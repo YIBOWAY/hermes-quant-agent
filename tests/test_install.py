@@ -4,6 +4,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parent.parent
 
 
@@ -39,4 +41,18 @@ def test_wrappers_pass_hermes_escape_check(tmp_path):
     for name in ("hqa-doctor-watchdog.sh", "hqa-premarket-digest.sh"):
         resolved = (scripts_dir_resolved / name).resolve()
         # raises ValueError (⇒ test failure) if the path escapes the scripts dir
+        resolved.relative_to(scripts_dir_resolved)
+
+
+def test_symlink_would_be_blocked_by_escape_check(tmp_path):
+    # Negative case: a symlink inside the scripts dir resolves OUTSIDE it,
+    # so Hermes' relative_to(scripts_dir) check raises ValueError (job blocked).
+    scripts_dir = tmp_path / ".hermes" / "scripts"
+    scripts_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.sh"
+    outside.write_text("#!/bin/bash\n")
+    (scripts_dir / "evil.sh").symlink_to(outside)
+    scripts_dir_resolved = scripts_dir.resolve()
+    resolved = (scripts_dir_resolved / "evil.sh").resolve()
+    with pytest.raises(ValueError):
         resolved.relative_to(scripts_dir_resolved)

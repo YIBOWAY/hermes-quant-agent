@@ -61,3 +61,16 @@ def test_run_writes_log_and_returns_digest(tmp_path):
     record = json.loads(log_path.read_text().splitlines()[0])
     assert record["job"] == "premarket-digest"
     assert record["options"]["candidates"] == "1000"
+
+
+def test_main_survives_exception_and_returns_zero(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("scan blew up")
+
+    monkeypatch.setattr(pd.quant_cli, "run_doctor", boom)
+    log_path = tmp_path / "digest.jsonl"
+    rc = pd.main(["--log", str(log_path)])
+    assert rc == 0
+    record = json.loads(log_path.read_text().splitlines()[0])
+    assert record["job"] == "premarket-digest"
+    assert "error" in record

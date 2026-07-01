@@ -8,6 +8,7 @@ DEST="${HERMES_HOME:-$HOME/.hermes}/scripts"
 mkdir -p "$DEST"
 for src in "$REPO_DIR"/scripts/hermes/hqa-*.sh; do
   name="$(basename "$src")"
+  rm -f "$DEST/$name"
   cp "$src" "$DEST/$name"
   chmod +x "$DEST/$name"
   echo "installed: $DEST/$name"

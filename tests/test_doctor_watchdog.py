@@ -74,3 +74,23 @@ def test_run_deviation_returns_alert_message(tmp_path):
     assert "[HQA][ALERT]" in message
     record = json.loads(log_path.read_text().splitlines()[0])
     assert record["alert"] is True
+
+
+def test_main_nominal_emits_empty_stdout(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(dw.quant_cli, "run_doctor", lambda *a, **k: (0, DOCTOR_SAMPLE))
+    rc = dw.main(["--log", str(tmp_path / "wd.jsonl")])
+    assert rc == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_main_survives_exception_and_returns_zero(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("doctor blew up")
+
+    monkeypatch.setattr(dw.quant_cli, "run_doctor", boom)
+    log_path = tmp_path / "wd.jsonl"
+    rc = dw.main(["--log", str(log_path)])
+    assert rc == 0
+    record = json.loads(log_path.read_text().splitlines()[0])
+    assert record["job"] == "doctor-watchdog"
+    assert "error" in record
