@@ -29,6 +29,7 @@ def test_run_doctor_invokes_cli_with_cwd(monkeypatch):
     assert seen["argv"][1] == "doctor"
     assert seen["kwargs"]["cwd"] == str(config.AIQP_DIR)
     assert seen["kwargs"]["stderr"] is subprocess.STDOUT
+    assert seen["kwargs"]["timeout"] == 300
 
 
 def test_run_options_sample_scan_argv(monkeypatch):
