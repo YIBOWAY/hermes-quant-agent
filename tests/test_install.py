@@ -59,3 +59,20 @@ def test_symlink_would_be_blocked_by_escape_check(tmp_path):
     resolved = (scripts_dir_resolved / "evil.sh").resolve()
     with pytest.raises(ValueError):
         resolved.relative_to(scripts_dir_resolved)
+
+
+def test_deployed_wrappers_have_no_unsubstituted_placeholders(tmp_path):
+    # Regression guard: install.sh MUST sed-substitute the __HQA_REPO_DIR__ and
+    # __HQA_PLATFORM_DIR__ placeholders. If install.sh were ever regressed to a
+    # plain `cp` (exit 0, no substitution), the deployed wrappers would be dead
+    # at runtime (cd to a literal "__HQA_REPO_DIR__" dir fails under
+    # `set -euo pipefail`). This test locks in the sed substitution.
+    dest = _install(tmp_path)
+    for wrapper in dest.glob("hqa-*.sh"):
+        body = wrapper.read_text()
+        assert "__HQA_REPO_DIR__" not in body, (
+            f"{wrapper.name}: unsubstituted __HQA_REPO_DIR__ placeholder remains"
+        )
+        assert "__HQA_PLATFORM_DIR__" not in body, (
+            f"{wrapper.name}: unsubstituted __HQA_PLATFORM_DIR__ placeholder remains"
+        )
