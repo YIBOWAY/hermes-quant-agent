@@ -62,3 +62,59 @@ def new_draft(
     entries.append(record)
     _write_entries(entries, review_dir)
     return entry_id
+
+
+def confirm(
+    entry_id: str,
+    review_dir: Path,
+    *,
+    judgment: str,
+    basis: str,
+    result: str,
+    failure_point: str,
+    next_rule: str,
+) -> bool:
+    entries = load_entries(review_dir)
+    found = False
+    for entry in entries:
+        if entry["id"] == entry_id:
+            entry.update(
+                judgment=judgment,
+                basis=basis,
+                result=result,
+                failure_point=failure_point,
+                next_rule=next_rule,
+                status="confirmed",
+            )
+            found = True
+            break
+    if found:
+        _write_entries(entries, review_dir)
+    return found
+
+
+def list_entries(review_dir: Path, status: Optional[str] = None) -> list[dict[str, Any]]:
+    entries = load_entries(review_dir)
+    if status is not None:
+        entries = [e for e in entries if e.get("status") == status]
+    return entries
+
+
+def render_markdown(review_dir: Path) -> str:
+    entries = sorted(load_entries(review_dir), key=lambda e: e["ts"], reverse=True)
+    lines = ["# Review Log", ""]
+    for e in entries:
+        lines.append(f"## {e['id']} · {e['kind']} · {e['status']} · {e['ts']}")
+        lines.append(f"- event: {e.get('event', '')}")
+        lines.append(f"- data: {e.get('data', '')}")
+        for f in HUMAN_FIELDS:
+            lines.append(f"- {f}: {e.get(f, '')}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def write_markdown(review_dir: Path) -> Path:
+    path = review_dir / "entries.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_markdown(review_dir), encoding="utf-8")
+    return path
