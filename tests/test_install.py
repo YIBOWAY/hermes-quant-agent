@@ -27,18 +27,21 @@ def _install(tmp_path):
 def test_install_copies_physical_executable_wrappers(tmp_path):
     dest = _install(tmp_path)
     names = sorted(p.name for p in dest.glob("hqa-*.sh"))
-    assert names == ["hqa-doctor-watchdog.sh", "hqa-premarket-digest.sh"]
+    assert names == ["hqa-doctor-watchdog.sh", "hqa-options-collect.sh", "hqa-premarket-digest.sh"]
     for wrapper in dest.glob("hqa-*.sh"):
         assert not wrapper.is_symlink()            # physical file (symlink would be blocked)
         assert os.access(wrapper, os.X_OK)         # executable
-        assert "python3 -m hqa." in wrapper.read_text()
+        body = wrapper.read_text()
+        # Every wrapper launches a real program — either an hqa Python module
+        # (digest/watchdog) or the platform quant-system CLI (collect). No stubs.
+        assert "python3 -m hqa." in body or "quant-system" in body
 
 
 def test_wrappers_pass_hermes_escape_check(tmp_path):
     # Replicate cron/scheduler.py: script must resolve INSIDE the scripts dir.
     dest = _install(tmp_path)
     scripts_dir_resolved = dest.resolve()
-    for name in ("hqa-doctor-watchdog.sh", "hqa-premarket-digest.sh"):
+    for name in ("hqa-doctor-watchdog.sh", "hqa-options-collect.sh", "hqa-premarket-digest.sh"):
         resolved = (scripts_dir_resolved / name).resolve()
         # raises ValueError (⇒ test failure) if the path escapes the scripts dir
         resolved.relative_to(scripts_dir_resolved)
