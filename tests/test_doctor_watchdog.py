@@ -94,3 +94,51 @@ def test_main_survives_exception_and_returns_zero(tmp_path, monkeypatch):
     record = json.loads(log_path.read_text().splitlines()[0])
     assert record["job"] == "doctor-watchdog"
     assert "error" in record
+
+
+def test_run_alert_autodrafts_review_entry(tmp_path):
+    from hqa import reviewlog
+
+    log_path = tmp_path / "wd.jsonl"
+    review_dir = tmp_path / "review"
+    flipped = DOCTOR_SAMPLE.replace("live_trading_enabled=false", "live_trading_enabled=true")
+    dw.run(
+        run_doctor=lambda: (0, flipped),
+        now_iso=lambda: "2026-07-01T00:00:00Z",
+        log_path=log_path,
+        review_dir=review_dir,
+    )
+    entries = reviewlog.load_entries(review_dir)
+    assert len(entries) == 1
+    assert entries[0]["kind"] == "alert"
+    assert entries[0]["status"] == "draft"
+    for f in reviewlog.HUMAN_FIELDS:
+        assert entries[0][f] == ""
+
+
+def test_run_alert_autodraft_is_idempotent_same_day(tmp_path):
+    from hqa import reviewlog
+
+    review_dir = tmp_path / "review"
+    flipped = DOCTOR_SAMPLE.replace("kill_switch=true", "kill_switch=false")
+    for _ in range(3):
+        dw.run(
+            run_doctor=lambda: (0, flipped),
+            now_iso=lambda: "2026-07-01T00:00:00Z",
+            log_path=tmp_path / "wd.jsonl",
+            review_dir=review_dir,
+        )
+    assert len(reviewlog.load_entries(review_dir)) == 1
+
+
+def test_run_nominal_does_not_draft(tmp_path):
+    from hqa import reviewlog
+
+    review_dir = tmp_path / "review"
+    dw.run(
+        run_doctor=lambda: (0, DOCTOR_SAMPLE),
+        now_iso=lambda: "2026-07-01T00:00:00Z",
+        log_path=tmp_path / "wd.jsonl",
+        review_dir=review_dir,
+    )
+    assert reviewlog.load_entries(review_dir) == []

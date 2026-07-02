@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Callable, Optional
 
-from hqa import config, quant_cli, runlog
+from hqa import config, quant_cli, reviewlog, runlog
 
 _SAFETY_RE = re.compile(r"^safety\.([a-z_]+)=(\S+)", re.MULTILINE)
 
@@ -43,6 +43,7 @@ def run(
     run_doctor: Callable[[], tuple[int, str]],
     now_iso: Callable[[], str],
     log_path: Path,
+    review_dir: Optional[Path] = None,
 ) -> tuple[bool, str]:
     exit_code, output = run_doctor()
     safety = parse_safety(output)
@@ -59,16 +60,27 @@ def run(
         },
         log_path,
     )
+    if alert and review_dir is not None:
+        reviewlog.new_draft(
+            kind="alert",
+            event="safety-invariant deviation",
+            data={"deviations": deviations, "safety": safety},
+            source="doctor-watchdog",
+            ts=ts,
+            review_dir=review_dir,
+            fingerprint=f"{ts[:10]}:" + ";".join(sorted(deviations)),
+        )
     return alert, (build_alert_message(deviations, ts) if alert else "")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="HQA safety-invariant watchdog ([SILENT] unless deviation)")
     parser.add_argument("--log", default=str(config.LOG_DIR / "doctor_watchdog.jsonl"))
+    parser.add_argument("--review-dir", default=str(config.REVIEW_DIR))
     args = parser.parse_args(argv)
     log_path = Path(args.log)
     try:
-        alert, message = run(quant_cli.run_doctor, runlog.utc_now_iso, log_path)
+        alert, message = run(quant_cli.run_doctor, runlog.utc_now_iso, log_path, Path(args.review_dir))
     except Exception as exc:  # unattended job: surface as alert, never crash the scheduler
         ts = runlog.utc_now_iso()
         runlog.append_jsonl({"ts": ts, "job": "doctor-watchdog", "alert": True, "error": repr(exc)}, log_path)
