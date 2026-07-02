@@ -13,7 +13,7 @@
 
 | 层 | 阶段 | 产出形式 | 文档 |
 |---|---|---|---|
-| 近 | 0b, 1a-1, 1a-2 | 完整 TDD 实现计划（可逐步执行） | `docs/plans/*.md` |
+| 近 | 0b, 1a-0, 1a-1, 1a-2 | 完整 TDD 实现计划（可逐步执行） | `docs/plans/*.md` |
 | 中 | 1b, 2 | 设计 spec（架构 / 接口契约 / 验收门；不到步骤级） | 本文 §3、§4 |
 | 远 | 3, 4 | 方向大纲（硬约束 / 开放问题 / 决策标准；不做实现设计） | 本文 §5、§6 |
 
@@ -36,6 +36,9 @@
 | D-10 | Phase 2 审批：**模拟单在风险信封内自动批**、超出人工；Phase 3 真钱逐单人工；采纳 §10 满月指标集 |
 | D-11 | Phase 3：锁死总设计 §10 八条硬约束；首实盘 = Longbridge（升级 1b/2 adapter）；单券商单策略小资金低频 |
 | D-12 | Phase 4：延后；IBKR 期货；硬门槛 = Phase 3 实盘链路稳定 |
+| D-13 | （2026-07-02）插入 **Phase 1a-0 平台接线包**：修复两个平台侧死胡同（`experiment run-config` 不透传 provider；已批准候选因子无法进入 FactorRegistry）+ 运维前提（OpenD/keys）+ 扫描分布收集 |
+| D-14 | （2026-07-02）真数据优先策略：真实运行用 `--provider futu`（盘中）/ `tiingo`（回测）与 `--llm openai`；`sample`/`stub` 仅限单元测试；降级运行必须标注 `DEGRADED`，绝不静默假装真数据 |
+| D-15 | （2026-07-02）场景 A 信号阈值不拍脑袋：看门狗默认 **collect 模式**（不报警只记录分布）；阈值来自 ≥4 个交易日的 futu 扫描分布复盘（建议 p90），决策落 0b 复盘库后才进 alert 模式 |
 
 ---
 
@@ -81,9 +84,18 @@
 
 ---
 
-## 2. Phase 1a — 数字员工 MVP（→ 完整 TDD 计划，拆 1a-1 / 1a-2）
+## 2. Phase 1a — 数字员工 MVP（→ 完整 TDD 计划，拆 1a-0 / 1a-1 / 1a-2）
 
 目标：让 Hermes 成为真正有用的个人研究助理。全部 read-only / proposal-only。
+
+### 2.0 Phase 1a-0 — 平台接线包（D-13/D-14/D-15，2026-07-02 追加）
+
+前置于 1a-1：把数字员工从合成数据（sample/stub）切换到真实数据面。详见 `docs/plans/2026-07-02-phase-1a-0-platform-wiring.md`：
+
+1. **平台侧（ai-quant-platform 仓库）**：`experiment run-config` 透传 `--provider`（seam 已在 `run_experiment(provider=...)`，纯 CLI 接线）；新增 `agent/promotion.py` —— `SafetyGate` 的第一个消费者，把**人工已批准**的候选因子加载进 `FactorRegistry`（`--include-approved-candidates`），从而闭合场景 B 链路。
+2. **Hermes 侧**：`hqa-options-collect.sh` 包装 `options daily-task --provider futu`，每交易日收集真实扫描产物。
+3. **运维前提（人工 gate）**：`QS_TIINGO_API_TOKEN` / `QS_OPENAI_API_KEY` 入平台 `.env`（凭证不过 LLM）；OpenD 盘时段运行 + Mac 不睡眠；平台本身是按需 CLI，**不需常驻**。
+4. **阈值复盘（D-15）**：≥4 交易日后看 `global_score`/`iv_rank` 分布，定 `--min-score`/`--min-iv-rank`，决策写入 0b 复盘库。
 
 ### 2.1 员工清单与拆分（D-5）
 
@@ -97,9 +109,9 @@
 5. **AI HOT / 个股异动提醒**：独立公开 REST API（D-6），异动才推。
 6. **场景 B 论文因子复现**：人工把因子/公式发来 → Hermes 调平台 AI 因子生成把它翻译成平台配置 → **人工确认翻译无误（关键 gate）** → 调 `backtest`/`factor run` 在真实历史数据回测 → 结果落评审池 + 推 `#回测结果` → 人工决定 promote。
 
-### 2.2 数据自主性（D-6）
+### 2.2 数据自主性（D-6，D-14 修订）
 
-- 行情 / 因子 / 期权 / 回测：全走平台本地 CLI（`/Users/sunyibo/programs/ai-quant-platform/ai-quant/bin/quant-system`，`cwd=平台目录`），不依赖外部行情 API。
+- 行情 / 因子 / 期权 / 回测：全走平台本地 CLI（`/Users/sunyibo/programs/ai-quant-platform/ai-quant/bin/quant-system`，`cwd=平台目录`），不依赖外部行情 API。**真实运行一律 `--provider futu`（盘中链）/ `tiingo`（EOD 回测）与 `--llm openai`；`sample`/`stub` 仅限单元测试（D-14）。**
 - AI HOT / 新闻：走独立公开 REST API（aihot skill / 直接 curl），**不为它起平台 HTTP**（鉴权在 1b 才引入）。
 - KOL / 社交监控：**推迟**（需单独定源，1a 不做）。
 
@@ -253,8 +265,9 @@ Phase 3 不是「把模拟改成 real」，是从零设计的实盘执行系统�
 1. 本文（路线 spec）——`docs/design/2026-07-01-roadmap-phases-0b-4.md`。
 2. 完整 TDD 计划（`docs/plans/`，0a 风格）：
    - `2026-07-01-phase-0b-observability-governance.md`
-   - `2026-07-01-phase-1a-1-core-digital-employees.md`
-   - `2026-07-01-phase-1a-2-advanced-digital-employees.md`
+   - `2026-07-02-phase-1a-0-platform-wiring.md`（D-13 追加；任务主体在 ai-quant-platform 仓库）
+   - `2026-07-01-phase-1a-1-core-digital-employees.md`（已按 D-14/D-15 修订：futu 默认、扫描产物信号语义、collect 模式）
+   - `2026-07-01-phase-1a-2-advanced-digital-employees.md`（已按 D-14 修订：openai 翻译、run-config 真数据回测、双人工 gate）
 3. 1b / 2 的 spec 即本文 §3 / §4；3 / 4 大纲即本文 §5 / §6。它们进入实现前各自再展开为独立计划。
 
 ## 投资与安全声明
