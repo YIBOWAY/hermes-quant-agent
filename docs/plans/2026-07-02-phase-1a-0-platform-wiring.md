@@ -14,8 +14,8 @@
 - **Candidate code execution is gated:** `exec` of candidate factor source is allowed **only** for candidates where `SafetyGate.allow_promotion(candidate_id)` is true, and only after a static forbidden-import check (`socket`, `subprocess`, `urllib`, `requests`, `http`, `os`). This is defense-in-depth behind the human review gate, not a sandbox.
 - **Backward compatibility:** `experiment run-config` defaults stay `--provider sample`, `--include-approved-candidates` off — existing behavior and tests unchanged.
 - **Credentials:** `QS_TIINGO_API_TOKEN` / `QS_OPENAI_API_KEY` are typed by the human into the platform `.env`; never pasted into chat, never committed, never in LLM context.
-- **Platform test convention:** run `./.venv/bin/pytest -q` from the platform repo root; record the baseline count before Task 1 and require baseline+new at the end (platform suite is large, ~120 files — never skip the full run).
-- **Hermes repo baseline:** Phase 0b executed → `43 passed`. Task 4 modifies `tests/test_install.py` (same test count, wrapper list grows to 3).
+- **Platform test convention:** run `./.venv/bin/python -m pytest -q` from the platform repo root (the `python -m pytest` form is required — some test modules use `from tests...` / `from scripts...` imports that only resolve with the repo root on `sys.path`; the bare `./.venv/bin/pytest` console-script fails to collect them). Record the baseline count before Task 1 and require baseline+new at the end (platform suite is large — never skip the full run). Note: the platform `main` baseline carries 3 pre-existing, unrelated failures (a Python 3.12 `FakeThread(name=...)` signature mismatch in `test_api_options_radar.py`, and a frontend schema-export drift in `test_frontend_backend_response_type_exports.py`) plus 2 skipped; these predate Phase 1a-0 and are out of scope — acceptance is "baseline + new, no NEW failures", not literal zero failures.
+- **Hermes repo baseline:** Phase 0b executed → `42 passed, 1 skipped` (the skip is `test_run_doctor_integration_real`, gated to manual because it needs a working `quant-system` environment). Task 4 modifies `tests/test_install.py` (wrapper list grows to 3); the adversarial-review remediation added one regression-guard test, so post-1a-0 the Hermes count is `43 passed, 1 skipped`.
 - **Absolute paths:** platform = `/Users/sunyibo/programs/ai-quant-platform`; Hermes repo = `/Users/sunyibo/programs/Hermes-quant-agent`; CLI = `<platform>/ai-quant/bin/quant-system`.
 
 ---
@@ -496,9 +496,10 @@ git commit -q -m "feat(experiment): factor_registry injection + --include-approv
 **Files:**
 - Create: `scripts/hermes/hqa-options-collect.sh`
 - Modify: `tests/test_install.py`
+- **Implementation deviation (recorded by adversarial review):** `scripts/install.sh` was ALSO modified — against this plan's original "no installer change" note — to substitute a new `__HQA_PLATFORM_DIR__` placeholder (resolved from `HQA_AIQP_DIR`, matching `hqa/config.py`) in addition to `__HQA_REPO_DIR__`. This made the collect wrapper portable instead of hardcoding `/Users/sunyibo/...`, consistent with the existing `__HQA_REPO_DIR__` convention. The deviation is strictly better than the plan's hardcoded-paths prescription and was committed in `167f407`; a regression-guard test now locks in that both placeholders are substituted at deploy time.
 
 **Interfaces:**
-- Consumes: `scripts/install.sh` `hqa-*.sh` glob (auto-picks new wrappers; no installer change).
+- Consumes: `scripts/install.sh` `hqa-*.sh` glob (auto-picks new wrappers; now also substitutes `__HQA_PLATFORM_DIR__` — see deviation note above).
 - Produces: wrapper running `quant-system options daily-task --provider futu` with `cwd=<platform>` — refreshes universe/earnings/VIX then scans real chains, appending artifacts to platform `data/options_scans/{date}.jsonl` + `_meta.json`. Phase 1a-1's watchdog and the Task-5 threshold review both read these artifacts.
 
 - [ ] **Step 1: Update the failing test** — in `tests/test_install.py` change the expected wrapper list to:
@@ -607,16 +608,16 @@ This decision unblocks Phase 1a-1's signal watchdog leaving collect-only mode.
 
 ## Phase 1a-0 Acceptance
 
-- [ ] Platform: `experiment run-config --provider tiingo|futu` reaches `run_experiment` (agent_summary `data.source` reflects it); default `sample` behavior unchanged.
-- [ ] Platform: approved-only candidate loading proven by tests (pending candidates never load; forbidden imports raise; reload idempotent); e2e test runs an experiment blending a candidate factor with `momentum`.
-- [ ] No code path creates/bypasses approval locks; `SafetyGate` untouched.
-- [ ] Platform full suite: baseline + 7 passed.
-- [ ] Hermes: 3 wrappers installed; `43 passed`.
-- [ ] Ops: keys masked in `config show`; futu smoke scan `candidates>0`; collection cron running; after ≥4 trading days a confirmed review entry records the thresholds.
+- [x] Platform: `experiment run-config --provider tiingo|futu` reaches `run_experiment` (agent_summary `data.source` reflects it, asserted by `test_api_experiments.py`); default `sample` behavior unchanged.
+- [x] Platform: approved-only candidate loading proven by tests (pending candidates never load; forbidden imports raise; reload idempotent); e2e test runs an experiment blending a candidate factor with `momentum`; walk-forward threading locked by an additional test. **Adversarial-review hardening:** the original substring blocklist was replaced by an AST import-allowlist + restricted `__builtins__` (guarded `__import__`) after review reproduced a load-time RCE via `importlib`/`__import__`/`eval`; `--include-approved-candidates` was fixed to read the agent CLI's real candidates dir (`data/agent_run/agent/candidates`).
+- [x] No code path creates/bypasses approval locks; `SafetyGate` untouched.
+- [x] Platform full suite: baseline + new tests pass, no NEW failures (3 pre-existing unrelated failures on `main` predate this phase — see Global Constraints).
+- [x] Hermes: 3 wrappers installed; `43 passed, 1 skipped` (skip is the manual `quant-system` integration test).
+- [ ] Ops: keys masked in `config show`; futu smoke scan `candidates>0`; collection cron running; after ≥4 trading days a confirmed review entry records the thresholds. **(human-gated, Task 5 — pending user execution)**
 
 ## Self-Review
 
 **1. Dead-end closure:** run-config→provider (Task 1) and approved-candidate→registry (Tasks 2–3) directly close the two verified platform dead ends; Task-3 e2e test proves the Scene-B chain propose→approve→registry→experiment is closed.
-**2. Safety:** loader consumes but never writes locks; exec gated by human approval + static denylist; run-config default unchanged; no trading calls.
+**2. Safety:** loader consumes but never writes locks; exec gated by human approval + AST import-allowlist + restricted `__builtins__` (hardened post-review from a bypassable substring denylist); run-config default unchanged; no trading calls.
 **3. Placeholder scan:** `<human>`/`<X>`/`<Y>`/`<N>`/`<id>` appear only in the human ops runbook (Task 5), by design.
 **4. Type consistency:** `build_ohlcv_provider -> tuple[provider, str]` matches CLI unpack; `FactorRegistry.register` ValueError-on-duplicate handled as idempotent skip; `run_experiment(factor_registry=None)` default preserves existing callers.
