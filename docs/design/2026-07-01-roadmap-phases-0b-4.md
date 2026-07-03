@@ -39,6 +39,9 @@
 | D-13 | （2026-07-02）插入 **Phase 1a-0 平台接线包**：修复两个平台侧死胡同（`experiment run-config` 不透传 provider；已批准候选因子无法进入 FactorRegistry）+ 运维前提（OpenD/keys）+ 扫描分布收集 |
 | D-14 | （2026-07-02）真数据优先策略：真实运行用 `--provider futu`（盘中）/ `tiingo`（回测）与 `--llm openai`；`sample`/`stub` 仅限单元测试；降级运行必须标注 `DEGRADED`，绝不静默假装真数据 |
 | D-15 | （2026-07-02）场景 A 信号阈值不拍脑袋：看门狗默认 **collect 模式**（不报警只记录分布）；阈值来自 ≥4 个交易日的 futu 扫描分布复盘（建议 p90），决策落 0b 复盘库后才进 alert 模式 |
+| D-16 | （2026-07-03）**闭环愿景定型：「两次点击的人在环」而非全自动**。论文→翻译（👤Gate1 确认公式）→propose 生成候选代码（只落 `.candidate`，绝不直写 src/）→👤Gate2 审代码 approve→tiingo 真实数据回测（自动）→结果落评审池+Discord→👤前端点击分配 sleeve（Phase 2 信封领地）。**无需热更新**：平台 registry 每次 run 请求重建，approved 候选按次加载，获批即可见，服务不重启。`promotion.py` 的 AST 白名单是纵深防御非沙箱，人工代码审查是唯一真安全闸 |
+| D-17 | （2026-07-03）**Hermes 工作台（平台前端）**：否决删除因子实验室/智能体工作室，改为**改造吞并**为单页面四区工作台（智能体工作室恰是 Gate2 审批 UI，不可丢）；吸收平台 phase_15 P4+P5；详见 §2.6；远程访问前置 1b 鉴权 |
+| D-18 | （2026-07-03）**平台迭代治理：从产品路线驱动改为 Hermes 需求拉动**。Hermes-quant-agent 为主项目（COO），平台降级为领域后端。phase_15 处置：P0 永保持；P1 provenance 最小切片提前（信号可信前提）；P4/P5 改造为工作台（D-17）；P2/P3 推迟到 Phase 2 前；独立功能增长停止 |
 
 ---
 
@@ -130,6 +133,19 @@
 - 场景 A：盘时稳定运行、无信号静默、每条提醒带标的/信号类型/关键指标/时间戳/run-id。
 - 场景 B：能把一个中等复杂度论文因子跑到回测出报告；**因子翻译有人工确认 gate**，不允许 LLM 理解直接进回测；结果落评审池不自动生效；无法可靠翻译时明确报「需人工补充定义」。
 - Discord 未配置时全链路仍能以 local 工作。
+
+### 2.6 Hermes 工作台（平台前端，D-17；排在 1a-1 之后、1b 之前）
+
+平台前端（Next.js 15，`src/frontend`）的因子实验室与智能体工作室两页**改造吞并**为单一「Hermes 工作台」页面（建议作为首页），四区：
+
+| 区 | 内容 | 数据源（大都现成） |
+|---|---|---|
+| ① 安全状态条 | safety 四开关 + gateway/OpenD/数据新鲜度 | `/api/health` + doctor |
+| ② 数字员工时间线 | digest、信号、告警、采集、回测完成——Hermes 全部工作过程/记录 | Hermes `logs/*.jsonl` + `review/entries.jsonl` + 平台 `/api/runs/recent`（需新增一个只读聚合端点） |
+| ③ 待办审批队列 | 待 approve 因子候选（含源码 diff 预览）+ 待补判断字段的复盘 draft | `/api/agent/candidates?status=pending` + 0b 复盘库 —— **吞并智能体工作室（Gate2 审批 UI）** |
+| ④ 产出货架 | 回测报告、期权 radar 摘要、周复盘归档 | 现有 runs/reports 端点 |
+
+因子实验室的 IC/分位数图降级为 run 详情页（从时间线点入），不占一级导航。此页同时是 Phase 2 满月运营面板底座（phase_15 P3 届时并入时间线）。**安全前置**：平台 API 零鉴权，工作台仅限 localhost；一旦需要远程点 approve，1b 鉴权必须先行。进入实现前单独走 brainstorming→plan 流程。
 
 ---
 
@@ -268,6 +284,7 @@ Phase 3 不是「把模拟改成 real」，是从零设计的实盘执行系统�
    - `2026-07-02-phase-1a-0-platform-wiring.md`（D-13 追加；任务主体在 ai-quant-platform 仓库）
    - `2026-07-01-phase-1a-1-core-digital-employees.md`（已按 D-14/D-15 修订：futu 默认、扫描产物信号语义、collect 模式）
    - `2026-07-01-phase-1a-2-advanced-digital-employees.md`（已按 D-14 修订：openai 翻译、run-config 真数据回测、双人工 gate）
+   - Hermes 工作台（D-17，§2.6）：排在 1a-1 之后、1b 之前；进入实现前单独走 brainstorming→plan 流程产出独立计划（平台仓库 Next.js 前端 + 一个只读聚合端点）。
 3. 1b / 2 的 spec 即本文 §3 / §4；3 / 4 大纲即本文 §5 / §6。它们进入实现前各自再展开为独立计划。
 
 ## 投资与安全声明

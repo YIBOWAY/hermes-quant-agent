@@ -575,6 +575,17 @@ hermes cron list
 
 Rollback: `hermes cron delete hqa-options-collect`.
 
+> **Ops resolution (2026-07-03, verified):** the default Hermes cron script timeout (120s)
+> killed the first collect run and left a stale `options_radar_scan.lock` blocking later
+> scans. Fixes applied: (a) `~/.hermes/config.yaml` → `cron.script_timeout_seconds: 3600`;
+> (b) wrapper capped at `--top 100` — futu rate limit ≈33s/symbol → 100 symbols ≈56min
+> fits the timeout (full 516-symbol universe ≈4.8h does not; top-100 distribution is
+> sufficient for D-15 statistics); (c) stale-lock removal is part of failure recovery — if a
+> collect run dies, check `pgrep -fl daily-task` and remove
+> `<platform>/data/options_scans/options_radar_scan.lock` before the next run.
+> End-to-end smoke verified with OpenD up: `--top 5` → `candidates=42, completed` in 167s.
+> Gateway must be running (`hermes cron status`) or no cron fires.
+
 - [ ] **Step 4: After ≥4 trading days — distribution review (threshold decision, D-15)**
 
 ```bash
