@@ -13,7 +13,7 @@
 - **Safety red line unchanged:** no trading-chain calls anywhere in this phase. `run-config` is research/backtest only; the loader only *reads* candidates and only when a human-created `approved.lock` exists. **No code path may create or bypass an approval lock** (`SafetyGate` stays observation-only).
 - **Candidate code execution is gated:** `exec` of candidate factor source is allowed **only** for candidates where `SafetyGate.allow_promotion(candidate_id)` is true, and only after a static forbidden-import check (`socket`, `subprocess`, `urllib`, `requests`, `http`, `os`). This is defense-in-depth behind the human review gate, not a sandbox.
 - **Backward compatibility:** `experiment run-config` defaults stay `--provider sample`, `--include-approved-candidates` off — existing behavior and tests unchanged.
-- **Credentials:** `QS_TIINGO_API_TOKEN` / `QS_OPENAI_API_KEY` are typed by the human into the platform `.env`; never pasted into chat, never committed, never in LLM context.
+- **Credentials:** `QS_TIINGO_API_TOKEN` is typed by the human into the platform `.env`; never pasted into chat, never committed, never in LLM context. (`QS_OPENAI_API_KEY` was dropped by D-19 — factor-code generation happens inside Hermes sessions on the Codex subscription; the platform receives deterministic artifacts only.)
 - **Platform test convention:** run `./.venv/bin/python -m pytest -q` from the platform repo root (the `python -m pytest` form is required — some test modules use `from tests...` / `from scripts...` imports that only resolve with the repo root on `sys.path`; the bare `./.venv/bin/pytest` console-script fails to collect them). Record the baseline count before Task 1 and require baseline+new at the end (platform suite is large — never skip the full run). Note: the platform `main` baseline carries 3 pre-existing, unrelated failures (a Python 3.12 `FakeThread(name=...)` signature mismatch in `test_api_options_radar.py`, and a frontend schema-export drift in `test_frontend_backend_response_type_exports.py`) plus 2 skipped; these predate Phase 1a-0 and are out of scope — acceptance is "baseline + new, no NEW failures", not literal zero failures.
 - **Hermes repo baseline:** Phase 0b executed → `42 passed, 1 skipped` (the skip is `test_run_doctor_integration_real`, gated to manual because it needs a working `quant-system` environment). Task 4 modifies `tests/test_install.py` (wrapper list grows to 3); the adversarial-review remediation added one regression-guard test, so post-1a-0 the Hermes count is `43 passed, 1 skipped`.
 - **Absolute paths:** platform = `/Users/sunyibo/programs/ai-quant-platform`; Hermes repo = `/Users/sunyibo/programs/Hermes-quant-agent`; CLI = `<platform>/ai-quant/bin/quant-system`.
@@ -554,7 +554,7 @@ git commit -q -m "feat: futu options-scan collection wrapper"
 
 - [ ] **Step 1: Configure platform credentials (human types values)**
 
-In `/Users/sunyibo/programs/ai-quant-platform/.env` set: `QS_TIINGO_API_TOKEN=<human>`, `QS_OPENAI_API_KEY=<human>` (model override optional: `QS_OPENAI_MODEL`). Verify with `quant-system config show` (keys must appear masked).
+In `/Users/sunyibo/programs/ai-quant-platform/.env` set: `QS_TIINGO_API_TOKEN=<human>`. Verify with `quant-system config show` (key must appear masked). (`QS_OPENAI_API_KEY` no longer needed — D-19.)
 
 - [ ] **Step 2: OpenD availability during US market hours**
 

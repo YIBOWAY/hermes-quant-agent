@@ -42,6 +42,7 @@
 | D-16 | （2026-07-03）**闭环愿景定型：「两次点击的人在环」而非全自动**。论文→翻译（👤Gate1 确认公式）→propose 生成候选代码（只落 `.candidate`，绝不直写 src/）→👤Gate2 审代码 approve→tiingo 真实数据回测（自动）→结果落评审池+Discord→👤前端点击分配 sleeve（Phase 2 信封领地）。**无需热更新**：平台 registry 每次 run 请求重建，approved 候选按次加载，获批即可见，服务不重启。`promotion.py` 的 AST 白名单是纵深防御非沙箱，人工代码审查是唯一真安全闸 |
 | D-17 | （2026-07-03）**Hermes 工作台（平台前端）**：否决删除因子实验室/智能体工作室，改为**改造吞并**为单页面四区工作台（智能体工作室恰是 Gate2 审批 UI，不可丢）；吸收平台 phase_15 P4+P5；详见 §2.6；远程访问前置 1b 鉴权 |
 | D-18 | （2026-07-03）**平台迭代治理：从产品路线驱动改为 Hermes 需求拉动**。Hermes-quant-agent 为主项目（COO），平台降级为领域后端。phase_15 处置：P0 永保持；P1 provenance 最小切片提前（信号可信前提）；P4/P5 改造为工作台（D-17）；P2/P3 推迟到 Phase 2 前；独立功能增长停止 |
+| D-19 | （2026-07-03）**LLM 职责收归 Hermes，平台去 LLM 化**（取代 D-14 的 `--llm openai` 部分）：Scene-B 因子代码生成在 Hermes 会话内完成（Codex 订阅已覆盖，零额外 API 费；订阅端点不能也不应当作平台后端的裸 LLM API）。平台侧新增确定性接缝 `agent propose-factor --source-file <path>`（内部用固定内容 LLMClient 注入 `AgentRunner`，复用全部 task-id/audit/candidate-pool 链）；`QS_OPENAI_API_KEY` 不再需要；`stub` 仍限单元测试；两道人工 gate 不变；`QS_TIINGO_API_TOKEN`（数据钥匙，非 LLM）仍必需 |
 
 ---
 
@@ -97,7 +98,7 @@
 
 1. **平台侧（ai-quant-platform 仓库）**：`experiment run-config` 透传 `--provider`（seam 已在 `run_experiment(provider=...)`，纯 CLI 接线）；新增 `agent/promotion.py` —— `SafetyGate` 的第一个消费者，把**人工已批准**的候选因子加载进 `FactorRegistry`（`--include-approved-candidates`），从而闭合场景 B 链路。
 2. **Hermes 侧**：`hqa-options-collect.sh` 包装 `options daily-task --provider futu`，每交易日收集真实扫描产物。
-3. **运维前提（人工 gate）**：`QS_TIINGO_API_TOKEN` / `QS_OPENAI_API_KEY` 入平台 `.env`（凭证不过 LLM）；OpenD 盘时段运行 + Mac 不睡眠；平台本身是按需 CLI，**不需常驻**。
+3. **运维前提（人工 gate）**：`QS_TIINGO_API_TOKEN` 入平台 `.env`（凭证不过 LLM；`QS_OPENAI_API_KEY` 已按 D-19 取消）；OpenD 盘时段运行 + Mac 不睡眠；平台本身是按需 CLI，**不需常驻**。
 4. **阈值复盘（D-15）**：≥4 交易日后看 `global_score`/`iv_rank` 分布，定 `--min-score`/`--min-iv-rank`，决策写入 0b 复盘库。
 
 ### 2.1 员工清单与拆分（D-5）
@@ -114,7 +115,7 @@
 
 ### 2.2 数据自主性（D-6，D-14 修订）
 
-- 行情 / 因子 / 期权 / 回测：全走平台本地 CLI（`/Users/sunyibo/programs/ai-quant-platform/ai-quant/bin/quant-system`，`cwd=平台目录`），不依赖外部行情 API。**真实运行一律 `--provider futu`（盘中链）/ `tiingo`（EOD 回测）与 `--llm openai`；`sample`/`stub` 仅限单元测试（D-14）。**
+- 行情 / 因子 / 期权 / 回测：全走平台本地 CLI（`/Users/sunyibo/programs/ai-quant-platform/ai-quant/bin/quant-system`，`cwd=平台目录`），不依赖外部行情 API。**真实运行一律 `--provider futu`（盘中链）/ `tiingo`（EOD 回测）；`sample` 仅限单元测试（D-14）。LLM 生成全部在 Hermes 会话内完成，平台只收确定性产物（D-19）。**
 - AI HOT / 新闻：走独立公开 REST API（aihot skill / 直接 curl），**不为它起平台 HTTP**（鉴权在 1b 才引入）。
 - KOL / 社交监控：**推迟**（需单独定源，1a 不做）。
 

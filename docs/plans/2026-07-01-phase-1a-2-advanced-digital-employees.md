@@ -4,14 +4,14 @@
 
 **Goal:** Ship the advanced research employees — the Scene-B paper-factor reproduction pipeline (real LLM translation + mandatory human gates + real-data backtest), an options-radar summary, and an AI-HOT alerts watchdog — all proposal-only, nothing auto-promoted.
 
-**Architecture:** Extend `hqa/` (Phases 0a/0b/1a-0/1a-1). New modules: `factor_repro` (parsers for the `agent propose-factor --llm openai` → human `agent review` → `experiment run-config --provider tiingo --include-approved-candidates` chain shipped by 1a-0), `factor_repro_cli` (the human-gated Scene-B CLI), `options_radar` (structured scan summary, futu), `aihot_alerts` (`[SILENT]` news watchdog reusing `hqa.aihot`). The safety-critical property: **no code path auto-approves a factor translation** — approval is a separate, human-only CLI invocation, and the Scene-B backtest runs on real EOD history (Tiingo), never on synthetic sample data.
+**Architecture:** Extend `hqa/` (Phases 0a/0b/1a-0/1a-1). New modules: `factor_repro` (parsers for the `agent propose-factor --source-file` → human `agent review` → `experiment run-config --provider tiingo --include-approved-candidates` chain), `factor_repro_cli` (the human-gated Scene-B CLI), `options_radar` (structured scan summary, futu), `aihot_alerts` (`[SILENT]` news watchdog reusing `hqa.aihot`). **LLM division of labor (D-19):** the paper→factor-code translation happens INSIDE the Hermes session (Codex subscription; no platform API key) — Hermes writes the generated code to a temp file and the platform ingests it deterministically via a new `--source-file` option (Task 0, platform repo), reusing the existing task-id/audit/candidate-pool chain. The safety-critical property: **no code path auto-approves a factor translation** — approval is a separate, human-only CLI invocation, and the Scene-B backtest runs on real EOD history (Tiingo), never on synthetic sample data.
 
-**Tech Stack:** Python 3.9.6 (stdlib only) · `pytest` in `.venv` · platform `quant-system` CLI (`agent propose-factor --llm openai`/`list-candidates`/`review`, `experiment run-config --provider tiingo --include-approved-candidates`, `options daily-scan --provider futu`).
+**Tech Stack:** Python 3.9.6 (stdlib only) · `pytest` in `.venv` · platform `quant-system` CLI (`agent propose-factor --source-file`/`list-candidates`/`review`, `experiment run-config --provider tiingo --include-approved-candidates`, `options daily-scan --provider futu`).
 
 ## Global Constraints
 
 - **Proposal-only, TWO human gates (Scene B, D-5):** gate 1 — the paper→goal distillation is confirmed by the human in the Hermes session before `propose` runs; gate 2 — the LLM/automation may `propose` and `backtest`, but MUST NOT `approve` a factor translation (`agent review --decision approve` is human-only). Backtest results land in the review pool + Discord; promotion is a human decision.
-- **Real-data policy (D-14, needs 1a-0):** Scene-B proposes with `--llm openai` (`QS_OPENAI_API_KEY` in the platform `.env`; the `stub` LLM appears only inside unit tests) and backtests via `experiment run-config --provider tiingo --include-approved-candidates` on real EOD history (`QS_TIINGO_API_TOKEN`). `backtest run-sample` is NOT used — it is hardwired to synthetic data.
+- **Real-data policy (D-14, amended by D-19):** Scene-B factor code is generated in the Hermes session (subscription-covered; no `QS_OPENAI_API_KEY`) and ingested via `agent propose-factor --source-file <path>`; the platform's `stub` LLM appears only inside unit tests. Backtests run via `experiment run-config --provider tiingo --include-approved-candidates` on real EOD history (`QS_TIINGO_API_TOKEN`). `backtest run-sample` is NOT used — it is hardwired to synthetic data.
 - **Read-only trading boundary:** only `agent propose-factor/list-candidates/review`, `experiment run-config` (research backtest), `options daily-scan` are invoked. `agent review` writes only an approval lock (no trade). No order/account/rebalance.
 - **Silent contract:** the AI-HOT alerts watchdog prints only when notable items exist; always logs; always exits 0.
 - **AI HOT access (D-6):** reuse `hqa.aihot` (standalone public API, browser UA).
@@ -24,7 +24,7 @@
 
 ```
 hqa/
-  quant_cli.py         # + run_propose_factor(llm), run_list_candidates, run_agent_review, run_experiment_config
+  quant_cli.py         # + run_propose_factor(source_file), run_list_candidates, run_agent_review, run_experiment_config
   factor_repro.py      # NEW: parse_candidate_id(), parse_experiment_summary(), extract_best_run_metrics()
   factor_repro_cli.py  # NEW: hqa-factor-repro propose|approve|backtest (human gates)
   options_radar.py     # NEW: build_radar_summary(), run(), main()  (futu)
@@ -43,13 +43,32 @@ tests/
 
 ---
 
+### Task 0 (PLATFORM repo): `agent propose-factor --source-file` seam (D-19)
+
+**Repo:** `/Users/sunyibo/programs/ai-quant-platform` (its own git + `./.venv/bin/python -m pytest -q`; record baseline first, acceptance = baseline + new, no NEW failures).
+
+**Files:**
+- Modify: `src/quant_system/agent/runner.py` (or the CLI layer in `src/quant_system/cli.py` where `--llm` is parsed — whichever is the smaller diff)
+- Create: `src/quant_system/agent/llm/fixed.py` — `FixedContentLLMClient` implementing the existing `LLMClient` protocol, returning the supplied source verbatim
+- Test: `tests/test_agent_propose_source_file.py`
+
+**Interfaces (verified 2026-07-03):** `AgentRunner.__init__(*, output_dir, llm: LLMClient | None)` already injects the LLM; `propose_factor` builds `AgentTask` + `AgentAuditLog` then calls `factor_proposal.run(llm=...)`. The seam: CLI gains `--source-file <path>` (mutually exclusive with `--llm`); when given, construct `AgentRunner(llm=FixedContentLLMClient(source=Path(...).read_text()))` so the ENTIRE existing chain (task-id, audit records, candidate pool, `status=pending`) is reused unchanged. Metadata records `generator=external-source` for provenance.
+
+- [ ] Step 1: failing test — CLI invoke `agent propose-factor --goal g --source-file <tmp .py>` → exit 0, output contains `candidate_id=`, candidate file content == supplied source, metadata carries `generator=external-source`, status `pending`.
+- [ ] Step 2: run → confirm fail (no such option).
+- [ ] Step 3: implement `FixedContentLLMClient` + CLI flag (mutually exclusive with `--llm`).
+- [ ] Step 4: platform suite green (baseline + new).
+- [ ] Step 5: commit on the platform branch: `feat(agent): propose-factor --source-file for externally generated candidates (D-19)`.
+
+---
+
 ### Task 1: quant_cli — Scene-B chain wrappers
 
 **Files:** Modify `hqa/quant_cli.py`, `tests/test_quant_cli.py`
 
 **Interfaces:**
 - Produces (all `-> tuple[int, str]`, merged streams, `cwd=AIQP_DIR`):
-  - `run_propose_factor(goal, universe="SPY,QQQ", llm="openai")` → `agent propose-factor --goal <goal> --universe <u> --llm <llm>` (real runs use openai; tests inject fakes)
+  - `run_propose_factor(goal, source_file, universe="SPY,QQQ")` → `agent propose-factor --goal <goal> --universe <u> --source-file <path>` (D-19: code generated in the Hermes session; tests inject fakes)
   - `run_list_candidates()` → `agent list-candidates`
   - `run_agent_review(candidate_id, decision, note)` → `agent review --candidate-id <id> --decision <approve|reject> --note <note>`
   - `run_experiment_config(config_path, provider="tiingo", include_approved=True)` → `experiment run-config --config <path> --provider <p> [--include-approved-candidates]` (1a-0 wiring)
@@ -61,10 +80,10 @@ def test_run_propose_factor_argv(monkeypatch):
     seen = {}
     monkeypatch.setattr(quant_cli.subprocess, "run",
                         lambda argv, **k: seen.update(argv=argv) or _FakeProc(0, "candidate_id=factor-x-1 status=pending"))
-    code, out = quant_cli.run_propose_factor("momentum 20d", "SPY,QQQ")
+    code, out = quant_cli.run_propose_factor("momentum 20d", "/tmp/factor_src.py", "SPY,QQQ")
     assert code == 0
     assert seen["argv"][1:] == ["agent", "propose-factor", "--goal", "momentum 20d",
-                                "--universe", "SPY,QQQ", "--llm", "openai"]
+                                "--universe", "SPY,QQQ", "--source-file", "/tmp/factor_src.py"]
 
 
 def test_run_agent_review_argv(monkeypatch):
@@ -93,8 +112,8 @@ Expected: FAIL — `AttributeError: module 'hqa.quant_cli' has no attribute 'run
 - [ ] **Step 3: Add to `hqa/quant_cli.py`:**
 
 ```python
-def run_propose_factor(goal: str, universe: str = "SPY,QQQ", llm: str = "openai", bin_path: Optional[Path] = None, cwd: Optional[Path] = None) -> tuple[int, str]:
-    return _run(["agent", "propose-factor", "--goal", goal, "--universe", universe, "--llm", llm], bin_path=bin_path, cwd=cwd)
+def run_propose_factor(goal: str, source_file: str, universe: str = "SPY,QQQ", bin_path: Optional[Path] = None, cwd: Optional[Path] = None) -> tuple[int, str]:
+    return _run(["agent", "propose-factor", "--goal", goal, "--universe", universe, "--source-file", source_file], bin_path=bin_path, cwd=cwd)
 
 
 def run_list_candidates(bin_path: Optional[Path] = None, cwd: Optional[Path] = None) -> tuple[int, str]:
@@ -242,7 +261,7 @@ git commit -q -m "feat: Scene-B candidate-id and experiment-summary parsers"
 
 **Interfaces:**
 - Produces: `main(argv=None) -> int` with subcommands:
-  - `propose --goal <text> [--universe SPY,QQQ]` → runs propose-factor (`--llm openai` via the Task-1 default), prints candidate_id + an explicit "HUMAN GATE" reminder. (Gate 1 — the paper→goal distillation — happens in the Hermes session BEFORE this command; see the runbook.)
+  - `propose --goal <text> --source-file <path> [--universe SPY,QQQ]` → runs propose-factor with the Hermes-session-generated code file (D-19), prints candidate_id + an explicit "HUMAN GATE" reminder. (Gate 1 — the paper→goal distillation AND code generation happen in the Hermes session BEFORE this command; see the runbook.)
   - `approve --candidate-id <id> --note <text>` → runs `agent review --decision approve` — **human-only translation gate (gate 2)**.
   - `backtest --factor-id <id> --symbol S [--symbol S] --start <> --end <> [--provider tiingo] [--config-out <path>]` → writes an experiment config referencing the approved candidate factor, runs `experiment run-config --provider <p> --include-approved-candidates` (1a-0), reads the platform `agent_summary.json`, prints best-run metrics + "proposal-only".
 - There is deliberately **no** subcommand that chains propose→approve→backtest automatically.
@@ -259,8 +278,8 @@ from hqa import factor_repro_cli as cli
 
 def test_propose_prints_candidate_id_and_human_gate(monkeypatch, capsys):
     monkeypatch.setattr(cli.quant_cli, "run_propose_factor",
-                        lambda goal, universe="SPY,QQQ": (0, "candidate_id=factor-x-1 status=pending"))
-    rc = cli.main(["propose", "--goal", "momentum 20d reversal"])
+                        lambda goal, source_file, universe="SPY,QQQ": (0, "candidate_id=factor-x-1 status=pending"))
+    rc = cli.main(["propose", "--goal", "momentum 20d reversal", "--source-file", "/tmp/factor_src.py"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "factor-x-1" in out
@@ -336,6 +355,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     p_propose = sub.add_parser("propose")
     p_propose.add_argument("--goal", required=True)
+    p_propose.add_argument("--source-file", required=True, dest="source_file",
+                           help="factor code generated in the Hermes session (D-19)")
     p_propose.add_argument("--universe", default="SPY,QQQ")
 
     p_approve = sub.add_parser("approve")
@@ -353,7 +374,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "propose":
-        _, out = quant_cli.run_propose_factor(args.goal, args.universe)
+        _, out = quant_cli.run_propose_factor(args.goal, args.source_file, args.universe)
         candidate_id = factor_repro.parse_candidate_id(out)
         print(f"candidate_id={candidate_id}")
         print("HUMAN GATE: inspect the generated candidate factor and confirm the translation is correct")
@@ -743,13 +764,14 @@ hermes cron create 'every 2h' --name hqa-aihot-alerts \
 hermes cron list
 ```
 
-The Scene-B factor-reproduction flow is **human-run on demand** (not scheduled). Prerequisites: Phase 1a-0 executed; `QS_OPENAI_API_KEY` + `QS_TIINGO_API_TOKEN` configured in the platform `.env`.
+The Scene-B factor-reproduction flow is **human-run on demand** (not scheduled). Prerequisites: Phase 1a-0 executed; Task 0 (`--source-file` seam) landed on the platform; `QS_TIINGO_API_TOKEN` configured in the platform `.env` (no OpenAI key — D-19).
 
 ```text
-GATE 1 — paper→goal distillation (in the Hermes chat session):
+GATE 1 — paper→goal distillation + code generation (in the Hermes chat session):
   1. You send the paper (PDF/link/formula) to Hermes.
   2. Hermes drafts: (a) a one-paragraph factor definition in plain math/pseudocode,
-     (b) the --goal string for propose-factor.
+     (b) the --goal string, and (c) the factor code itself (Codex subscription —
+     no platform API key), written to e.g. /tmp/factor_src.py.
   3. YOU confirm the distillation matches the paper (or correct it).
      If Hermes cannot state the factor unambiguously it must answer
      "需人工补充定义" — never guess.
@@ -757,8 +779,8 @@ GATE 1 — paper→goal distillation (in the Hermes chat session):
 
 ```bash
 cd /Users/sunyibo/programs/Hermes-quant-agent
-# LLM translation (openai) — produces an inert candidate + audit log:
-python3 -m hqa.factor_repro_cli propose --goal "<confirmed goal string>"
+# Deterministic ingestion of the Hermes-generated code (D-19) — inert candidate + audit log:
+python3 -m hqa.factor_repro_cli propose --goal "<confirmed goal string>" --source-file /tmp/factor_src.py
 
 # GATE 2 — read the generated code before approving:
 #   cat /Users/sunyibo/programs/ai-quant-platform/data/agent/candidates/<id>/factor.py.candidate
@@ -778,7 +800,7 @@ Rollback: `hermes cron delete hqa-options-radar` / `hermes cron delete hqa-aihot
 
 ## Phase 1a-2 Acceptance (maps to spec §2.1/§2.5, Scene B)
 
-- [ ] Scene B runs distill (gate 1, in-session) → propose (`--llm openai`) → **human approve (gate 2)** → real-data backtest (`run-config --provider tiingo --include-approved-candidates`) → report; no code path auto-approves; results are proposal-only.
+- [ ] Scene B runs distill+generate (gate 1, in-session, D-19) → propose (`--source-file`) → **human approve (gate 2)** → real-data backtest (`run-config --provider tiingo --include-approved-candidates`) → report; no code path auto-approves; results are proposal-only.
 - [ ] `hqa-factor-repro` has no auto/pipeline subcommand that bypasses the human gates (test `test_no_auto_pipeline_subcommand`).
 - [ ] The backtest step never invokes `backtest run-sample` / synthetic data; metrics come from the platform `agent_summary.json` of a real-provider experiment.
 - [ ] Options radar delivers a structured, read-only summary (futu) to `#期权radar`.
