@@ -11,6 +11,7 @@ def test_repo_and_platform_paths():
     assert config.AIQP_DIR == Path("/Users/sunyibo/programs/ai-quant-platform")
     assert config.QUANT_SYSTEM_BIN == config.AIQP_DIR / "ai-quant" / "bin" / "quant-system"
     assert config.LOG_DIR == config.REPO_DIR / "logs"
+    assert config.OPTIONS_SCAN_DIR == config.AIQP_DIR / "data" / "options_scans"
 
 
 def test_expected_safety_baseline():

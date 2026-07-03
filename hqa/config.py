@@ -10,6 +10,7 @@ QUANT_SYSTEM_BIN = Path(
 )
 LOG_DIR = Path(os.environ.get("HQA_LOG_DIR", str(REPO_DIR / "logs")))
 REVIEW_DIR = Path(os.environ.get("HQA_REVIEW_DIR", str(REPO_DIR / "review")))
+OPTIONS_SCAN_DIR = Path(os.environ.get("HQA_OPTIONS_SCAN_DIR", str(AIQP_DIR / "data" / "options_scans")))
 
 # Nominal safety baseline. Any deviation from these values is an alert.
 EXPECTED_SAFETY = {
