@@ -946,6 +946,20 @@ hermes cron list
 
 Rollback: `hermes cron delete hqa-signal-watchdog` / `hermes cron delete hqa-weekly-review`.
 
+> **Architecture correction (2026-07-03, committed e75c81e, verified on real data):**
+> as written, Tasks 3/5 had `main()` run a fresh `options daily-scan --provider futu`
+> on every invocation — the every-30-min watchdog hit the 300s `quant_cli` subprocess
+> timeout (a futu full-universe scan takes hours) and collided with the platform's
+> scan lock, leaving stale locks behind. Corrected division of labor (D-15):
+> **the 23:00 `hqa-options-collect` cron owns scanning; watchdog and digest default
+> to CONSUMING artifacts** — the watchdog reads `data/options_scans/<date>.jsonl`,
+> the digest renders `<date>_meta.json` via `meta_as_summary()`; both accept an
+> explicit `--scan` flag for manual full-chain runs. Verified: watchdog 11.6s /
+> silent / 654 real candidates with distribution logged; digest 1.4s with real
+> radar line. **Threshold-review note:** today's futu artifacts have `iv_rank`
+> empty on all 654 rows (`iv_rank_known: 0`) — before the D-15 review, either
+> fix iv_rank population platform-side or set thresholds on `global_score` only.
+
 ---
 
 ## Phase 1a-1 Acceptance (maps to spec §2.1/§2.5)
