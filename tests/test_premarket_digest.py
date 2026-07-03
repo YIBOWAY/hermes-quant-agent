@@ -74,3 +74,38 @@ def test_main_survives_exception_and_returns_zero(tmp_path, monkeypatch):
     record = json.loads(log_path.read_text().splitlines()[0])
     assert record["job"] == "premarket-digest"
     assert "error" in record
+
+
+def test_build_digest_includes_headlines_when_provided():
+    from hqa.doctor_watchdog import parse_safety
+
+    heads = [{"title": "Meta compute", "source": "TC", "url": "u", "publishedAt": "t", "category": "industry", "score": 72}]
+    text = pd.build_digest(parse_safety(DOCTOR_SAMPLE), pd.parse_scan_summary(SCAN_SAMPLE), "2026-07-01T00:00:00Z", headlines=heads)
+    assert "AI headlines" in text
+    assert "Meta compute" in text
+
+
+def test_run_with_aihot_logs_titles_not_payload(tmp_path):
+    import json
+
+    log_path = tmp_path / "d.jsonl"
+    payload = '{"items":[{"title":"H1","source":"S","url":"u","publishedAt":"t","category":"c","score":9}]}'
+    text = pd.run(
+        run_doctor=lambda: (0, DOCTOR_SAMPLE),
+        run_scan=lambda: (0, SCAN_SAMPLE),
+        now_iso=lambda: "2026-07-01T00:00:00Z",
+        log_path=log_path,
+        run_aihot=lambda: payload,
+    )
+    assert "H1" in text
+    record = json.loads(log_path.read_text().splitlines()[0])
+    assert record["headlines"] == ["H1"]           # titles only
+    assert "items" not in json.dumps(record)       # no raw payload persisted
+
+
+def test_build_digest_degraded_label_on_futu_empty_scan():
+    from hqa.doctor_watchdog import parse_safety
+
+    text = pd.build_digest(parse_safety(DOCTOR_SAMPLE), {}, "2026-07-01T00:00:00Z", provider="futu")
+    assert "Options radar (futu)" in text
+    assert "DEGRADED" in text
