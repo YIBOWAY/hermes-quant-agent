@@ -45,6 +45,32 @@ def test_run_options_sample_scan_argv(monkeypatch):
     assert seen["argv"][1:] == ["options", "daily-scan", "--provider", "sample"]
 
 
+def test_run_options_scan_default_argv_futu(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        return _FakeProc(0, "candidates=1000\n")
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+    code, out = quant_cli.run_options_scan()
+    assert code == 0
+    assert seen["argv"][1:] == ["options", "daily-scan", "--provider", "futu"]
+
+
+def test_run_factor_lab_default_argv_futu(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        return _FakeProc(0, "cross_rows=5 timing_rows=5\n")
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+    code, out = quant_cli.run_factor_lab()
+    assert code == 0
+    assert seen["argv"][1:] == ["factor", "refresh-lab", "--provider", "futu"]
+
+
 @pytest.mark.skipif(
     True, reason="manual — requires working quant-system environment; run with --no-skip to verify live"
 )

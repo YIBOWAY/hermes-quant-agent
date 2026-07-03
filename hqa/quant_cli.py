@@ -27,3 +27,11 @@ def run_doctor(bin_path: Optional[Path] = None, cwd: Optional[Path] = None) -> t
 
 def run_options_sample_scan(bin_path: Optional[Path] = None, cwd: Optional[Path] = None) -> tuple[int, str]:
     return _run(["options", "daily-scan", "--provider", "sample"], bin_path=bin_path, cwd=cwd)
+
+
+def run_options_scan(provider: str = "futu", bin_path: Optional[Path] = None, cwd: Optional[Path] = None) -> tuple[int, str]:
+    return _run(["options", "daily-scan", "--provider", provider], bin_path=bin_path, cwd=cwd)
+
+
+def run_factor_lab(provider: str = "futu", bin_path: Optional[Path] = None, cwd: Optional[Path] = None) -> tuple[int, str]:
+    return _run(["factor", "refresh-lab", "--provider", provider], bin_path=bin_path, cwd=cwd)
