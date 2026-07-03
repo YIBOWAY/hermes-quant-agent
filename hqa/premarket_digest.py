@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -21,6 +23,21 @@ _SCAN_RE = re.compile(
 def parse_scan_summary(scan_output: str) -> dict[str, str]:
     match = _SCAN_RE.search(scan_output)
     return match.groupdict() if match else {}
+
+
+def meta_as_summary(scan_dir: Path, run_date: str) -> str:
+    """Render a collect-run meta artifact as a scan-summary line (D-15: consume, don't scan)."""
+    path = Path(scan_dir) / f"{run_date}_meta.json"
+    if not path.exists():
+        return ""
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    failed = meta.get("failed_tickers", [])
+    failed_n = len(failed) if isinstance(failed, list) else failed
+    return (
+        f"run_date={meta.get('run_date', run_date)} universe_size={meta.get('universe_size', 0)} "
+        f"scanned_tickers={meta.get('scanned_tickers', 0)} failed_tickers={failed_n} "
+        f"candidates={meta.get('candidate_count', 0)}"
+    )
 
 
 def build_digest(
@@ -98,12 +115,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="HQA pre-market digest (daily, always delivered)")
     parser.add_argument("--log", default=str(config.LOG_DIR / "premarket_digest.jsonl"))
     parser.add_argument("--provider", default="futu")
+    parser.add_argument("--scan", action="store_true", help="run a fresh scan (default: read collect meta artifact, D-15)")
+    parser.add_argument("--scan-dir", default=str(config.OPTIONS_SCAN_DIR))
+    parser.add_argument("--date", default=None, help="scan run_date; defaults to today UTC")
     args = parser.parse_args(argv)
     log_path = Path(args.log)
+    run_date = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if args.scan:
+        run_scan = lambda: quant_cli.run_options_scan(args.provider)  # noqa: E731
+    else:
+        run_scan = lambda: (0, meta_as_summary(Path(args.scan_dir), run_date))  # noqa: E731
     try:
         digest = run(
             quant_cli.run_doctor,
-            lambda: quant_cli.run_options_scan(args.provider),
+            run_scan,
             runlog.utc_now_iso,
             log_path,
             run_aihot=aihot.fetch_items,

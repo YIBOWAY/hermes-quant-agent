@@ -46,6 +46,7 @@ def run(
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="HQA Scene-A market-signal watchdog ([SILENT] unless signal)")
     parser.add_argument("--provider", default="futu")
+    parser.add_argument("--scan", action="store_true", help="run a fresh scan first (default: consume collect artifacts, D-15)")
     parser.add_argument("--scan-dir", default=str(config.OPTIONS_SCAN_DIR))
     parser.add_argument("--date", default=None, help="scan run_date; defaults to today UTC")
     parser.add_argument("--min-score", type=float, default=None, help="unset = collect mode (D-15)")
@@ -54,9 +55,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
     log_path = Path(args.log)
     run_date = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if args.scan:
+        run_scan = lambda: quant_cli.run_options_scan(args.provider)  # noqa: E731
+    else:
+        run_scan = lambda: (0, "")  # noqa: E731 — artifacts produced by hqa-options-collect (D-15)
     try:
         has_signal, message = run(
-            run_scan=lambda: quant_cli.run_options_scan(args.provider),
+            run_scan=run_scan,
             load_candidates=lambda: signals.load_scan_candidates(Path(args.scan_dir), run_date),
             run_factor_lab=lambda: quant_cli.run_factor_lab(args.provider),
             now_iso=runlog.utc_now_iso,

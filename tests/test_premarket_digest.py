@@ -32,6 +32,29 @@ def test_parse_scan_summary_missing_returns_empty():
     assert pd.parse_scan_summary("no summary here") == {}
 
 
+def test_meta_as_summary_renders_collect_artifact(tmp_path):
+    meta = {
+        "run_date": "2026-07-03",
+        "universe_size": 100,
+        "scanned_tickers": 100,
+        "failed_tickers": [],
+        "candidate_count": 654,
+    }
+    (tmp_path / "2026-07-03_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    line = pd.meta_as_summary(tmp_path, "2026-07-03")
+    assert pd.parse_scan_summary(line) == {
+        "run_date": "2026-07-03",
+        "universe_size": "100",
+        "scanned": "100",
+        "failed": "0",
+        "candidates": "654",
+    }
+
+
+def test_meta_as_summary_missing_returns_empty(tmp_path):
+    assert pd.meta_as_summary(tmp_path, "2026-07-03") == ""
+
+
 def test_build_digest_nominal_mentions_counts_and_safety():
     from hqa.doctor_watchdog import parse_safety
 

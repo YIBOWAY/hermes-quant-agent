@@ -54,10 +54,24 @@ def test_main_collect_mode_emits_empty_stdout(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_main_default_consumes_artifacts_never_scans(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("must not scan in artifact mode (D-15)")
+
+    monkeypatch.setattr(sw.quant_cli, "run_options_scan", boom)
+    monkeypatch.setattr(sw.quant_cli, "run_factor_lab", lambda *a, **k: (0, LAB_OUT))
+    monkeypatch.setattr(sw.signals, "load_scan_candidates", lambda *a, **k: [CAND_HI])
+    log_path = tmp_path / "sw.jsonl"
+    rc = sw.main(["--log", str(log_path)])
+    assert rc == 0
+    record = json.loads(log_path.read_text().splitlines()[0])
+    assert record["n_candidates"] == 1  # artifacts consumed, no subprocess scan
+
+
 def test_main_survives_exception_and_returns_zero(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("scan blew up")
 
     monkeypatch.setattr(sw.quant_cli, "run_options_scan", boom)
-    rc = sw.main(["--log", str(tmp_path / "sw.jsonl")])
+    rc = sw.main(["--scan", "--log", str(tmp_path / "sw.jsonl")])
     assert rc == 0
