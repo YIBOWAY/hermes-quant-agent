@@ -8,12 +8,33 @@ _CANDIDATE_RE = re.compile(r"candidate_id=(\S+)")
 _METRIC_KEYS = ("sharpe", "total_return", "max_drawdown")
 
 
+def parse_json_payload(output: str) -> Optional[dict]:
+    for line in reversed(output.splitlines()):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        return payload if isinstance(payload, dict) else None
+    return None
+
+
 def parse_candidate_id(output: str) -> Optional[str]:
+    payload = parse_json_payload(output)
+    if payload is not None:
+        candidate_id = payload.get("candidate_id")
+        if candidate_id is not None:
+            return str(candidate_id)
     match = _CANDIDATE_RE.search(output)
     return match.group(1) if match else None
 
 
 def parse_experiment_summary(output: str) -> dict[str, str]:
+    payload = parse_json_payload(output)
+    if payload is not None and "experiment_id" in payload:
+        return {key: str(value) for key, value in payload.items()}
     for line in output.splitlines():
         if "experiment_id=" in line:
             return {

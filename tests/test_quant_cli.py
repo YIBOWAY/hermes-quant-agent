@@ -30,6 +30,7 @@ def test_run_doctor_invokes_cli_with_cwd(monkeypatch):
     assert seen["kwargs"]["cwd"] == str(config.AIQP_DIR)
     assert seen["kwargs"]["stderr"] is subprocess.STDOUT
     assert seen["kwargs"]["timeout"] == 300
+    assert seen["argv"][-1] == "--json"
 
 
 def test_run_options_sample_scan_argv(monkeypatch):
@@ -93,6 +94,7 @@ def test_run_propose_factor_argv(monkeypatch):
         "SPY,QQQ",
         "--source-file",
         "/tmp/factor_src.py",
+        "--json",
     ]
 
 
@@ -128,6 +130,7 @@ def test_run_agent_review_argv(monkeypatch):
         "approve",
         "--note",
         "translation confirmed",
+        "--json",
     ]
 
 
@@ -148,6 +151,7 @@ def test_run_experiment_config_argv(monkeypatch):
         "--provider",
         "tiingo",
         "--include-approved-candidates",
+        "--json",
     ]
 
 
@@ -161,6 +165,7 @@ def test_run_experiment_config_can_omit_approved_candidates(monkeypatch):
     monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
     quant_cli.run_experiment_config("/tmp/exp.json", provider="tiingo", include_approved=False)
     assert "--include-approved-candidates" not in seen["argv"]
+    assert seen["argv"][-1] == "--json"
 
 
 @pytest.mark.skipif(

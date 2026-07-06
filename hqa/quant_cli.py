@@ -27,7 +27,7 @@ def _run(
 
 
 def run_doctor(bin_path: Optional[Path] = None, cwd: Optional[Path] = None) -> tuple[int, str]:
-    return _run(["doctor"], bin_path=bin_path, cwd=cwd)
+    return _run(["doctor", "--json"], bin_path=bin_path, cwd=cwd)
 
 
 def run_options_sample_scan(bin_path: Optional[Path] = None, cwd: Optional[Path] = None) -> tuple[int, str]:
@@ -55,7 +55,7 @@ def run_propose_factor(
     cwd: Optional[Path] = None,
 ) -> tuple[int, str]:
     return _run(
-        ["agent", "propose-factor", "--goal", goal, "--universe", universe, "--source-file", source_file],
+        ["agent", "propose-factor", "--goal", goal, "--universe", universe, "--source-file", source_file, "--json"],
         bin_path=bin_path,
         cwd=cwd,
     )
@@ -73,7 +73,7 @@ def run_agent_review(
     cwd: Optional[Path] = None,
 ) -> tuple[int, str]:
     return _run(
-        ["agent", "review", "--candidate-id", candidate_id, "--decision", decision, "--note", note],
+        ["agent", "review", "--candidate-id", candidate_id, "--decision", decision, "--note", note, "--json"],
         bin_path=bin_path,
         cwd=cwd,
     )
@@ -90,4 +90,5 @@ def run_experiment_config(
     args = ["experiment", "run-config", "--config", config_path, "--provider", provider]
     if include_approved:
         args.append("--include-approved-candidates")
+    args.append("--json")
     return _run(args, bin_path=bin_path, cwd=cwd, timeout=timeout)
