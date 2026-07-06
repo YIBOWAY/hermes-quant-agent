@@ -20,6 +20,7 @@ def check_strategy(cfg: dict[str, Any]) -> tuple[bool, list[dict[str, Any]]]:
 
     add("kill_switch_hook", cfg.get("kill_switch_enabled") is True, "needs kill_switch_enabled=true")
     add("review_hook", cfg.get("review_on_drawdown") is True, "needs review_on_drawdown=true")
+    add("paper_month", cfg.get("paper_days_completed", 0) >= 30, "needs paper_days_completed >= 30 (D-21)")
 
     passed = all(r["passed"] for r in results)
     return passed, results
