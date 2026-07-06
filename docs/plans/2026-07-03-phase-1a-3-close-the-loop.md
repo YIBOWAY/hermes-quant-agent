@@ -108,14 +108,14 @@ def build_factor_registry(
   - `cli.py` run-config branch keeps calling
     `load_approved_factor_candidates` explicitly (already correct).
 
-- [ ] Step 1: failing test — factory returns examples+promoted by default;
+- [x] Step 1: failing test — factory returns examples+promoted by default;
   `include_approved_candidates=True` with a tmp candidates dir containing an
   approved candidate registers it; `False` does not; promoted package with a
   stub factor class in `PROMOTED_FACTORS` gets registered.
-- [ ] Step 2: run → fail (no `build_factor_registry`).
-- [ ] Step 3: implement factory; rewire the call sites listed above.
-- [ ] Step 4: platform suite green (baseline + new).
-- [ ] Step 5: commit `feat(factors): single registry factory; promoted library package (D-23)`.
+- [x] Step 2: run → fail (no `build_factor_registry`).
+- [x] Step 3: implement factory; rewire the call sites listed above.
+- [x] Step 4: platform suite green (baseline + new).
+- [x] Step 5: commit `feat(factors): single registry factory; promoted library package (D-23)`.
 
 ---
 
@@ -132,14 +132,14 @@ additive field. Candidate loading reuses the factory from Task P1 with the
 same candidates dir the CLI uses (`data/agent_run/agent/candidates` — mirror
 the `--candidates-dir` default in `cli.py:677`).
 
-- [ ] Step 1: failing test — API client: default call has no `candidate`
+- [x] Step 1: failing test — API client: default call has no `candidate`
   origins; `?include_candidates=true` lists the approved tmp candidate with
   `origin="candidate"`; a pending (un-approved) candidate never appears.
-- [ ] Step 2: run → fail.
-- [ ] Step 3: implement (origin computed from which registration pass added
+- [x] Step 2: run → fail.
+- [x] Step 3: implement (origin computed from which registration pass added
   the factor_id; keep it in the factory's return metadata, not by re-parsing).
-- [ ] Step 4: suite green.
-- [ ] Step 5: commit `feat(api): /factors provenance + opt-in approved candidates`.
+- [x] Step 4: suite green.
+- [x] Step 5: commit `feat(api): /factors provenance + opt-in approved candidates`.
 
 ---
 
@@ -180,20 +180,20 @@ Behavior (all verified against existing seams):
 7. **Never touches git.** CLI prints the file list and:
    `GATE 3 — review the diff and commit yourself: git diff -- <paths>`.
 
-- [ ] Step 1: failing tests — happy path writes 3 files & regenerated init
+- [x] Step 1: failing tests — happy path writes 3 files & regenerated init
   imports the new module; un-approved candidate → refuse; AST-violating
   source → refuse; second promotion of same factor_id → refuse; result
   factor_id matches the class metadata; **no `.git` mutation** (assert no
   subprocess/git import in `promote.py`).
-- [ ] Step 2: run → fail.
-- [ ] Step 3: implement `promote.py` + CLI command
+- [x] Step 2: run → fail.
+- [x] Step 3: implement `promote.py` + CLI command
   (`agent promote-candidate --candidate-id <id> [--candidates-dir ...]`).
-- [ ] Step 4: suite green; then a manual end-to-end sanity: promote the
+- [x] Step 4: suite green; then a manual end-to-end sanity: promote the
   existing on-disk candidate `factor-momentum_20d_reversal-323b045e4b`
   (approve it first if pending), inspect `git diff`, then `git checkout --`
   the generated files (leave the repo clean — this plan does not decide that
   factor's promotion).
-- [ ] Step 5: commit `feat(agent): promote-candidate deterministic Gate-3 diff (D-20)`.
+- [x] Step 5: commit `feat(agent): promote-candidate deterministic Gate-3 diff (D-20)`.
 
 ---
 
@@ -212,13 +212,13 @@ Behavior (all verified against existing seams):
 Existing key=value lines are UNCHANGED when `--json` is absent (HQA regex
 fallback keeps working; no consumer breaks mid-migration).
 
-- [ ] Step 1: failing tests — each command with `--json`: last line parses,
+- [x] Step 1: failing tests — each command with `--json`: last line parses,
   required keys present; without `--json`: byte-identical legacy format
   (regression-pin one representative line per command).
-- [ ] Step 2: run → fail.
-- [ ] Step 3: implement (shared `_emit_json(payload)` helper; `typer.echo(json.dumps(..., sort_keys=True))`).
-- [ ] Step 4: suite green.
-- [ ] Step 5: commit `feat(cli): --json contract for HQA consumers (D-22)`.
+- [x] Step 2: run → fail.
+- [x] Step 3: implement (shared `_emit_json(payload)` helper; `typer.echo(json.dumps(..., sort_keys=True))`).
+- [x] Step 4: suite green.
+- [x] Step 5: commit `feat(cli): --json contract for HQA consumers (D-22)`.
 
 ---
 
@@ -237,13 +237,13 @@ fallback keeps working; no consumer breaks mid-migration).
 - `quant_cli.run_propose_factor/run_agent_review/run_experiment_config/run_doctor`
   append `--json` to their argv.
 
-- [ ] Step 1: failing tests — JSON last-line parsed; mixed human-lines+JSON
+- [x] Step 1: failing tests — JSON last-line parsed; mixed human-lines+JSON
   parsed; legacy-only output still parsed via fallback; argv now ends with
   `--json`.
-- [ ] Step 2: run → fail.
-- [ ] Step 3: implement.
-- [ ] Step 4: `./.venv/bin/pytest -q` green.
-- [ ] Step 5: commit `feat: JSON-first platform CLI parsing, regex fallback (D-22)`.
+- [x] Step 2: run → fail.
+- [x] Step 3: implement.
+- [x] Step 4: `./.venv/bin/pytest -q` green.
+- [x] Step 5: commit `feat: JSON-first platform CLI parsing, regex fallback (D-22)`.
 
 ---
 
@@ -264,10 +264,10 @@ Log: `logs/factor_trials.jsonl`, one line per backtest run:
 `{"ts", "factor_id", "start", "end", "final": bool, "sharpe": ...}`.
 Warning text (≥3rd trial): `OVERFIT WARNING: trial N for <factor_id> — 回测结果可信度随迭代次数下降；参考 D-21/复盘库，考虑 holdout --final 或收手`.
 
-- [ ] Step 1: failing tests — append+count round-trip; missing log → 0;
+- [x] Step 1: failing tests — append+count round-trip; missing log → 0;
   warning empty at n=2, non-empty at n=3.
-- [ ] Step 2: run → fail. Step 3: implement. Step 4: green.
-- [ ] Step 5: commit `feat: per-factor trial counter with overfit warning (D-21)`.
+- [x] Step 2: run → fail. Step 3: implement. Step 4: green.
+- [x] Step 5: commit `feat: per-factor trial counter with overfit warning (D-21)`.
 
 ---
 
@@ -291,12 +291,12 @@ config written with the CUT end date; stdout prints
 Every run (final or not) appends a trial record (Task H2) and prints the
 overfit warning when due. `--final` runs are also recorded (`"final": true`).
 
-- [ ] Step 1: failing tests — cut math (ISO dates, 3.9-compatible
+- [x] Step 1: failing tests — cut math (ISO dates, 3.9-compatible
   `datetime.date.fromisoformat`); window-too-short raises; CLI non-final
   writes cut end into the experiment config + prints HOLDOUT note; `--final`
   writes the full end; 3rd run prints OVERFIT WARNING.
-- [ ] Step 2: run → fail. Step 3: implement. Step 4: green.
-- [ ] Step 5: commit `feat: default 6-month holdout on Scene-B backtests (D-21)`.
+- [x] Step 2: run → fail. Step 3: implement. Step 4: green.
+- [x] Step 5: commit `feat: default 6-month holdout on Scene-B backtests (D-21)`.
 
 ---
 
@@ -309,10 +309,10 @@ overfit warning when due. `--final` runs are also recorded (`"final": true`).
 Existing four criteria unchanged; a config passing today with no
 `paper_days_completed` must now FAIL overall.
 
-- [ ] Step 1: failing tests — config with `paper_days_completed=30` + prior
+- [x] Step 1: failing tests — config with `paper_days_completed=30` + prior
   fields passes; 29 fails; absent fails; result list length now 5.
-- [ ] Step 2: run → fail. Step 3: implement. Step 4: full HQA suite green.
-- [ ] Step 5: commit `feat: gate requires >=30 paper days before broker-sim promotion (D-21)`.
+- [x] Step 2: run → fail. Step 3: implement. Step 4: full HQA suite green.
+- [x] Step 5: commit `feat: gate requires >=30 paper days before broker-sim promotion (D-21)`.
 
 ---
 
@@ -332,7 +332,7 @@ Existing four criteria unchanged; a config passing today with no
   P3 推迟。本文余下内容仅作素材保留」; add the mutual pointer line to the
   platform `AGENTS.md`. Applied in the same cleanup; final commit/push is still
   separate.
-- [ ] Step 3: end-to-end runbook (human-run, after P1–P4 + H1–H3 land):
+- [x] Step 3: end-to-end runbook (human-run, after P1–P4 + H1–H3 land):
 
 ```text
 GATE 1 (Hermes 会话): 论文 → 因子定义蒸馏 → 你确认 → 代码写入 /tmp/factor_src.py
@@ -358,12 +358,12 @@ $ git add -A && git commit -m "promote: <fid> (Gate 3)"
 - [ ] 一篇论文 → Gate1 → Gate2 → 回测报告 → Gate3（diff 审查+人工 commit）→
   `/factors` 可见 → sleeve 分配 cash 跑纸面模拟：全程零手写代码，三道门均无
   代码路径可绕过（P3 的 no-git 断言、gate 的人工 CLI、review 的 approve.lock）。
-- [ ] 常驻交易路径（sleeve 信号服务）永不加载候选文件；只有 promoted 模块。
-- [ ] `hqa-factor-repro backtest` 同一 factor_id 第 3 次运行打印 OVERFIT
+- [x] 常驻交易路径（sleeve 信号服务）永不加载候选文件；只有 promoted 模块。
+- [x] `hqa-factor-repro backtest` 同一 factor_id 第 3 次运行打印 OVERFIT
   WARNING；非 `--final` 运行自动保留末 183 天 holdout。
-- [ ] `hqa-gate check` 缺 `paper_days_completed>=30` 必不放行。
-- [ ] 平台 4 命令 `--json` 最后一行可解析；无 `--json` 时输出与旧版逐字节一致。
-- [ ] 两仓库测试全绿（各自 baseline + new）。
+- [x] `hqa-gate check` 缺 `paper_days_completed>=30` 必不放行。
+- [x] 平台 4 命令 `--json` 最后一行可解析；无 `--json` 时输出与旧版逐字节一致。
+- [x] 两仓库测试全绿（各自 baseline + new）。
 
 ## Self-Review
 
