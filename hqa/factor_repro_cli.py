@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 from pathlib import Path
 from typing import Optional
 
-from hqa import config, factor_repro, quant_cli
+from hqa import config, factor_repro, holdout, quant_cli, trials
 
 
 def _write_experiment_config(path: Path, factor_id: str, symbols: list[str], start: str, end: str) -> None:
@@ -52,6 +53,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_backtest.add_argument("--end", required=True)
     p_backtest.add_argument("--provider", default="tiingo")
     p_backtest.add_argument("--config-out", default=None)
+    p_backtest.add_argument(
+        "--final",
+        action="store_true",
+        help="run the FULL window once before promotion; non-final runs reserve the last 183 days (D-21)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -73,8 +79,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0 if code == 0 else 1
 
     if args.cmd == "backtest":
+        try:
+            effective_end, holdout_note = holdout.effective_backtest_end(
+                args.start, args.end, args.final
+            )
+        except ValueError as exc:
+            print(f"ERROR: {exc}")
+            return 1
         config_out = Path(args.config_out) if args.config_out else _default_config_path(args.factor_id)
-        _write_experiment_config(config_out, args.factor_id, args.symbols, args.start, args.end)
+        _write_experiment_config(config_out, args.factor_id, args.symbols, args.start, effective_end)
+        if holdout_note:
+            print(holdout_note)
         code, out = quant_cli.run_experiment_config(
             str(config_out),
             provider=args.provider,
@@ -95,6 +110,21 @@ def main(argv: Optional[list[str]] = None) -> int:
         for key in ("sharpe", "total_return", "max_drawdown"):
             print(f"{key}={metrics.get(key, '?')}")
         print(f"report={summary.get('report', '?')}")
+        log_path = Path(config.LOG_DIR) / "factor_trials.jsonl"
+        trials.append_trial(
+            args.factor_id,
+            {
+                "ts": datetime.datetime.now().isoformat(timespec="seconds"),
+                "start": args.start,
+                "end": effective_end,
+                "final": args.final,
+                "sharpe": metrics.get("sharpe", "?"),
+            },
+            log_path,
+        )
+        warning = trials.overfit_warning(args.factor_id, trials.count_trials(args.factor_id, log_path))
+        if warning:
+            print(warning)
         print("Results are proposal-only; promotion to the review pool is a human decision.")
         return 0 if code == 0 else 1
 
