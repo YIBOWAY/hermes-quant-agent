@@ -4,6 +4,7 @@
 > 上游：`docs/design/hermes_quant_agent_plan.md`（总设计）。前置：Phase 0a 已交付（只读数字员工，见 `docs/plans/2026-07-01-phase-0a-readonly-digital-employee.md`）。
 > 本文定位：把 0a 之后的全部阶段一次性对齐方向。**分层规划**——近期阶段给完整 TDD 计划，中期给设计 spec，远期给方向大纲。
 > 安全红线（贯穿全程，继承总设计）：实盘执行层完成前，保持 `paper_trading` / `live_trading_enabled=false` / `kill_switch` / 人工审批门。任何策略、agent、cron、MCP 都不得绕过。
+> **单一事实源**：本文决策台账（D-1…D-24）是 Hermes-quant-agent 与 `ai-quant-platform` 的唯一活跃路线图；平台 Phase 15 只保留素材价值。
 
 ---
 
@@ -13,7 +14,7 @@
 
 | 层 | 阶段 | 产出形式 | 文档 |
 |---|---|---|---|
-| 近 | 0b, 1a-0, 1a-1, 1a-2 | 完整 TDD 实现计划（可逐步执行） | `docs/plans/*.md` |
+| 近 | 0b, 1a-0, 1a-1, 1a-2, 1a-3, 工作台 | 完整 TDD 实现计划（可逐步执行） | `docs/plans/*.md` |
 | 中 | 1b, 2 | 设计 spec（架构 / 接口契约 / 验收门；不到步骤级） | 本文 §3、§4 |
 | 远 | 3, 4 | 方向大纲（硬约束 / 开放问题 / 决策标准；不做实现设计） | 本文 §5、§6 |
 
@@ -37,12 +38,17 @@
 | D-11 | Phase 3：锁死总设计 §10 八条硬约束；首实盘 = Longbridge（升级 1b/2 adapter）；单券商单策略小资金低频 |
 | D-12 | Phase 4：延后；IBKR 期货；硬门槛 = Phase 3 实盘链路稳定 |
 | D-13 | （2026-07-02）插入 **Phase 1a-0 平台接线包**：修复两个平台侧死胡同（`experiment run-config` 不透传 provider；已批准候选因子无法进入 FactorRegistry）+ 运维前提（OpenD/keys）+ 扫描分布收集 |
-| D-14 | （2026-07-02）真数据优先策略：真实运行用 `--provider futu`（盘中）/ `tiingo`（回测）与 `--llm openai`；`sample`/`stub` 仅限单元测试；降级运行必须标注 `DEGRADED`，绝不静默假装真数据 |
+| D-14 | （2026-07-02，D-19 已修订 LLM 部分）真数据优先策略：真实运行用 `--provider futu`（盘中）/ `tiingo`（回测）；`sample`/`stub` 仅限单元测试；降级运行必须标注 `DEGRADED`，绝不静默假装真数据 |
 | D-15 | （2026-07-02）场景 A 信号阈值不拍脑袋：看门狗默认 **collect 模式**（不报警只记录分布）；阈值来自 ≥4 个交易日的 futu 扫描分布复盘（建议 p90），决策落 0b 复盘库后才进 alert 模式 |
-| D-16 | （2026-07-03）**闭环愿景定型：「两次点击的人在环」而非全自动**。论文→翻译（👤Gate1 确认公式）→propose 生成候选代码（只落 `.candidate`，绝不直写 src/）→👤Gate2 审代码 approve→tiingo 真实数据回测（自动）→结果落评审池+Discord→👤前端点击分配 sleeve（Phase 2 信封领地）。**无需热更新**：平台 registry 每次 run 请求重建，approved 候选按次加载，获批即可见，服务不重启。`promotion.py` 的 AST 白名单是纵深防御非沙箱，人工代码审查是唯一真安全闸 |
-| D-17 | （2026-07-03）**Hermes 工作台（平台前端）**：否决删除因子实验室/智能体工作室，改为**改造吞并**为单页面四区工作台（智能体工作室恰是 Gate2 审批 UI，不可丢）；吸收平台 phase_15 P4+P5；详见 §2.6；远程访问前置 1b 鉴权 |
+| D-16 | （2026-07-03）**闭环愿景定型：「两次点击的人在环」而非全自动**。论文→翻译（👤Gate1 确认公式）→propose 生成候选代码（只落 `.candidate`，绝不直写 src/）→👤Gate2 审代码 approve→tiingo 真实数据回测（自动）→结果落评审池+Discord→👤前端点击分配 sleeve（Phase 2 信封领地）。**无需热更新**：平台 registry 每次 run 请求重建，approved 候选按次加载，获批即可见，服务不重启。`promotion.py` 的 AST 白名单是纵深防御非沙箱，人工代码审查是唯一真安全闸。**（同日修订：核验发现「点击分配 sleeve」在批准态因子上不可行——sleeve 信号链路对候选 factor_id 直接 KeyError；分配资金前需经 D-20 转正门，闭环实为三道人工门）** |
+| D-17 | （2026-07-03）**Hermes 工作台（平台前端）**：否决删除因子实验室/智能体工作室，改为**改造吞并**为单页面四区工作台（智能体工作室恰是 Gate2 审批 UI，不可丢）；吸收平台 phase_15 P4+P5；详见 §2.7；远程访问前置 1b 鉴权 |
 | D-18 | （2026-07-03）**平台迭代治理：从产品路线驱动改为 Hermes 需求拉动**。Hermes-quant-agent 为主项目（COO），平台降级为领域后端。phase_15 处置：P0 永保持；P1 provenance 最小切片提前（信号可信前提）；P4/P5 改造为工作台（D-17）；P2/P3 推迟到 Phase 2 前；独立功能增长停止 |
-| D-19 | （2026-07-03）**LLM 职责收归 Hermes，平台去 LLM 化**（取代 D-14 的 `--llm openai` 部分）：Scene-B 因子代码生成在 Hermes 会话内完成（Codex 订阅已覆盖，零额外 API 费；订阅端点不能也不应当作平台后端的裸 LLM API）。平台侧新增确定性接缝 `agent propose-factor --source-file <path>`（内部用固定内容 LLMClient 注入 `AgentRunner`，复用全部 task-id/audit/candidate-pool 链）；`QS_OPENAI_API_KEY` 不再需要；`stub` 仍限单元测试；两道人工 gate 不变；`QS_TIINGO_API_TOKEN`（数据钥匙，非 LLM）仍必需 |
+| D-19 | （2026-07-03）**LLM 职责收归 Hermes，平台去 LLM 化**（取代 D-14 的 `--llm openai` 部分）：Scene-B 因子代码生成在 Hermes 会话内完成（Codex 订阅已覆盖，零额外 API 费；订阅端点不能也不应当作平台后端的裸 LLM API）。平台侧新增确定性接缝 `agent propose-factor --source-file <path>`（内部用固定内容 LLMClient 注入 `AgentRunner`，复用全部 task-id/audit/candidate-pool 链）；`QS_OPENAI_API_KEY` 不再需要；`stub` 仍限单元测试；proposal/backtest 段仍保留 Gate1+Gate2，端到端晋级链路见 D-20 三道门；`QS_TIINGO_API_TOKEN`（数据钥匙，非 LLM）仍必需 |
+| D-20 | （2026-07-03）**闭环第三道门「转正 promote-to-code」**：候选因子回测满意后，`agent promote-candidate`（确定性、无 LLM）把**已批准**候选源码正式写入 `src/quant_system/factors/library/promoted/<factor_id>.py` + 重生成 `promoted/__init__.py` 注册表 + 生成测试脚手架，**只产工作区 diff、绝不自动 commit**；人工 `git diff` 审查并 commit 即 Gate 3。merge 后因子成为一等公民（前端目录/回测/sleeve 全可用；registry 每次请求重建，获批即可见，无需热更新——D-16 已证伪热更新需求）。**sleeve 信号链路永不 exec `.candidate` 文件**：受限 exec 只限一次性回测（`run-config --include-approved-candidates`），常驻交易路径只允许代码化、注册化、有测试的正式因子（与平台 phase_15「不做前端自由公式因子编辑器」纪律同源）。已核验断点：`paper_strategy_signal_service.py:188-192` 对候选 factor_id 直接 `KeyError`（`registry.py:31-36`）——转正是让新因子获得纸面资金的唯一路径 |
+| D-21 | （2026-07-03）**反过拟合三纪律硬编码进流程**（参考文章「回测漂亮、模拟仓两周 -12%」翻车模式的系统级对策；当"提想法→回测报告"只要 10 分钟，人会天然迭代到回测好看为止）：① 试验计数——`hqa-factor-repro backtest` 每次运行按 factor_id 落 `logs/factor_trials.jsonl`，≥3 次显式告警「回测结果可信度随迭代次数下降」；② holdout——`backtest` 默认截断最近 6 个月数据，只有转正前的一次 `--final` 跑全窗口，holdout 段明显衰减 = 回炉；③ 满月门槛——`hqa-gate` 增加 `paper_days_completed >= 30` 必过项：回测 + holdout 通过 ≠ 晋级，纸面 sleeve 跑满月才有资格谈券商模拟 |
+| D-22 | （2026-07-03）**HQA↔平台契约升级为 `--json`**：HQA 消费的平台 CLI 命令（`agent propose-factor` / `agent review` / `experiment run-config` / `doctor`）增加 `--json` 单行 JSON 输出；HQA 侧 JSON 解析优先、既有正则兜底（当前 `factor_repro.py` 靠 `candidate_id=(\S+)` 正则抓 stdout，平台输出格式一变即静默断裂）。业务 MCP server 仍按 D-9 推迟到 1b——只有订单/审批类高风险能力才值得 MCP 的 schema+鉴权成本，研究链路 CLI+JSON 足够 |
+| D-23 | （2026-07-03）**注册表构建收敛单一工厂**：新增 `build_factor_registry(*, include_promoted=True, include_approved_candidates=False, candidates_dir=...)`，替换散落的 `build_default_factor_registry()` 调用点（已核验：`api/routes/factors.py:33`、`factors/lab.py:53`、`paper_strategy_signal_service.py:188`、`cli.py` run-config 分支）。`/factors` 目录可选返回已批准候选并带 `origin=builtin|promoted|candidate` 标记（修复断点：批准后的因子前端目录不可见）；转正因子经 `library/promoted/` 包进默认注册表（配合 D-20 修复断点：sleeve 无法使用新因子）。sleeve 信号服务硬编码 `include_approved_candidates=False` |
+| D-24 | （2026-07-03）**文档单一事实源，消除上下文污染**：本 roadmap + 决策台账为两仓库唯一活跃路线图（D-18 的执行细则）。平台 `docs/phases/phase_11~14*` 移入 `docs/archive/phases/`；`phase_15_iteration_roadmap.md` 顶部标注「迭代治理已被 HQA D-18 取代，本文仅存 P0-P5 素材价值」；两仓库 AGENTS.md/CLAUDE.md 各加一行互指（平台=领域后端，活跃路线图在 HQA）。动机即参考文章的教训：过时文档是 agent 会话的上下文污染源 |
 
 ---
 
@@ -88,7 +94,7 @@
 
 ---
 
-## 2. Phase 1a — 数字员工 MVP（→ 完整 TDD 计划，拆 1a-0 / 1a-1 / 1a-2）
+## 2. Phase 1a — 数字员工 MVP（→ 完整 TDD 计划，拆 1a-0 / 1a-1 / 1a-2 / 1a-3）
 
 目标：让 Hermes 成为真正有用的个人研究助理。全部 read-only / proposal-only。
 
@@ -111,7 +117,7 @@
 **1a-2 进阶**：
 4. **期权 radar 摘要**：`options daily-scan` 结果的结构化摘要 + 分位提醒，推 `#期权radar`。
 5. **AI HOT / 个股异动提醒**：独立公开 REST API（D-6），异动才推。
-6. **场景 B 论文因子复现**：人工把因子/公式发来 → Hermes 调平台 AI 因子生成把它翻译成平台配置 → **人工确认翻译无误（关键 gate）** → 调 `backtest`/`factor run` 在真实历史数据回测 → 结果落评审池 + 推 `#回测结果` → 人工决定 promote。
+6. **场景 B 论文因子复现**：人工把因子/公式发来 → Hermes 会话生成源码 → 平台 `agent propose-factor --source-file <path>` 确定性摄入候选 → **人工确认翻译/审码（关键 gate）** → `experiment run-config --provider tiingo --include-approved-candidates` 在真实历史数据回测 → 结果落评审池 + 推 `#回测结果`。是否进入 paper sleeve 由 1a-3 的 D-20 转正门决定。
 
 ### 2.2 数据自主性（D-6，D-14 修订）
 
@@ -135,18 +141,33 @@
 - 场景 B：能把一个中等复杂度论文因子跑到回测出报告；**因子翻译有人工确认 gate**，不允许 LLM 理解直接进回测；结果落评审池不自动生效；无法可靠翻译时明确报「需人工补充定义」。
 - Discord 未配置时全链路仍能以 local 工作。
 
-### 2.6 Hermes 工作台（平台前端，D-17；排在 1a-1 之后、1b 之前）
+### 2.6 Phase 1a-3 — 闭环补全包（D-20/D-21/D-22/D-23，2026-07-03 追加；排在 1a-2 之后）
+
+1a-2 交付后闭环仍有两个已核验断点：批准候选在前端因子目录不可见（`api/routes/factors.py:33` 只构建默认注册表）；批准候选无法进入 sleeve 纸面模拟（`paper_strategy_signal_service.py:188-192` 对候选 factor_id 直接 `KeyError`）。本包补全「回测报告 → 分配纸面资金」的最后一段，并落反过拟合纪律：
+
+1. **平台侧**：D-23 注册表工厂收敛 + `/factors` 展示候选（带 `origin` 标记）；D-20 `agent promote-candidate` 转正命令（只产 diff，人工 commit = Gate 3）；D-22 关键 CLI 加 `--json`。
+2. **Hermes 侧**：`factor_repro_cli` 接 `--json` 解析（正则兜底）；D-21 试验计数 + holdout 默认截断；`hqa-gate` 加满月必过项。
+3. **验收**：一篇论文从 Hermes 会话出发，经 Gate1（确认公式）→ Gate2（approve 代码）→ 回测报告 → Gate3（审 diff 转正）→ 前端可见 → 创建 sleeve 分配 cash 跑纸面模拟，全程零手写代码、三道人工门皆不可绕过；`hqa-factor-repro backtest` 同一 factor_id 第 3 次运行输出过拟合告警；holdout 段默认不参与迭代回测。
+
+### 2.7 Hermes 工作台（平台前端，D-17；排在 1a-3 之后、1b 之前）
 
 平台前端（Next.js 15，`src/frontend`）的因子实验室与智能体工作室两页**改造吞并**为单一「Hermes 工作台」页面（建议作为首页），四区：
 
 | 区 | 内容 | 数据源（大都现成） |
 |---|---|---|
 | ① 安全状态条 | safety 四开关 + gateway/OpenD/数据新鲜度 | `/api/health` + doctor |
-| ② 数字员工时间线 | digest、信号、告警、采集、回测完成——Hermes 全部工作过程/记录 | Hermes `logs/*.jsonl` + `review/entries.jsonl` + 平台 `/api/runs/recent`（需新增一个只读聚合端点） |
-| ③ 待办审批队列 | 待 approve 因子候选（含源码 diff 预览）+ 待补判断字段的复盘 draft | `/api/agent/candidates?status=pending` + 0b 复盘库 —— **吞并智能体工作室（Gate2 审批 UI）** |
-| ④ 产出货架 | 回测报告、期权 radar 摘要、周复盘归档 | 现有 runs/reports 端点 |
+| ② 数字员工时间线 | digest、信号、告警、采集、回测完成——Hermes 全部工作过程/记录 | Hermes `logs/*.jsonl` + `review/entries.jsonl` + 平台 `/api/runs/recent`（需新增一个只读聚合端点 `/api/hermes/timeline`，读取路径可配置、只读） |
+| ③ 待办审批队列 | 待 approve 因子候选（含源码 diff 预览）+ 待转正因子（D-20，链接到 diff）+ 待补判断字段的复盘 draft | `/api/agent/candidates?status=pending` + 0b 复盘库 —— **吞并智能体工作室（Gate2 审批 UI：候选池列表/源码纯文本预览/审计时间线/批准对话框全部复用现有组件）** |
+| ④ 产出货架 | 回测报告（含试验计数标注，D-21）、期权 radar 摘要、周复盘归档、sleeve 状态卡 | 现有 runs/reports/sleeves 端点 |
 
-因子实验室的 IC/分位数图降级为 run 详情页（从时间线点入），不占一级导航。此页同时是 Phase 2 满月运营面板底座（phase_15 P3 届时并入时间线）。**安全前置**：平台 API 零鉴权，工作台仅限 localhost；一旦需要远程点 approve，1b 鉴权必须先行。进入实现前单独走 brainstorming→plan 流程。
+改造要点（2026-07-03 核验补充）：
+
+- **agent-studio 有两块 D-19 之后的僵尸 UI 需在吞并时清除**：页面顶部 LLM provider/model/API-key 状态徽章（平台已去 LLM 化，展示 stub 只会误导）；`AgentTaskForm` 中调 `POST /api/agent/tasks` 的「运行 agent 任务」表单（已被 `--source-file` 流程取代）。审批对话框（approve 仅写 `approved.lock`）是要保留的核心。
+- **factor-lab 页面本体只有 73 行薄壳**，真正有价值的是 `FactorLabDashboard` 组件（IC/分位数图）——按原案降级为 run 详情页（从时间线点入），组件保留，路由从一级导航摘除。
+- **导航同步收敛**：`Sidebar.tsx` 摘除 factor-lab、agent-studio 两项；现有 464 行 Dashboard 首页与工作台合并（它已拉取 factors/paper runs/candidates/recent runs，正是工作台骨架）。
+- 此页同时是 Phase 2 满月运营面板底座（phase_15 P3 届时并入时间线）。
+
+**安全前置**：平台 API 零鉴权（`apiClient.ts` 指向 `127.0.0.1:8765`），工作台仅限 localhost；一旦需要远程点 approve，1b 鉴权必须先行。进入实现前单独走 brainstorming→plan 流程。
 
 ---
 
@@ -284,8 +305,9 @@ Phase 3 不是「把模拟改成 real」，是从零设计的实盘执行系统�
    - `2026-07-01-phase-0b-observability-governance.md`
    - `2026-07-02-phase-1a-0-platform-wiring.md`（D-13 追加；任务主体在 ai-quant-platform 仓库）
    - `2026-07-01-phase-1a-1-core-digital-employees.md`（已按 D-14/D-15 修订：futu 默认、扫描产物信号语义、collect 模式）
-   - `2026-07-01-phase-1a-2-advanced-digital-employees.md`（已按 D-14 修订：openai 翻译、run-config 真数据回测、双人工 gate）
-   - Hermes 工作台（D-17，§2.6）：排在 1a-1 之后、1b 之前；进入实现前单独走 brainstorming→plan 流程产出独立计划（平台仓库 Next.js 前端 + 一个只读聚合端点）。
+   - `2026-07-01-phase-1a-2-advanced-digital-employees.md`（已按 D-19 修订：Hermes 会话生成源码、平台 `--source-file` 接缝、run-config 真数据回测；局部链路为 Gate1+Gate2，完整闭环三道门见 1a-3）
+   - `2026-07-03-phase-1a-3-close-the-loop.md`（D-20/D-21/D-22/D-23 闭环补全包；§2.6；任务横跨两仓库）
+   - Hermes 工作台（D-17，§2.7）：排在 1a-3 之后、1b 之前；进入实现前单独走 brainstorming→plan 流程产出独立计划（平台仓库 Next.js 前端 + 一个只读聚合端点）。
 3. 1b / 2 的 spec 即本文 §3 / §4；3 / 4 大纲即本文 §5 / §6。它们进入实现前各自再展开为独立计划。
 
 ## 投资与安全声明

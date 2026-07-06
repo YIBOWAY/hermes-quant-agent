@@ -126,6 +126,26 @@ def test_run_with_aihot_logs_titles_not_payload(tmp_path):
     assert "items" not in json.dumps(record)       # no raw payload persisted
 
 
+def test_run_with_aihot_error_marks_degraded_and_logs_error(tmp_path):
+    log_path = tmp_path / "d.jsonl"
+
+    def boom():
+        raise RuntimeError("aihot down")
+
+    text = pd.run(
+        run_doctor=lambda: (0, DOCTOR_SAMPLE),
+        run_scan=lambda: (0, SCAN_SAMPLE),
+        now_iso=lambda: "2026-07-01T00:00:00Z",
+        log_path=log_path,
+        run_aihot=boom,
+    )
+
+    assert "AI HOT: DEGRADED" in text
+    record = json.loads(log_path.read_text().splitlines()[0])
+    assert "aihot_error" in record
+    assert "aihot down" in record["aihot_error"]
+
+
 def test_build_digest_degraded_label_on_futu_empty_scan():
     from hqa.doctor_watchdog import parse_safety
 

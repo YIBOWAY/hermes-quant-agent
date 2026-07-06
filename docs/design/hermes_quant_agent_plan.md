@@ -1,6 +1,7 @@
 # Hermes 个性化量化交易 Agent 设计方案
 
 > 状态：修订草案（2026-07-01），已迁移到 `Hermes-quant-agent` 作为后续开发主目录。
+> **路线与阶段以 `docs/design/2026-07-01-roadmap-phases-0b-4.md` 的决策台账（D-1…D-24）为准**；本文为背景调研与总设计，个别章节（如 §10 分阶段计划的细节）可能已被台账取代。
 > 定位：用本机已安装的 Hermes 编排 `ai-quant-platform`，搭建一个以“数字员工 + 研究助手 + 人工审批交易助理”为核心的个人量化 agent。最终目标是 human-in-loop 半自动实盘，但实盘执行层必须独立设计、独立验收，不能靠打开旧开关实现。
 > 安全红线：在实盘执行层完成前，保持 `paper_trading` / `live_trading_enabled=false` / `kill_switch` / 人工审批门。任何策略、agent、cron、MCP 都不得绕过这些边界。
 
@@ -85,7 +86,7 @@
 
 - CLI：`doctor`、`config`、`data`、`factor`、`backtest`、`experiment`、`paper`、`agent`、`prediction-market`、`options`、`serve`
 - FastAPI：16 个 router，统一 `/api` 前缀
-- AI 评审池：`POST /agent/tasks` -> 候选池 pending -> `POST /agent/candidates/{id}/review` 人工 review，只写锁文件，不自动生效
+- AI 评审池：候选池 pending -> 人工 review -> 只写锁文件，不自动生效。D-19 之后 Scene-B 入口为 `agent propose-factor --source-file <path>`；平台侧 `POST /agent/tasks`/LLM 表单只作历史能力，不再作为 Hermes 因子生成主入口。
 - async backtest jobs + run metadata/index
 - persistent paper account + strategy sleeves + account-level kill switch
 - AI News 是只读 AI HOT 集成，不能连接交易链路
@@ -231,13 +232,13 @@ Longbridge + Futu/Moomoo live accounts
 
 流程（**半自动，human-in-loop**）：
 1. 用户把论文 PDF/链接/因子公式发进 Discord 或直接对 Hermes 说。
-2. Hermes 读懂因子定义 → 调用平台**已有的** AI 因子生成能力（`agent propose-factor` / `POST /agent/tasks`）把因子翻译成平台可跑的配置。
-3. **用户确认因子逻辑翻译无误**（关键人工 gate——防止 LLM 把公式理解偏，正是文章"过拟合/理解偏差"坑的对策）。
-4. Hermes 调 `quant-system backtest` / `factor run` 在真实美股数据上回测。
-5. 结果（夏普/回撤/IC 等）→ 评审池 pending + 推 Discord `#回测结果`。
-6. 用户人工决定是否 promote。
+2. Hermes 在会话内把论文翻译成因子定义与 Python 源码，先让用户确认公式和字段语义（Gate 1）。
+3. Hermes 将确认后的源码写入临时文件，调用平台 `agent propose-factor --source-file <path>`，只生成 `.candidate` 候选。
+4. 用户审候选源码并手动 approve（Gate 2），Hermes 再调用 `experiment run-config --provider tiingo --include-approved-candidates` 做一次性真实历史回测。
+5. 结果（夏普/回撤/IC/holdout/试验次数）→ 评审池 pending + 推 Discord `#回测结果`。
+6. 用户满意后调用 `agent promote-candidate` 生成正式代码 diff；人工 `git diff` + commit 是 Gate 3，之后才能进入 paper sleeve。
 
-关键优势：平台**已有** AI 因子生成 + 评审池 + 回测引擎三件套，Hermes 是"编排已有的复现流水线"，不是从零复现。
+关键优势：平台提供候选池、评审池、回测引擎和转正落代码机制；LLM 生成职责收归 Hermes，会话外的平台后端保持确定性接缝。
 
 验收标准：
 - 能把一个中等复杂度的论文因子跑通到回测出报告。
@@ -358,13 +359,15 @@ IBKR 和期货相关能力延后处理。只有当股票/期权链路稳定后�
 
 ## 11. 当前最小下一步
 
-推荐从 Phase 0a 开始：
+不要再从 Phase 0a 开始。Phase 0a/0b/1a-0/1a-1/1a-2 的路线已迁入
+`docs/design/2026-07-01-roadmap-phases-0b-4.md` 与对应 `docs/plans/*.md`。
 
-1. 在 `Hermes-quant-agent` 创建 `scripts/`、`logs/`、`docs/`。
-2. 写第一个只读 `doctor` watchdog。
-3. 写每日 digest 脚本，先只汇总本地平台状态和 AI News。
-4. 用 `hermes cron create --workdir /Users/sunyibo/programs/Hermes-quant-agent` 调度。
-5. 输出到本地日志，必要时再接 Discord。
+当前最小下一步是 **Phase 1a-3 close-the-loop**：
+
+1. 平台实现单一 factor registry factory、promoted factor package、`agent promote-candidate`、关键 CLI `--json`。
+2. HQA 改为 JSON-first 解析，增加 trial counter、默认 holdout、`--final` 与满月 gate。
+3. 完整链路以三道人工门验收：确认公式 → 审候选源码 → 审转正 diff。
+4. 完成后再进入 Hermes 工作台改造，而不是继续扩张平台独立 Phase 15。
 
 第一阶段的成功标准不是赚钱，而是：
 

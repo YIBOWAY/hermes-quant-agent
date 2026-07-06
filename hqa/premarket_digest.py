@@ -45,6 +45,7 @@ def build_digest(
     scan: dict[str, str],
     ts: str,
     headlines: Optional[list[dict]] = None,
+    aihot_error: Optional[str] = None,
     provider: str = "sample",
 ) -> str:
     safe = all(safety.get(k) == v for k, v in config.EXPECTED_SAFETY.items())
@@ -72,6 +73,8 @@ def build_digest(
         lines.append("Top AI headlines:")
         for h in headlines[:5]:
             lines.append(f"  - [{h.get('category', '?')}] {h.get('title', '?')} ({h.get('source', '?')})")
+    elif aihot_error:
+        lines.append(f"AI HOT: DEGRADED ({aihot_error})")
     lines.append("Scope: read-only research digest. No trading action taken.")
     return "\n".join(lines)
 
@@ -89,10 +92,12 @@ def run(
     safety = parse_safety(doctor_out)
     scan = parse_scan_summary(scan_out)
     headlines: list[dict] = []
+    aihot_error: Optional[str] = None
     if run_aihot is not None:
         try:
             headlines = aihot.parse_items(run_aihot())
-        except Exception:
+        except Exception as exc:
+            aihot_error = repr(exc)
             headlines = []
     ts = now_iso()
     runlog.append_jsonl(
@@ -105,10 +110,18 @@ def run(
             "safety": safety,
             "options": scan,
             "headlines": [h.get("title") for h in headlines],
+            "aihot_error": aihot_error,
         },
         log_path,
     )
-    return build_digest(safety, scan, ts, headlines=headlines or None, provider=provider)
+    return build_digest(
+        safety,
+        scan,
+        ts,
+        headlines=headlines or None,
+        aihot_error=aihot_error,
+        provider=provider,
+    )
 
 
 def main(argv: Optional[list[str]] = None) -> int:

@@ -34,6 +34,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     p_list = sub.add_parser("list")
     p_list.add_argument("--status", default=None)
+    p_list.add_argument("--since", default=None)
     p_list.add_argument("--review-dir", default=str(config.REVIEW_DIR))
 
     p_render = sub.add_parser("render")
@@ -52,6 +53,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     if args.cmd == "confirm":
+        if not any(e["id"] == args.id for e in reviewlog.list_entries(review_dir)):
+            print(f"not found: {args.id}")
+            return 1
+        missing = [
+            field for field in ("judgment", "basis", "result", "failure_point", "next_rule")
+            if not getattr(args, field).strip()
+        ]
+        if missing:
+            print(f"missing required human fields: {', '.join(missing)}")
+            return 2
         ok = reviewlog.confirm(
             args.id, review_dir,
             judgment=args.judgment, basis=args.basis, result=args.result,
@@ -65,7 +76,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     if args.cmd == "list":
-        for e in reviewlog.list_entries(review_dir, status=args.status):
+        for e in reviewlog.list_entries(review_dir, status=args.status, since=args.since):
             print(f"{e['id']}\t{e['status']}\t{e['kind']}\t{e.get('event', '')}")
         return 0
 

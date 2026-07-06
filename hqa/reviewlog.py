@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,15 +17,27 @@ def load_entries(review_dir: Path) -> list[dict[str, Any]]:
     path = _entries_path(review_dir)
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    by_id: dict[str, dict[str, Any]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        entry = json.loads(line)
+        by_id[entry["id"]] = entry
+    return list(by_id.values())
 
 
-def _write_entries(entries: list[dict[str, Any]], review_dir: Path) -> None:
+def _append_entry(entry: dict[str, Any], review_dir: Path) -> None:
     path = _entries_path(review_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        for entry in entries:
-            fh.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _parse_ts(value: str) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def new_draft(
@@ -60,7 +73,7 @@ def new_draft(
         "next_rule": "",
     }
     entries.append(record)
-    _write_entries(entries, review_dir)
+    _append_entry(record, review_dir)
     return entry_id
 
 
@@ -76,27 +89,37 @@ def confirm(
 ) -> bool:
     entries = load_entries(review_dir)
     found = False
+    confirmed: Optional[dict[str, Any]] = None
     for entry in entries:
         if entry["id"] == entry_id:
-            entry.update(
-                judgment=judgment,
-                basis=basis,
-                result=result,
-                failure_point=failure_point,
-                next_rule=next_rule,
-                status="confirmed",
+            confirmed = dict(entry)
+            confirmed.update(
+                judgment=judgment, basis=basis, result=result,
+                failure_point=failure_point, next_rule=next_rule, status="confirmed",
             )
             found = True
             break
-    if found:
-        _write_entries(entries, review_dir)
+    if found and confirmed is not None:
+        _append_entry(confirmed, review_dir)
     return found
 
 
-def list_entries(review_dir: Path, status: Optional[str] = None) -> list[dict[str, Any]]:
+def list_entries(
+    review_dir: Path,
+    status: Optional[str] = None,
+    since: Optional[str] = None,
+) -> list[dict[str, Any]]:
     entries = load_entries(review_dir)
     if status is not None:
         entries = [e for e in entries if e.get("status") == status]
+    if since is not None:
+        since_dt = _parse_ts(since)
+        if since_dt is not None:
+            entries = [
+                e for e in entries
+                if (entry_dt := _parse_ts(str(e.get("ts", "")))) is not None
+                and entry_dt >= since_dt
+            ]
     return entries
 
 

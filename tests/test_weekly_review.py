@@ -27,3 +27,28 @@ def test_run_reads_review_and_run_logs(tmp_path):
     assert "safety alerts: 1" in text
     assert "signals fired: 1" in text
     assert "missed NVDA" in text
+
+
+def test_run_defaults_to_last_7_days(tmp_path):
+    review_dir = tmp_path / "review"
+    reviewlog.new_draft("manual", "old review", {}, "manual", "2026-06-20T00:00:00Z", review_dir)
+    reviewlog.new_draft("manual", "recent review", {}, "manual", "2026-07-06T00:00:00Z", review_dir)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "doctor_watchdog.jsonl").write_text(
+        '{"job":"doctor-watchdog","alert":true,"ts":"2026-06-20T00:00:00Z"}\n'
+        '{"job":"doctor-watchdog","alert":true,"ts":"2026-07-06T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    (log_dir / "signal_watchdog.jsonl").write_text(
+        '{"job":"signal-watchdog","has_signal":true,"ts":"2026-06-20T00:00:00Z"}\n'
+        '{"job":"signal-watchdog","has_signal":true,"ts":"2026-07-06T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+
+    text = wr.run(review_dir=review_dir, log_dir=log_dir, now_iso=lambda: "2026-07-08T00:00:00Z")
+
+    assert "safety alerts: 1" in text
+    assert "signals fired: 1" in text
+    assert "recent review" in text
+    assert "old review" not in text

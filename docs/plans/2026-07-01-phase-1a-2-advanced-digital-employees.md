@@ -816,6 +816,6 @@ Rollback: `hermes cron delete hqa-options-radar` / `hermes cron delete hqa-aihot
 
 **2. Placeholder scan:** No TBD/TODO; all code + tests complete; `<CH_...>`, `<id>`, `<factor_id>`, `<confirmed goal string>` are human-supplied runbook values with explicit surrounding instructions, not code placeholders.
 
-**3. Type consistency:** Scene-B wrappers `run_propose_factor(goal, universe, llm)/run_agent_review/run_experiment_config -> tuple[int,str]` (Task 1) consumed in Task 3. `parse_candidate_id -> Optional[str]` / `parse_experiment_summary -> dict[str,str]` / `extract_best_run_metrics -> dict[str,float]` (Task 2) consumed in Task 3. `run_options_scan` (from 1a-1, futu default) reused in Task 4. `aihot.parse_items` (1a-1) reused in Task 5.
+**3. Type consistency:** Scene-B wrappers `run_propose_factor(goal, source_file, universe)/run_agent_review/run_experiment_config -> tuple[int,str]` (Task 1, D-19 source-file seam) consumed in Task 3. `parse_candidate_id -> Optional[str]` / `parse_experiment_summary -> dict[str,str]` / `extract_best_run_metrics -> dict[str,float]` (Task 2) consumed in Task 3. `run_options_scan` (from 1a-1, futu default) reused in Task 4. `aihot.parse_items` (1a-1) reused in Task 5.
 
 **4. Human-gate integrity:** Verified `approve` is a discrete human-only subcommand; `propose` prints a HUMAN GATE reminder; gate 1 (distillation confirm) is written into the runbook protocol; no chaining command exists (enforced by `test_no_auto_pipeline_subcommand`). Backtest output is labeled proposal-only and sourced from a real-data experiment.

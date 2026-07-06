@@ -1,6 +1,6 @@
 # Hermes 全阶段落地后 · 日常使用全景推演
 
-> **状态：推演笔记（2026-07-02），不代表最终形态，也不代表一定要实现成这样。**
+> **状态：推演笔记（2026-07-02 初稿，2026-07-03 按 D-16~D-24 修订），不代表最终形态，也不代表一定要实现成这样。**
 > 本文是对"如果所有阶段都按当前设计落地，用户日常会如何与 Hermes 量化 agent 协作"的一次想象实验。它不是 spec，不是承诺，不约束后续设计决策。它存在的意义是：让团队（目前就是你）在埋头实现具体模块时，有一个"这玩意儿最终是给人怎么用的"的直觉锚点。
 > 随着项目演进，本文可能与实际路线产生偏差——届时以 `docs/design/hermes_quant_agent_plan.md` 和 `docs/design/2026-07-01-roadmap-phases-0b-4.md` 为准。
 
@@ -31,13 +31,13 @@ Scope: read-only research digest. No trading action taken.
 
 你花 2 分钟扫一眼。NOMINAL，没有异常。AI 新闻看起来没有直接影响你的持仓的东西。你喝咖啡去了。
 
-**这背后发生了什么：** `hqa.premarket_digest` 在 cron 触发后，调用 `quant-system doctor` 检查安全基线，调用 `options daily-scan --provider futu` 获取前一日期权雷达扫描结果，调 AI HOT API 拉取精选头条，组装成结构化简报，推送到 Discord。全程 30 秒以内，零人工介入。
+**这背后发生了什么：** `hqa.premarket_digest` 在 cron 触发后，调用 `quant-system doctor` 检查安全基线，读取 23:00 collect 任务留下的 Futu 期权雷达 meta artifact，调 AI HOT API 拉取精选头条，组装成结构化简报，推送到 Discord。默认不现场重跑全量 Futu scan，因此可以快速完成；若 artifact 缺失或新闻源不可用，会明确标注 DEGRADED。
 
 ---
 
 ### 🕘 白天 — 你该干嘛干嘛
 
-信号看门狗在后台沉默运行。每 30 分钟一次：调 `options daily-scan --provider futu` 跑期权雷达、调 `factor refresh-lab --provider futu` 刷新因子数据，读扫描产物，算分布。
+信号看门狗在后台沉默运行。每 30 分钟一次：读取当天 collect 任务已经落盘的 `data/options_scans/<date>.jsonl`，调 `factor refresh-lab --provider futu` 刷新因子数据，读扫描产物，算分布。显式 `--scan` 只作为人工全链路诊断，不是 cron 默认路径。
 
 **没有信号的时候：** Discord 静默。什么都不推。但 JSONL 日志一直在写——每条记录的 `score_summary` 里存着当次扫描的 p50/p90/max 分布。
 
@@ -92,7 +92,10 @@ Hermes 读完论文，输出：
 你检查了平台数据字典，确认 `dollar_volume` 可用。回复"确认"。然后：
 
 ```bash
-python3 -m hqa.factor_repro_cli propose --goal "Amihud illiquidity weekly change × turnover decay..."
+# Hermes 会话内先把已确认的公式翻译成源码，并写入临时文件（Gate 1 后）
+python3 -m hqa.factor_repro_cli propose \
+  --goal "Amihud illiquidity weekly change × turnover decay..." \
+  --source-file /tmp/factor_src.py
 # → candidate_id=factor-amihud_liquidity-a1b2c3d4e5
 # → HUMAN GATE: inspect the generated candidate factor...
 
@@ -103,23 +106,39 @@ cat .../factor-amihud_liquidity-a1b2c3d4e5/factor.py.candidate
 python3 -m hqa.factor_repro_cli approve --candidate-id factor-amihud_liquidity-a1b2c3d4e5 \
   --note "Amihud 公式翻译确认无误，dollar_volume 字段已验证"
 
-# 真实数据回测（Tiingo EOD，不碰 sample 合成数据）
+# 1a-3 落地后：真实数据回测（Tiingo EOD；默认保留最近 183 天 holdout 不参与迭代——D-21）
 python3 -m hqa.factor_repro_cli backtest --factor-id amihud_liquidity_factor \
   --symbol SPY --symbol QQQ --start 2020-01-02 --end 2026-06-30
 ```
 
-几分钟后，回测完成：
+几分钟后，回测完成。以下 holdout 与 `--final` 约束是 1a-3 落地后的目标体验；当前已实现 CLI 只覆盖 `propose|approve|backtest` 的前两道门：
 
 ```
+HOLDOUT: last 183 days reserved; run --final ONCE before promotion (D-21)
 experiment_id=factor-repro-20260702T... best_run_id=run-001
 sharpe=1.18 total_return=0.42 max_drawdown=0.14
 report=/Users/.../reports/factor-repro-.../report.md
 Results are proposal-only; promotion to the review pool is a human decision.
 ```
 
-夏普 1.18，回撤 14%。还不错但不算惊艳。你把结果标记到评审池，决定再观察一下，同时和现有的 momentum 因子做个组合回测。
+夏普 1.18，回撤 14%。还不错但不算惊艳。你调整了一次参数重跑（trial 2）。如果你忍不住再调第三次，系统会打印 `OVERFIT WARNING: trial 3`——提醒你正在走"迭代到回测好看为止"的翻车老路。
 
-**关键：因子翻译有两道人工 gate，LLM 不能自己理解完就直接跑回测。这是防止"AI 把公式理解偏"的核心防线。**
+假设两周后你决定真的要用这个因子。此时走第三道门（D-20 转正）：
+
+```bash
+# 1a-3 落地后：转正前唯一一次全窗口回测（含 holdout 段）——holdout 明显衰减就回炉
+python3 -m hqa.factor_repro_cli backtest --factor-id amihud_liquidity_factor ... --final
+
+# Gate 3：生成正式代码 diff（绝不自动 commit），你在 git 层面做最后审查
+cd /Users/sunyibo/programs/ai-quant-platform
+./ai-quant/bin/quant-system agent promote-candidate --candidate-id factor-amihud_liquidity-a1b2c3d4e5
+git diff        # 审查 library/promoted/amihud_liquidity_factor.py + 测试脚手架
+git add -A && git commit -m "promote: amihud_liquidity_factor (Gate 3)"
+```
+
+commit 之后，因子成为平台一等公民：前端因子目录可见、回测可用、可以创建 strategy config 绑定它、开一个 strategy sleeve、分配一笔 sleeve cash——纸面模拟开始跑。跑满 30 天、通过 `hqa-gate check`，才有资格进入券商模拟的讨论。
+
+**关键：因子进入你资金链路（哪怕是纸面资金）之前有三道人工 gate——确认翻译、审候选代码、审转正 diff。LLM 不能自己理解完就直接跑回测，更不能绕过 git 审查进入常驻交易路径。这是防"AI 把公式理解偏"和防过拟合流水线的核心防线。**
 
 ---
 
@@ -250,8 +269,8 @@ python3 -m hqa.review_cli confirm <id> \
 | 盘中信号扫描 | 全自动，30min/次 | 只在触发时评估 |
 | AI 行业异动 | 全自动，2h/次 | 只在有高分条目时看到 |
 | 期权雷达摘要 | 全自动，每日 | 1 分钟扫读 |
-| 论文因子复现 | 半自动（双 gate） | 确认翻译 + approve |
-| 回测 | 自动化执行 | 设置参数 + 解读结果 |
+| 论文因子复现 | 半自动（三 gate：翻译确认/审码 approve/转正 diff） | 三次确认，合计约 10 分钟 |
+| 回测 | 自动化执行（默认 holdout 截断 + 试验计数告警） | 设置参数 + 解读结果 |
 | 周复盘 | 自动汇总 | 10 分钟补充判断 |
 | 错误/回撤复盘 | 自动起草骨架 | 人工填判断字段 |
 | 策略晋级验收 | 自动校验 | 人工决策 |
