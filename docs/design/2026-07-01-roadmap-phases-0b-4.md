@@ -4,7 +4,7 @@
 > 上游：`docs/design/hermes_quant_agent_plan.md`（总设计）。前置：Phase 0a 已交付（只读数字员工，见 `docs/plans/2026-07-01-phase-0a-readonly-digital-employee.md`）。
 > 本文定位：把 0a 之后的全部阶段一次性对齐方向。**分层规划**——近期阶段给完整 TDD 计划，中期给设计 spec，远期给方向大纲。
 > 安全红线（贯穿全程，继承总设计）：实盘执行层完成前，保持 `paper_trading` / `live_trading_enabled=false` / `kill_switch` / 人工审批门。任何策略、agent、cron、MCP 都不得绕过。
-> **单一事实源**：本文决策台账（D-1…D-24）是 Hermes-quant-agent 与 `ai-quant-platform` 的唯一活跃路线图；平台 Phase 15 只保留素材价值。
+> **单一事实源**：本文决策台账（D-1…D-27）是 Hermes-quant-agent 与 `ai-quant-platform` 的唯一活跃路线图；平台 Phase 15 只保留素材价值。
 
 ---
 
@@ -49,6 +49,9 @@
 | D-22 | （2026-07-03）**HQA↔平台契约升级为 `--json`**：HQA 消费的平台 CLI 命令（`agent propose-factor` / `agent review` / `experiment run-config` / `doctor`）增加 `--json` 单行 JSON 输出；HQA 侧 JSON 解析优先、既有正则兜底（当前 `factor_repro.py` 靠 `candidate_id=(\S+)` 正则抓 stdout，平台输出格式一变即静默断裂）。业务 MCP server 仍按 D-9 推迟到 1b——只有订单/审批类高风险能力才值得 MCP 的 schema+鉴权成本，研究链路 CLI+JSON 足够 |
 | D-23 | （2026-07-03）**注册表构建收敛单一工厂**：新增 `build_factor_registry(*, include_promoted=True, include_approved_candidates=False, candidates_dir=...)`，替换散落的 `build_default_factor_registry()` 调用点（已核验：`api/routes/factors.py:33`、`factors/lab.py:53`、`paper_strategy_signal_service.py:188`、`cli.py` run-config 分支）。`/factors` 目录可选返回已批准候选并带 `origin=builtin|promoted|candidate` 标记（修复断点：批准后的因子前端目录不可见）；转正因子经 `library/promoted/` 包进默认注册表（配合 D-20 修复断点：sleeve 无法使用新因子）。sleeve 信号服务硬编码 `include_approved_candidates=False` |
 | D-24 | （2026-07-03）**文档单一事实源，消除上下文污染**：本 roadmap + 决策台账为两仓库唯一活跃路线图（D-18 的执行细则）。平台 `docs/phases/phase_11~14*` 移入 `docs/archive/phases/`；`phase_15_iteration_roadmap.md` 顶部标注「迭代治理已被 HQA D-18 取代，本文仅存 P0-P5 素材价值」；两仓库 AGENTS.md/CLAUDE.md 各加一行互指（平台=领域后端，活跃路线图在 HQA）。动机即参考文章的教训：过时文档是 agent 会话的上下文污染源 |
+| D-25 | （2026-07-06）**交互延迟三件套 + artifact-first 原则**（横切项，不占 Phase 编号；根因来自 2026-07-05 Discord 网关日志实测：单回合问答 18s，多回合 agentic 任务 216-742s / 15-25 次 LLM 调用）：① **异步 ack+推送**——预计 >30s 的任务（回测、启动服务、全量扫描）不阻塞 Discord 对话；Hermes 先回「任务已启动 run_id=…」，完成后经 `hermes send --to discord` 推结果（平台 async backtest jobs + run metadata 零件已备）；② **HQA 技能卡**——把高频操作（doctor/期权链/扫描/信号/复盘）的精确命令模板+输出格式写成 Hermes skill，消灭探索式回合；配合 D-22 `--json` 消灭解析重试回合；③ **只读预授权**——平台只读命令（doctor、行情/期权/因子查询、日志读取）加入 Hermes 审批 allowlist，消灭「等人点按钮」死时间；写操作保留审批（与安全红线兼容）。**系统级原则：artifact-first**——数字员工持续把答案落成产物（D-15 的 collect 模式推广），会话回答优先读现成 artifact，缺失才现场跑。北极星从「回答更快」改为「开口之前答案已在」——request-driven → artifact-driven。另：Discord 经 127.0.0.1:7897 代理频繁断连（DNS 失败、300s 重试间隔），属环境问题需单独修 |
+| D-26 | （2026-07-06）**Phase 1a-4 研究员工扩容**（排 1a-3 之后、工作台之前；全 read-only、零审批复杂度）：① **公司/市场调研员工**——按需（Discord 指令）或事件驱动（财报日历、宏观数据日）触发，产出结构化调研简报（firecrawl/新闻源 + 平台数据）；② **市场推演员工 + 预测台账（prediction ledger）**——推演产出必须落结构化预测 `{标的/主题, 方向, 区间, 期限, 置信度, 证伪条件}`，到期自动对账评分（Brier 类），是 0b 复盘库的延伸——把「玄学推演」变成「可校准能力」，只在被证明靠谱的领域信它；③ **组合风险日报**——paper 账户敞口/集中度/相关性（将来无缝换真实账户数据）；④ **错过机会追踪**——「信号触发但未行动」自动记录并周度汇总入复盘。**agent 化研究的反过拟合护栏**：任何「主动多因子测试」都必须是预注册想法 + 固定 trial 预算（≤2）+ 晨报呈现完整证据（holdout、试验次数），晋级仍走三道人工门——agent 比人更会把回测迭代到好看为止，D-21 纪律对 agent 同样生效且更重要 |
+| D-27 | （2026-07-06）**1b 只读 probe 拆出提前**：真实账户组合分析只需要 Longbridge 只读接口（`account_status`/`positions`/`orders`），无副作用、无审批复杂度，不必等订单状态机+MCP server 整套 1b。作为独立小任务可在 1a-4 前后随时插入；变更类操作仍完整走 1b 的 MCP+鉴权+幂等+审计设计 |
 
 ---
 
@@ -149,7 +152,19 @@
 2. **Hermes 侧**：`factor_repro_cli` 接 `--json` 解析（正则兜底）；D-21 试验计数 + holdout 默认截断；`hqa-gate` 加满月必过项。
 3. **验收**：一篇论文从 Hermes 会话出发，经 Gate1（确认公式）→ Gate2（approve 代码）→ 回测报告 → Gate3（审 diff 转正）→ 前端可见 → 创建 sleeve 分配 cash 跑纸面模拟，全程零手写代码、三道人工门皆不可绕过；`hqa-factor-repro backtest` 同一 factor_id 第 3 次运行输出过拟合告警；holdout 段默认不参与迭代回测。
 
-### 2.7 Hermes 工作台（平台前端，D-17；排在 1a-3 之后、1b 之前）
+### 2.6b Phase 1a-4 — 研究员工扩容（D-26；排在 1a-3 之后、工作台之前）
+
+全 read-only / proposal-only，零审批复杂度，纯增量（价值/成本比最高的一批）：
+
+1. **公司/市场调研员工**：按需（Discord 指令）或事件驱动（财报日历、CPI/FOMC 宏观日、期权到期临近持仓标的）触发，产出结构化调研简报。
+2. **市场推演员工 + 预测台账**：推演核心判断落结构化预测（标的/方向/区间/期限/置信度/证伪条件），JSONL append-only（复盘库同款模式），到期自动对账评分；周复盘并入「预测对账」段。
+3. **组合风险日报**：paper 账户敞口/集中度/相关性/beta；D-27 只读 probe 落地后无缝切真实账户。
+4. **错过机会追踪**：信号触发未行动自动记录，周度汇总入复盘库。
+5. **（可选）夜间预注册因子批测**：预注册想法清单 + 每想法 ≤2 trial 预算 + 晨报完整证据呈现；晋级仍走三道门（D-26 反过拟合护栏）。
+
+进入实现前单独产出 `docs/plans/` 计划（brainstorming→plan 流程）。
+
+### 2.7 Hermes 工作台（平台前端，D-17；排在 1a-4 之后、1b 之前）
 
 平台前端（Next.js 15，`src/frontend`）的因子实验室与智能体工作室两页**改造吞并**为单一「Hermes 工作台」页面（建议作为首页），四区：
 
@@ -307,7 +322,9 @@ Phase 3 不是「把模拟改成 real」，是从零设计的实盘执行系统�
    - `2026-07-01-phase-1a-1-core-digital-employees.md`（已按 D-14/D-15 修订：futu 默认、扫描产物信号语义、collect 模式）
    - `2026-07-01-phase-1a-2-advanced-digital-employees.md`（已按 D-19 修订：Hermes 会话生成源码、平台 `--source-file` 接缝、run-config 真数据回测；局部链路为 Gate1+Gate2，完整闭环三道门见 1a-3）
    - `2026-07-03-phase-1a-3-close-the-loop.md`（D-20/D-21/D-22/D-23 闭环补全包；§2.6；任务横跨两仓库）
-   - Hermes 工作台（D-17，§2.7）：排在 1a-3 之后、1b 之前；进入实现前单独走 brainstorming→plan 流程产出独立计划（平台仓库 Next.js 前端 + 一个只读聚合端点）。
+   - `2026-07-06-interaction-latency-hermes-ux.md`（D-25 交互延迟三件套；横切项，与 1a-3 并行）
+   - Phase 1a-4 研究员工扩容（D-26，§2.6b）：1a-3 交付后单独走 brainstorming→plan 产出计划。
+   - Hermes 工作台（D-17，§2.7）：排在 1a-4 之后、1b 之前；进入实现前单独走 brainstorming→plan 流程产出独立计划（平台仓库 Next.js 前端 + 一个只读聚合端点）。
 3. 1b / 2 的 spec 即本文 §3 / §4；3 / 4 大纲即本文 §5 / §6。它们进入实现前各自再展开为独立计划。
 
 ## 投资与安全声明

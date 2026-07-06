@@ -322,7 +322,7 @@ Existing four criteria unchanged; a config passing today with no
   2026-07-03 neat-freak doc-source cleanup. Commit remains a human/project
   milestone decision, not an automated requirement of the cleanup;
   `docs/design/hermes_quant_agent_plan.md` header gains one line: 「路线与阶段以
-  `2026-07-01-roadmap-phases-0b-4.md` 决策台账（D-1…D-24）为准；本文为背景调研与
+  `2026-07-01-roadmap-phases-0b-4.md` 决策台账（D-1…D-27）为准；本文为背景调研与
   总设计，个别章节可能已被台账取代」.
 - [x] Step 2 (PLATFORM repo, per D-24): `git mv docs/phases/phase_11*.md
   docs/phases/phase_12*.md docs/phases/phase_13*.md docs/phases/phase14*.md

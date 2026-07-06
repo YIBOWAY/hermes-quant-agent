@@ -7,8 +7,10 @@ Rules for AI agents working in this repository.
 - `Hermes-quant-agent` is the active orchestration/COO layer for the local
   `/Users/sunyibo/programs/ai-quant-platform` backend.
 - The single active roadmap is
-  `docs/design/2026-07-01-roadmap-phases-0b-4.md`; the next build slice is
-  `docs/plans/2026-07-03-phase-1a-3-close-the-loop.md`.
+  `docs/design/2026-07-01-roadmap-phases-0b-4.md`; the next build slices are
+  `docs/plans/2026-07-03-phase-1a-3-close-the-loop.md` (close the loop) and
+  `docs/plans/2026-07-06-interaction-latency-hermes-ux.md` (D-25 latency
+  triple, cross-cutting).
 - Treat `ai-quant-platform/docs/phases/phase_15_iteration_roadmap.md` as
   reference material only. Do not use it as an independent product roadmap.
 

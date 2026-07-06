@@ -1,7 +1,7 @@
 # Hermes 个性化量化交易 Agent 设计方案
 
 > 状态：修订草案（2026-07-01），已迁移到 `Hermes-quant-agent` 作为后续开发主目录。
-> **路线与阶段以 `docs/design/2026-07-01-roadmap-phases-0b-4.md` 的决策台账（D-1…D-24）为准**；本文为背景调研与总设计，个别章节（如 §10 分阶段计划的细节）可能已被台账取代。
+> **路线与阶段以 `docs/design/2026-07-01-roadmap-phases-0b-4.md` 的决策台账（D-1…D-27）为准**；本文为背景调研与总设计，个别章节（如 §10 分阶段计划的细节）可能已被台账取代。
 > 定位：用本机已安装的 Hermes 编排 `ai-quant-platform`，搭建一个以“数字员工 + 研究助手 + 人工审批交易助理”为核心的个人量化 agent。最终目标是 human-in-loop 半自动实盘，但实盘执行层必须独立设计、独立验收，不能靠打开旧开关实现。
 > 安全红线：在实盘执行层完成前，保持 `paper_trading` / `live_trading_enabled=false` / `kill_switch` / 人工审批门。任何策略、agent、cron、MCP 都不得绕过这些边界。
 
