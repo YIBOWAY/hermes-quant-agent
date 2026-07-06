@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -31,6 +32,7 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
     assert names == [
         "hqa-aihot-alerts.sh",
         "hqa-doctor-watchdog.sh",
+        "hqa-notify.sh",
         "hqa-options-collect.sh",
         "hqa-options-radar.sh",
         "hqa-premarket-digest.sh",
@@ -42,9 +44,14 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
         assert not wrapper.is_symlink()            # physical file (symlink would be blocked)
         assert os.access(wrapper, os.X_OK)         # executable
         body = wrapper.read_text()
-        # Every wrapper launches a real program — either an hqa Python module
-        # (digest/watchdog) or the platform quant-system CLI (collect). No stubs.
-        assert "python3 -m hqa." in body or "quant-system" in body
+        # Every wrapper launches a real program — an hqa Python module
+        # (digest/watchdog), the platform quant-system CLI (collect/gate), or
+        # the hermes messaging CLI (notify). No stubs.
+        assert (
+            "python3 -m hqa." in body
+            or "quant-system" in body
+            or "hermes send" in body
+        )
 
 
 def test_wrappers_pass_hermes_escape_check(tmp_path):
@@ -54,6 +61,7 @@ def test_wrappers_pass_hermes_escape_check(tmp_path):
     for name in (
         "hqa-aihot-alerts.sh",
         "hqa-doctor-watchdog.sh",
+        "hqa-notify.sh",
         "hqa-options-collect.sh",
         "hqa-options-radar.sh",
         "hqa-premarket-digest.sh",
@@ -332,5 +340,136 @@ def test_skill_card_documents_json_status_honestly():
             assert "--json" not in cell, (
                 f"gate/platform template must not use unsupported --json: {ln!r}"
             )
+
+
+# --- D-25 async completion push wrapper -------------------------------------
+
+NOTIFY_SRC = REPO / "scripts" / "hermes" / "hqa-notify.sh"
+
+
+def _build_notify(tmp_path, repo_dir):
+    """Materialise hqa-notify.sh with __HQA_REPO_DIR__ pointed at a scratch repo
+    (so the fallback JSONL lands under tmp, never the real repo)."""
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    body = NOTIFY_SRC.read_text().replace("__HQA_REPO_DIR__", str(repo_dir))
+    notify = tmp_path / "hqa-notify.sh"
+    notify.write_text(body)
+    notify.chmod(0o755)
+    return notify
+
+
+def _run_notify(tmp_path, args, *, path):
+    """Run the notifier under a controlled PATH so we decide whether a `hermes`
+    binary is reachable. Returns the completed process."""
+    repo_dir = tmp_path / "repo"
+    notify = _build_notify(tmp_path, repo_dir)
+    env = dict(os.environ, PATH=path)
+    return subprocess.run(
+        ["bash", str(notify), *args],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def test_notify_fallback_writes_jsonl_when_hermes_absent(tmp_path):
+    # PATH without a `hermes` binary → local fallback: append one JSON line to
+    # logs/notify_fallback.jsonl under the repo dir AND echo the message.
+    result = _run_notify(
+        tmp_path,
+        ["#backtest", "run-x done: sharpe=1.18"],
+        path="/usr/bin:/bin",
+    )
+    assert result.returncode == 0, result.stderr
+    fallback = tmp_path / "repo" / "logs" / "notify_fallback.jsonl"
+    assert fallback.is_file(), "fallback JSONL not created"
+    lines = [ln for ln in fallback.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1, f"expected exactly one JSONL line, got {lines!r}"
+    record = json.loads(lines[0])
+    assert set(record) >= {"ts", "target", "message"}
+    assert record["target"] == "#backtest"
+    # Message carries the [HQA] prefix + a UTC timestamp before the body.
+    assert record["message"].startswith("[HQA] ")
+    assert "run-x done: sharpe=1.18" in record["message"]
+    assert re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", record["message"])
+    # The message is also echoed to stdout for the caller/log.
+    assert "run-x done: sharpe=1.18" in result.stdout
+    assert "[HQA] " in result.stdout
+
+
+def test_notify_fallback_appends_second_line(tmp_path):
+    # Two invocations append (never truncate) — the JSONL is a running log.
+    repo_dir = tmp_path / "repo"
+    notify = _build_notify(tmp_path, repo_dir)
+    env = dict(os.environ, PATH="/usr/bin:/bin")
+    for msg in ("first", "second"):
+        r = subprocess.run(
+            ["bash", str(notify), "#ch", msg],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        assert r.returncode == 0, r.stderr
+    fallback = repo_dir / "logs" / "notify_fallback.jsonl"
+    lines = [ln for ln in fallback.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 2
+    assert json.loads(lines[0])["message"].endswith("first")
+    assert json.loads(lines[1])["message"].endswith("second")
+
+
+def test_notify_delivers_via_hermes_when_available(tmp_path):
+    # PATH with a stub `hermes` that succeeds → deliver via `hermes send`, NO
+    # fallback JSONL. The stub records its argv so we assert the discord target
+    # and the [HQA]-prefixed message are forwarded.
+    stubdir = tmp_path / "stub"
+    stubdir.mkdir()
+    argv_log = tmp_path / "hermes_argv.txt"
+    stub = stubdir / "hermes"
+    stub.write_text(
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" > "{argv_log}"\n'
+        "exit 0\n"
+    )
+    stub.chmod(0o755)
+    result = _run_notify(
+        tmp_path,
+        ["#backtest", "done"],
+        path=f"{stubdir}:/usr/bin:/bin",
+    )
+    assert result.returncode == 0, result.stderr
+    fallback = tmp_path / "repo" / "logs" / "notify_fallback.jsonl"
+    assert not fallback.exists(), "must not fall back when hermes delivery succeeds"
+    forwarded = argv_log.read_text()
+    assert "send" in forwarded
+    assert "discord" in forwarded  # --to discord[:#channel]
+    assert "[HQA] " in forwarded
+
+
+def test_notify_falls_back_when_hermes_delivery_fails(tmp_path):
+    # PATH with a `hermes` that EXITS NONZERO (delivery/backend error) → the
+    # wrapper must still not lose the message: fall back to the JSONL log.
+    stubdir = tmp_path / "stub"
+    stubdir.mkdir()
+    stub = stubdir / "hermes"
+    stub.write_text("#!/bin/bash\nexit 1\n")
+    stub.chmod(0o755)
+    result = _run_notify(
+        tmp_path,
+        ["#backtest", "salvage-me"],
+        path=f"{stubdir}:/usr/bin:/bin",
+    )
+    assert result.returncode == 0, result.stderr
+    fallback = tmp_path / "repo" / "logs" / "notify_fallback.jsonl"
+    assert fallback.is_file(), "delivery failure must still persist to fallback"
+    assert "salvage-me" in fallback.read_text()
+
+
+def test_notify_source_uses_repo_placeholder_and_discord_target():
+    # Static guards: the source ships the install-time repo placeholder (so the
+    # fallback log resolves per-machine) and delivers to discord via hermes send.
+    body = NOTIFY_SRC.read_text(encoding="utf-8")
+    assert "__HQA_REPO_DIR__" in body
+    assert "logs/notify_fallback.jsonl" in body
+    assert "hermes send" in body
+    assert "discord" in body
 
 
