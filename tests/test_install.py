@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -209,4 +210,127 @@ def test_gate_source_declares_readonly_allowlist():
         '"agent list-candidates"',
     ):
         assert entry in body
+
+
+# --- D-25 HQA skill card ----------------------------------------------------
+
+SKILL_SRC = REPO / "skills" / "hermes" / "hqa-quant" / "SKILL.md"
+# The read-write CLIs the card documents; every `-m hqa.<mod>` template must
+# name one of these (guards against invented modules).
+_WRITE_PATH_MODULES = ("hqa.factor_repro_cli", "hqa.review_cli")
+# Platform read-only subcommands baked into the gate allowlist (Task L1). Any
+# gate template in the card must forward one of these — no invented commands.
+_READONLY_SUBCOMMANDS = (
+    "doctor",
+    "config show",
+    "factor list",
+    "options daily-scan",
+    "options buyside-screen",
+    "paper account-show",
+    "agent list-candidates",
+)
+
+
+def test_install_deploys_skill_card_with_substitution(tmp_path):
+    # install.sh must also deploy skills/hermes/<name>/SKILL.md to
+    # $HERMES_HOME/skills/<name>/SKILL.md with the repo/platform placeholders
+    # replaced (same seam as the script wrappers).
+    scripts_dest = _install(tmp_path)
+    skill = scripts_dest.parent / "skills" / "hqa-quant" / "SKILL.md"
+    assert skill.is_file(), "SKILL.md not deployed under $HERMES_HOME/skills/hqa-quant/"
+    body = skill.read_text(encoding="utf-8")
+    assert "__HQA_REPO_DIR__" not in body
+    assert "__HQA_PLATFORM_DIR__" not in body
+    # The gate wrapper is referenced by absolute deployed path, not placeholder.
+    assert str(scripts_dest / "hqa-quant-readonly.sh") in body
+
+
+def test_skill_card_frontmatter_mirrors_hermes_contract():
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    assert body.startswith("---\n"), "SKILL.md must open with YAML frontmatter"
+    front = body.split("---", 2)[1]
+    assert re.search(r"^name:\s*hqa-quant\s*$", front, re.M)
+    assert re.search(r"^description:\s*\S", front, re.M)
+    assert re.search(r"^version:\s*1\.0\.0\s*$", front, re.M)
+    # platforms must be a list containing macos.
+    assert re.search(r"^platforms:\s*\[.*macos.*\]\s*$", front, re.M)
+    # metadata.hermes.tags present with the quant/trading/hqa tags.
+    assert re.search(r"^\s*hermes:\s*$", front, re.M)
+    assert re.search(r"tags:\s*\[.*\bhqa\b.*\]", front)
+
+
+def test_skill_card_readonly_templates_use_gate_wrapper():
+    # Every read-only command template must go through the single-command gate
+    # wrapper (absolute path), never bare `quant-system` and never a compound
+    # command (&&/|/;) that would bypass the Hermes allowlist shortcut.
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    gate = "hqa-quant-readonly.sh"
+    gate_lines = [ln for ln in body.splitlines() if gate in ln and ln.lstrip().startswith(("`", "|", "python3", "/", "bash", "$HERMES", "~/"))]
+    assert gate_lines, "no gate-wrapper command templates found in the card"
+    for ln in gate_lines:
+        # Extract the command text following the wrapper name, stripping the
+        # markdown code-span backticks and any trailing table cell.
+        after = ln.split(gate, 1)[1]
+        cmd = after.split("|")[0].replace("`", "").strip()
+        assert cmd, f"empty gate subcommand in: {ln!r}"
+        first_two = " ".join(cmd.split()[:2])
+        first_one = cmd.split()[0]
+        assert (
+            cmd in _READONLY_SUBCOMMANDS
+            or first_two in _READONLY_SUBCOMMANDS
+            or first_one in _READONLY_SUBCOMMANDS
+        ), f"gate template forwards a non-allowlisted subcommand: {cmd!r}"
+
+
+def test_skill_card_has_no_compound_operators_on_gate_lines():
+    # Hermes command_allowlist glob matching is bypassed by &&/|/;/$( — the card
+    # must teach single-command wrapper invocations only (plan line 20).
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    for ln in body.splitlines():
+        if "hqa-quant-readonly.sh" in ln and "```" not in ln:
+            # A shell pipe inside a markdown table cell is fine ONLY as the table
+            # delimiter; disallow actual shell compounding of the wrapper call.
+            payload = ln.split("hqa-quant-readonly.sh", 1)[1]
+            # Table cell ends at ` | `; inspect only the command up to that.
+            cell = payload.split("|")[0]
+            assert "&&" not in cell, f"compound && breaks allowlist: {ln!r}"
+            assert ";" not in cell, f"compound ; breaks allowlist: {ln!r}"
+            assert "$(" not in cell, f"cmd-subst breaks allowlist: {ln!r}"
+
+
+def test_skill_card_write_templates_name_real_modules():
+    # Read-write op templates must invoke real hqa modules via `python3 -m`.
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    module_hits = re.findall(r"python3 -m (hqa\.[\w_]+)", body)
+    assert module_hits, "no `python3 -m hqa.<mod>` write templates found"
+    for mod in module_hits:
+        assert mod in _WRITE_PATH_MODULES, f"unknown/invented module: {mod}"
+
+
+def test_skill_card_covers_required_sections():
+    body = SKILL_SRC.read_text(encoding="utf-8").lower()
+    # (2) artifact-first — real log + scan paths.
+    assert "logs/" in body
+    assert "options_scans" in body
+    # (3) 30s triage — background + run-id + notify push.
+    assert "30" in body and "hqa-notify.sh" in body
+    # (4) safety redlines — approval + kill_switch/paper_trading not bypassed.
+    assert "approval" in body
+    assert "kill_switch" in body or "kill switch" in body
+    assert "paper_trading" in body or "paper trading" in body
+
+
+def test_skill_card_documents_json_status_honestly():
+    # The platform CLI does NOT yet accept --json (verified: `doctor --json`
+    # exits 2 "No such option"); D-22 JSON-first parsing lives in the hqa
+    # write-path wrappers. The card must not attach --json to a gate (platform)
+    # template, or it would teach Hermes an invented flag.
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    for ln in body.splitlines():
+        if "hqa-quant-readonly.sh" in ln:
+            cell = ln.split("hqa-quant-readonly.sh", 1)[1].split("|")[0]
+            assert "--json" not in cell, (
+                f"gate/platform template must not use unsupported --json: {ln!r}"
+            )
+
 
