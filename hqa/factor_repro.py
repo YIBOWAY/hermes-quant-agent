@@ -34,7 +34,13 @@ def parse_candidate_id(output: str) -> Optional[str]:
 def parse_experiment_summary(output: str) -> dict[str, str]:
     payload = parse_json_payload(output)
     if payload is not None and "experiment_id" in payload:
-        return {key: str(value) for key, value in payload.items()}
+        # Drop null values instead of stringifying them: a JSON null best_run_id
+        # would otherwise become the string "None", defeating the CLI's
+        # summary.get("best_run_id", "?") fallback (F7). The regex path below
+        # never emits a null, so absence keeps both paths consistent.
+        return {
+            key: str(value) for key, value in payload.items() if value is not None
+        }
     for line in output.splitlines():
         if "experiment_id=" in line:
             return {

@@ -86,6 +86,24 @@ def test_parse_experiment_summary_from_json():
     assert summary["agent_summary"] == "/y/agent_summary.json"
 
 
+def test_parse_experiment_summary_json_null_field_is_dropped():
+    # A JSON null (e.g. best_run_id when no run beat the baseline) must not
+    # stringify to "None" — the CLI does summary.get("best_run_id", "?") and
+    # expects an absent key to fall through to "?", matching the regex path
+    # which never emits a null value (review finding F7).
+    payload = {
+        "experiment_id": "factor-repro-null-20260707T000000Z",
+        "best_run_id": None,
+        "agent_summary": "/z/agent_summary.json",
+    }
+    output = json.dumps(payload)
+    summary = fr.parse_experiment_summary(output)
+    assert "best_run_id" not in summary
+    assert summary.get("best_run_id", "?") == "?"
+    assert summary["experiment_id"] == "factor-repro-null-20260707T000000Z"
+    assert summary["agent_summary"] == "/z/agent_summary.json"
+
+
 def test_parse_experiment_summary_legacy_fallback_still_works():
     summary = fr.parse_experiment_summary(SUMMARY_OUT)
     assert summary["experiment_id"] == "factor-repro-20260702T000000Z"
