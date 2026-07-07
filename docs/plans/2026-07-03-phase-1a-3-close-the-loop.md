@@ -40,7 +40,10 @@ sees promoted, code-reviewed, registered factors.
   (examples + promoted) registry. No exec of candidate text in any resident
   process.
 - **D-14 unchanged:** real backtests stay `--provider tiingo`; `sample`/`stub`
-  remain unit-test-only.
+  remain unit-test-only. *(Erratum 2026-07-07: tiingo was never configured —
+  `tiingo_api_token: null`, `default_data_provider: futu`. Real backtests in
+  practice run `--provider futu`. 1a-4 formalizes futu-primary + longbridge
+  fallback; see D-26 spec §2.)*
 - **HQA Python 3.9 compat:** every HQA module starts with
   `from __future__ import annotations`; stdlib only.
 - **Baselines before this phase:** HQA `77 passed, 1 skipped` (after 1a-2);
