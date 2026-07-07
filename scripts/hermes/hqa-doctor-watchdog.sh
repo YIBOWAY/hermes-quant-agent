@@ -4,5 +4,6 @@
 # into the repo and exec's the version-controlled Python module.
 # The repo-dir placeholder is replaced by install.sh at deploy time.
 set -euo pipefail
+unset PYTHONPATH PYTHONHOME
 cd __HQA_REPO_DIR__
 exec /usr/bin/env python3 -m hqa.doctor_watchdog "$@"

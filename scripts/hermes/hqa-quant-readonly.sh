@@ -14,6 +14,7 @@
 # are deliberately EXCLUDED — those keep human approval. Two-word entries match
 # the first two args (Typer subcommand groups); "doctor" is a single word.
 set -euo pipefail
+unset PYTHONPATH PYTHONHOME
 
 PLATFORM_DIR="__HQA_PLATFORM_DIR__"
 
