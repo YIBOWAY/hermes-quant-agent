@@ -10,9 +10,14 @@
 #
 # Allowlist provenance: every entry below was confirmed side-effect-free via
 # `quant-system <cmd> --help`. Commands that refresh inputs, delete caches,
-# download data, run loops, start servers, or write candidate/approval files
-# are deliberately EXCLUDED — those keep human approval. Two-word entries match
-# the first two args (Typer subcommand groups); "doctor" is a single word.
+# download data, run loops, start servers, write scan snapshots, or write
+# candidate/approval files are deliberately EXCLUDED — those keep human
+# approval. Two-word entries match the first two args (Typer subcommand groups);
+# "doctor" is a single word.
+#
+# Audit F4 / D-25 purity: `options daily-scan` and `options buyside-screen` were
+# removed — they write under data/options_scans/ and burn Futu quota. Full scans
+# stay behind approval (or the dedicated collect cron wrapper).
 set -euo pipefail
 unset PYTHONPATH PYTHONHOME
 
@@ -21,9 +26,8 @@ PLATFORM_DIR="__HQA_PLATFORM_DIR__"
 READONLY_ALLOWLIST=(
   "doctor"
   "config show"
+  "data prices"
   "factor list"
-  "options daily-scan"
-  "options buyside-screen"
   "paper account-show"
   "agent list-candidates"
 )

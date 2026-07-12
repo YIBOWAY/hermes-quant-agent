@@ -51,7 +51,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_backtest.add_argument("--symbol", action="append", required=True, dest="symbols")
     p_backtest.add_argument("--start", required=True)
     p_backtest.add_argument("--end", required=True)
-    p_backtest.add_argument("--provider", default="tiingo")
+    p_backtest.add_argument(
+        "--provider",
+        default=config.DEFAULT_DATA_PROVIDER,
+        help="data provider (default: futu — only configured live source; tiingo is opt-in when token is set)",
+    )
     p_backtest.add_argument("--config-out", default=None)
     p_backtest.add_argument(
         "--final",

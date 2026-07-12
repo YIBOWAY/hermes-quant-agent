@@ -11,7 +11,15 @@ def utc_now_iso() -> str:
 
 
 def append_jsonl(record: dict[str, Any], path: Path) -> None:
+    line = json.dumps(
+        record,
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+    )
+    # Validate encoding before opening the append-only artifact. Otherwise a
+    # lone surrogate can leave behind a misleading zero-byte file.
+    (line + "\n").encode("utf-8", errors="strict")
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(record, ensure_ascii=False, sort_keys=True)
     with path.open("a", encoding="utf-8") as fh:
         fh.write(line + "\n")

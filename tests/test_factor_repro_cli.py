@@ -59,7 +59,7 @@ def test_backtest_builds_config_runs_experiment_and_prints_metrics(monkeypatch, 
     )
     seen = {}
 
-    def fake_run_experiment_config(config_path, provider="tiingo", include_approved=True):
+    def fake_run_experiment_config(config_path, provider="futu", include_approved=True):
         seen.update(config_path=config_path, provider=provider, include_approved=include_approved)
         return (
             0,
@@ -91,13 +91,14 @@ def test_backtest_builds_config_runs_experiment_and_prints_metrics(monkeypatch, 
     written = json.loads(config_out.read_text(encoding="utf-8"))
     assert written["factor_blend"]["factors"] == [{"factor_id": "wiring_test_factor"}]
     assert written["symbols"] == ["SPY", "QQQ"]
-    assert seen == {"config_path": str(config_out), "provider": "tiingo", "include_approved": True}
+    # PR-2: default provider is futu (tiingo is explicit opt-in).
+    assert seen == {"config_path": str(config_out), "provider": "futu", "include_approved": True}
     out = capsys.readouterr().out
     assert "sharpe=1.42" in out
     assert "proposal-only" in out.lower()
 
 
-def _fake_experiment_no_summary(config_path, provider="tiingo", include_approved=True):
+def _fake_experiment_no_summary(config_path, provider="futu", include_approved=True):
     return (0, "experiment_id=e-1 best_run_id=run-001 report=/x/report.md")
 
 

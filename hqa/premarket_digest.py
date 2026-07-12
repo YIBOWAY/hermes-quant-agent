@@ -47,6 +47,8 @@ def build_digest(
     headlines: Optional[list[dict]] = None,
     aihot_error: Optional[str] = None,
     provider: str = "sample",
+    run_date: Optional[str] = None,
+    artifact_missing: bool = False,
 ) -> str:
     safe = all(safety.get(k) == v for k, v in config.EXPECTED_SAFETY.items())
     safety_state = "NOMINAL" if safe else "DEVIATION — CHECK WATCHDOG LOG"
@@ -65,9 +67,13 @@ def build_digest(
             f"failed={scan.get('failed', '?')}, candidates={scan.get('candidates', '?')}"
         )
     else:
-        note = "summary unavailable (no summary line in scan output)"
-        if provider != "sample":
-            note += " — DEGRADED: is OpenD running?"
+        date_hint = run_date or "?"
+        if artifact_missing:
+            note = f"DEGRADED: no scan artifact for {date_hint}"
+        else:
+            note = "summary unavailable (no summary line in scan output)"
+            if provider != "sample":
+                note += " — DEGRADED: is OpenD running?"
         lines.append(f"Options radar ({provider}): {note}")
     if headlines:
         lines.append("Top AI headlines:")
@@ -86,11 +92,15 @@ def run(
     log_path: Path,
     run_aihot: Optional[Callable[[], str]] = None,
     provider: str = "sample",
+    run_date: Optional[str] = None,
+    artifact_missing: bool = False,
 ) -> str:
     doctor_exit, doctor_out = run_doctor()
     scan_exit, scan_out = run_scan()
     safety = parse_safety(doctor_out)
     scan = parse_scan_summary(scan_out)
+    # Empty scan_out in artifact mode means the collect meta file was missing.
+    missing = artifact_missing or (not scan and not (scan_out or "").strip())
     headlines: list[dict] = []
     aihot_error: Optional[str] = None
     if run_aihot is not None:
@@ -109,6 +119,8 @@ def run(
             "provider": provider,
             "safety": safety,
             "options": scan,
+            "run_date": run_date,
+            "artifact_missing": missing and not scan,
             "headlines": [h.get("title") for h in headlines],
             "aihot_error": aihot_error,
         },
@@ -121,6 +133,8 @@ def run(
         headlines=headlines or None,
         aihot_error=aihot_error,
         provider=provider,
+        run_date=run_date,
+        artifact_missing=missing and not scan,
     )
 
 
@@ -134,10 +148,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
     log_path = Path(args.log)
     run_date = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    artifact_missing = False
     if args.scan:
         run_scan = lambda: quant_cli.run_options_scan(args.provider)  # noqa: E731
     else:
-        run_scan = lambda: (0, meta_as_summary(Path(args.scan_dir), run_date))  # noqa: E731
+        meta_line = meta_as_summary(Path(args.scan_dir), run_date)
+        artifact_missing = not meta_line
+        run_scan = lambda: (0, meta_line)  # noqa: E731
     try:
         digest = run(
             quant_cli.run_doctor,
@@ -146,6 +163,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             log_path,
             run_aihot=aihot.fetch_items,
             provider=args.provider,
+            run_date=run_date,
+            artifact_missing=artifact_missing,
         )
     except Exception as exc:  # unattended job: report failure line, never crash the scheduler
         ts = runlog.utc_now_iso()

@@ -31,26 +31,29 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
     names = sorted(p.name for p in dest.glob("hqa-*.sh"))
     assert names == [
         "hqa-aihot-alerts.sh",
+        "hqa-artifacts.sh",
         "hqa-doctor-watchdog.sh",
+        "hqa-market-foresight.sh",
         "hqa-notify.sh",
+        "hqa-opportunities.sh",
         "hqa-options-collect.sh",
         "hqa-options-radar.sh",
+        "hqa-portfolio-risk.sh",
+        "hqa-prediction.sh",
         "hqa-premarket-digest.sh",
         "hqa-quant-readonly.sh",
         "hqa-signal-watchdog.sh",
         "hqa-weekly-review.sh",
     ]
     for wrapper in dest.glob("hqa-*.sh"):
-        assert not wrapper.is_symlink()            # physical file (symlink would be blocked)
-        assert os.access(wrapper, os.X_OK)         # executable
+        assert not wrapper.is_symlink()  # physical file (symlink would be blocked)
+        assert os.access(wrapper, os.X_OK)  # executable
         body = wrapper.read_text()
         # Every wrapper launches a real program — an hqa Python module
         # (digest/watchdog), the platform quant-system CLI (collect/gate), or
         # the hermes messaging CLI (notify). No stubs.
         assert (
-            "python3 -m hqa." in body
-            or "quant-system" in body
-            or "hermes send" in body
+            "python3 -m hqa." in body or "quant-system" in body or "hermes send" in body
         )
 
 
@@ -60,10 +63,15 @@ def test_wrappers_pass_hermes_escape_check(tmp_path):
     scripts_dir_resolved = dest.resolve()
     for name in (
         "hqa-aihot-alerts.sh",
+        "hqa-artifacts.sh",
         "hqa-doctor-watchdog.sh",
+        "hqa-market-foresight.sh",
         "hqa-notify.sh",
         "hqa-options-collect.sh",
+        "hqa-opportunities.sh",
         "hqa-options-radar.sh",
+        "hqa-portfolio-risk.sh",
+        "hqa-prediction.sh",
         "hqa-premarket-digest.sh",
         "hqa-quant-readonly.sh",
         "hqa-signal-watchdog.sh",
@@ -108,8 +116,13 @@ def test_deployed_wrappers_have_no_unsubstituted_placeholders(tmp_path):
 def test_python_wrappers_use_install_time_repo_placeholder():
     for name in (
         "hqa-aihot-alerts.sh",
+        "hqa-artifacts.sh",
         "hqa-doctor-watchdog.sh",
+        "hqa-market-foresight.sh",
+        "hqa-opportunities.sh",
         "hqa-options-radar.sh",
+        "hqa-portfolio-risk.sh",
+        "hqa-prediction.sh",
         "hqa-premarket-digest.sh",
         "hqa-signal-watchdog.sh",
         "hqa-weekly-review.sh",
@@ -160,12 +173,24 @@ def _run_gate(tmp_path, args):
         (["config", "show"], "ARGV|config|show"),
         (["factor", "list"], "ARGV|factor|list"),
         (
-            ["options", "daily-scan", "--top", "20"],
-            "ARGV|options|daily-scan|--top|20",
+            [
+                "data",
+                "prices",
+                "--symbol",
+                "AAPL",
+                "--start",
+                "2026-01-01",
+                "--end",
+                "2026-07-10",
+                "--provider",
+                "futu",
+            ],
+            "ARGV|data|prices|--symbol|AAPL|--start|2026-01-01|--end|2026-07-10|--provider|futu",
         ),
-        (["options", "buyside-screen"], "ARGV|options|buyside-screen"),
-        (["paper", "account-show", "--account", "main"],
-         "ARGV|paper|account-show|--account|main"),
+        (
+            ["paper", "account-show", "--account", "main", "--format", "json"],
+            "ARGV|paper|account-show|--account|main|--format|json",
+        ),
         (["agent", "list-candidates"], "ARGV|agent|list-candidates"),
     ],
 )
@@ -179,19 +204,23 @@ def test_gate_allows_readonly_commands(tmp_path, args, expected_argv):
 @pytest.mark.parametrize(
     "args",
     [
-        [],                              # empty → refused
-        ["paper", "rebalance"],          # write: mutates account
-        ["paper", "run-sample"],         # write: runs a loop
+        [],  # empty → refused
+        ["paper", "rebalance"],  # write: mutates account
+        ["paper", "run-sample"],  # write: runs a loop
         ["agent", "review", "--approve"],  # write: approval lock
-        ["agent", "propose-factor"],     # write: creates candidate file
-        ["options", "daily-task"],       # refreshes inputs (side effect)
+        ["agent", "propose-factor"],  # write: creates candidate file
+        ["options", "daily-scan"],  # write: scan snapshot (audit F4)
+        ["options", "daily-scan", "--top", "20"],
+        ["options", "buyside-screen"],  # write: scan side-effect
+        ["options", "daily-task"],  # refreshes inputs (side effect)
         ["options", "prune-cache", "--delete"],  # deletes cache
-        ["data", "ingest-tiingo"],       # write: downloads + stores
-        ["backtest", "run-sample"],      # compute/write
-        ["config"],                      # bare group, not the `config show` leaf
-        ["options"],                     # bare group
-        ["doctor; rm -rf /"],            # injection as single token, no match
-        ["serve"],                       # starts a server
+        ["data", "ingest-tiingo"],  # write: downloads + stores
+        ["data", "ingest-sample"],  # write: generates + stores
+        ["backtest", "run-sample"],  # compute/write
+        ["config"],  # bare group, not the `config show` leaf
+        ["options"],  # bare group
+        ["doctor; rm -rf /"],  # injection as single token, no match
+        ["serve"],  # starts a server
         ["totally-unknown"],
     ],
 )
@@ -207,17 +236,19 @@ def test_gate_source_declares_readonly_allowlist():
     # Lock the verified read-only set into the script source. Every entry was
     # confirmed side-effect-free via `quant-system <cmd> --help`; adding a
     # write command here should require an explicit, reviewed change.
+    # Audit F4: options daily-scan / buyside-screen must NOT be allowlisted.
     body = READONLY_SRC.read_text()
     for entry in (
         '"doctor"',
         '"config show"',
+        '"data prices"',
         '"factor list"',
-        '"options daily-scan"',
-        '"options buyside-screen"',
         '"paper account-show"',
         '"agent list-candidates"',
     ):
         assert entry in body
+    assert '"options daily-scan"' not in body
+    assert '"options buyside-screen"' not in body
 
 
 # --- D-25 HQA skill card ----------------------------------------------------
@@ -231,9 +262,8 @@ _WRITE_PATH_MODULES = ("hqa.factor_repro_cli", "hqa.review_cli")
 _READONLY_SUBCOMMANDS = (
     "doctor",
     "config show",
+    "data prices",
     "factor list",
-    "options daily-scan",
-    "options buyside-screen",
     "paper account-show",
     "agent list-candidates",
 )
@@ -251,6 +281,9 @@ def test_install_deploys_skill_card_with_substitution(tmp_path):
     assert "__HQA_PLATFORM_DIR__" not in body
     # The gate wrapper is referenced by absolute deployed path, not placeholder.
     assert str(scripts_dest / "hqa-quant-readonly.sh") in body
+    assert str(scripts_dest / "hqa-portfolio-risk.sh") in body
+    assert str(scripts_dest / "hqa-prediction.sh") in body
+    assert str(scripts_dest / "hqa-opportunities.sh") in body
 
 
 def test_skill_card_frontmatter_mirrors_hermes_contract():
@@ -259,12 +292,74 @@ def test_skill_card_frontmatter_mirrors_hermes_contract():
     front = body.split("---", 2)[1]
     assert re.search(r"^name:\s*hqa-quant\s*$", front, re.M)
     assert re.search(r"^description:\s*\S", front, re.M)
-    assert re.search(r"^version:\s*1\.0\.0\s*$", front, re.M)
+    assert re.search(r"^version:\s*1\.\d+\.\d+\s*$", front, re.M)
     # platforms must be a list containing macos.
     assert re.search(r"^platforms:\s*\[.*macos.*\]\s*$", front, re.M)
     # metadata.hermes.tags present with the quant/trading/hqa tags.
     assert re.search(r"^\s*hermes:\s*$", front, re.M)
     assert re.search(r"tags:\s*\[.*\bhqa\b.*\]", front)
+
+
+def test_skill_card_uses_unified_paper_snapshot_json_contract():
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    assert "paper account-show --account default --format json" in body
+
+
+def test_skill_card_documents_strict_portfolio_risk_v2() -> None:
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    lower = body.lower()
+
+    assert "version: 1.7.0" in body
+    assert "__HERMES_SCRIPTS_DIR__/hqa-portfolio-risk.sh" in body
+    assert "logs/portfolio_risk.jsonl" in body
+    assert "current snapshot" in lower
+    assert "correlation" in lower and "beta" in lower
+    assert "data prices" in lower
+    assert "qfq" in lower
+    assert "60" in lower and "inner join" in lower
+    assert "no sample" in lower and "longbridge" in lower
+    assert "no risk-policy threshold" in lower
+
+
+def test_skill_card_documents_prediction_ledger_contract() -> None:
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    lower = body.lower()
+
+    assert "version: 1.7.0" in body
+    assert "__HERMES_SCRIPTS_DIR__/hqa-prediction.sh" in body
+    assert "create" in lower and "list" in lower and "reconcile" in lower
+    assert "predictions/entries.jsonl" in body
+    assert "binary brier" in lower
+    assert "first" in lower and ">= horizon_date" in lower
+    assert "no longbridge" in lower and "no sample" in lower
+    assert "9h" in lower and "cron" in lower
+
+
+def test_skill_card_documents_market_foresight_and_artifact_shelf() -> None:
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    lower = body.lower()
+
+    assert "version: 1.7.0" in body
+    assert "__HERMES_SCRIPTS_DIR__/hqa-market-foresight.sh" in body
+    assert "__HERMES_SCRIPTS_DIR__/hqa-artifacts.sh" in body
+    assert "artifacts/hermes-feed/manifest.v1.json" in body
+    assert "proposal_only" in lower
+    assert "human-confirmed" in lower
+    assert "composer" in lower and "not wired" in lower
+
+
+def test_skill_card_documents_opportunity_ledger_contract() -> None:
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    lower = body.lower()
+
+    assert "version: 1.7.0" in body
+    assert "__HERMES_SCRIPTS_DIR__/hqa-opportunities.sh" in body
+    assert "opportunities/entries.jsonl" in body
+    assert "sync-signals" in lower and "record-action" in lower
+    assert "sync-actions" in lower and "reconcile" in lower
+    assert "not_actionable" in lower and "expired_coverage_unknown" in lower
+    assert "matching ticker is not causality" in lower
+    assert "never invoke generate-signal" in lower
 
 
 def test_skill_card_readonly_templates_use_gate_wrapper():
@@ -273,7 +368,12 @@ def test_skill_card_readonly_templates_use_gate_wrapper():
     # command (&&/|/;) that would bypass the Hermes allowlist shortcut.
     body = SKILL_SRC.read_text(encoding="utf-8")
     gate = "hqa-quant-readonly.sh"
-    gate_lines = [ln for ln in body.splitlines() if gate in ln and ln.lstrip().startswith(("`", "|", "python3", "/", "bash", "$HERMES", "~/"))]
+    gate_lines = [
+        ln
+        for ln in body.splitlines()
+        if gate in ln
+        and ln.lstrip().startswith(("`", "|", "python3", "/", "bash", "$HERMES", "~/"))
+    ]
     assert gate_lines, "no gate-wrapper command templates found in the card"
     for ln in gate_lines:
         # Extract the command text following the wrapper name, stripping the
@@ -329,17 +429,27 @@ def test_skill_card_covers_required_sections():
 
 
 def test_skill_card_documents_json_status_honestly():
-    # The platform CLI does NOT yet accept --json (verified: `doctor --json`
-    # exits 2 "No such option"); D-22 JSON-first parsing lives in the hqa
-    # write-path wrappers. The card must not attach --json to a gate (platform)
-    # template, or it would teach Hermes an invented flag.
+    # doctor --json is supported and used by HQA's watchdog, but the skill
+    # gate templates must still not invent --json on other platform leaves
+    # (many still reject it). Card must also not claim doctor lacks --json.
     body = SKILL_SRC.read_text(encoding="utf-8")
+    assert "doctor --json is supported" in body or "doctor --json` is supported" in body
     for ln in body.splitlines():
         if "hqa-quant-readonly.sh" in ln:
             cell = ln.split("hqa-quant-readonly.sh", 1)[1].split("|")[0]
             assert "--json" not in cell, (
-                f"gate/platform template must not use unsupported --json: {ln!r}"
+                f"gate/platform template must not invent --json on unknown leaves: {ln!r}"
             )
+
+
+def test_skill_card_does_not_list_scan_as_readonly():
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    # Scan must not appear as a pre-authorized gate template.
+    for ln in body.splitlines():
+        if "hqa-quant-readonly.sh" in ln and "options" in ln:
+            assert "daily-scan" not in ln
+            assert "buyside-screen" not in ln
+    assert "default" in body.lower() and "futu" in body.lower()
 
 
 # --- D-25 async completion push wrapper -------------------------------------
@@ -406,7 +516,10 @@ def test_notify_fallback_appends_second_line(tmp_path):
     for msg in ("first", "second"):
         r = subprocess.run(
             ["bash", str(notify), "#ch", msg],
-            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
         assert r.returncode == 0, r.stderr
     fallback = repo_dir / "logs" / "notify_fallback.jsonl"
@@ -424,11 +537,7 @@ def test_notify_delivers_via_hermes_when_available(tmp_path):
     stubdir.mkdir()
     argv_log = tmp_path / "hermes_argv.txt"
     stub = stubdir / "hermes"
-    stub.write_text(
-        "#!/bin/bash\n"
-        f'printf "%s\\n" "$*" > "{argv_log}"\n'
-        "exit 0\n"
-    )
+    stub.write_text(f'#!/bin/bash\nprintf "%s\\n" "$*" > "{argv_log}"\nexit 0\n')
     stub.chmod(0o755)
     result = _run_notify(
         tmp_path,
@@ -471,5 +580,3 @@ def test_notify_source_uses_repo_placeholder_and_discord_target():
     assert "logs/notify_fallback.jsonl" in body
     assert "hermes send" in body
     assert "discord" in body
-
-

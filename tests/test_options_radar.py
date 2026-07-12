@@ -76,3 +76,22 @@ def test_main_scan_flag_runs_fresh_scan(monkeypatch, capsys, tmp_path):
     assert rc == 0
     assert seen == {"provider": "futu"}
     assert "candidates=1000" in capsys.readouterr().out
+
+
+def test_main_missing_artifact_is_degraded(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(orad.runlog, "utc_now_iso", lambda: "2026-07-09T00:00:00Z")
+    rc = orad.main(
+        [
+            "--date",
+            "2026-07-09",
+            "--scan-dir",
+            str(tmp_path),  # empty dir
+            "--log",
+            str(tmp_path / "options_radar.jsonl"),
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "DEGRADED: no scan artifact for 2026-07-09" in out
+    record = json.loads((tmp_path / "options_radar.jsonl").read_text().splitlines()[0])
+    assert record["artifact_missing"] is True

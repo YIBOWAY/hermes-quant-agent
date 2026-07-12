@@ -5,5 +5,14 @@ __pycache__/
 logs/*.jsonl
 review/entries.jsonl
 review/entries.md
-data/
+predictions/
+opportunities/
+market_foresight/
+artifacts/hermes-feed/
+# Ignore runtime data, but track Scene-A threshold config (audit PR-5).
+# Must use `data/*` (not `data/`) so negation of children works.
+data/*
+!data/_runtime/
+data/_runtime/*
+!data/_runtime/signal_thresholds.json
 .DS_Store

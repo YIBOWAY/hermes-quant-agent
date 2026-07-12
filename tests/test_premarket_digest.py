@@ -152,3 +152,33 @@ def test_build_digest_degraded_label_on_futu_empty_scan():
     text = pd.build_digest(parse_safety(DOCTOR_SAMPLE), {}, "2026-07-01T00:00:00Z", provider="futu")
     assert "Options radar (futu)" in text
     assert "DEGRADED" in text
+
+
+def test_build_digest_artifact_missing_names_date():
+    from hqa.doctor_watchdog import parse_safety
+
+    text = pd.build_digest(
+        parse_safety(DOCTOR_SAMPLE),
+        {},
+        "2026-07-09T00:00:00Z",
+        provider="futu",
+        run_date="2026-07-09",
+        artifact_missing=True,
+    )
+    assert "DEGRADED: no scan artifact for 2026-07-09" in text
+
+
+def test_run_logs_artifact_missing_when_scan_empty(tmp_path):
+    log_path = tmp_path / "d.jsonl"
+    text = pd.run(
+        run_doctor=lambda: (0, DOCTOR_SAMPLE),
+        run_scan=lambda: (0, ""),
+        now_iso=lambda: "2026-07-09T00:00:00Z",
+        log_path=log_path,
+        provider="futu",
+        run_date="2026-07-09",
+        artifact_missing=True,
+    )
+    assert "DEGRADED: no scan artifact for 2026-07-09" in text
+    record = json.loads(log_path.read_text().splitlines()[0])
+    assert record["artifact_missing"] is True

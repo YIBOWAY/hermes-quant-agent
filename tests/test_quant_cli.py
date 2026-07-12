@@ -8,9 +8,10 @@ from hqa import config, quant_cli
 
 
 class _FakeProc:
-    def __init__(self, returncode, stdout):
+    def __init__(self, returncode, stdout, stderr=""):
         self.returncode = returncode
         self.stdout = stdout
+        self.stderr = stderr
 
 
 def test_run_doctor_invokes_cli_with_cwd(monkeypatch):
@@ -31,6 +32,152 @@ def test_run_doctor_invokes_cli_with_cwd(monkeypatch):
     assert seen["kwargs"]["stderr"] is subprocess.STDOUT
     assert seen["kwargs"]["timeout"] == 300
     assert seen["argv"][-1] == "--json"
+
+
+def test_run_paper_account_snapshot_keeps_json_stdout_clean(monkeypatch):
+    seen = {}
+    payload = '{"account_id":"default","account_exists":false,"account":null}\n'
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        seen["kwargs"] = kwargs
+        return _FakeProc(
+            0,
+            payload,
+            stderr="paper account reconciliation unavailable\ntraceback noise\n",
+        )
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+
+    code, out = quant_cli.run_paper_account_snapshot()
+
+    assert code == 0
+    assert out == payload
+    assert seen["argv"][1:] == [
+        "paper",
+        "account-show",
+        "--account",
+        "default",
+        "--format",
+        "json",
+    ]
+    assert seen["kwargs"]["stderr"] is subprocess.PIPE
+
+
+def test_run_paper_account_snapshot_returns_stderr_when_cli_crashes_before_json(
+    monkeypatch,
+):
+    def fake_run(_argv, **_kwargs):
+        return _FakeProc(2, "", stderr="unexpected CLI failure\n")
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+
+    code, out = quant_cli.run_paper_account_snapshot(account_id="research")
+
+    assert code == 2
+    assert out == "unexpected CLI failure\n"
+
+
+def test_run_historical_prices_uses_strict_futu_qfq_json_contract(monkeypatch):
+    seen = {}
+    payload = '{"provider":"futu","symbols":["AAPL","SPY"]}\n'
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        seen["kwargs"] = kwargs
+        return _FakeProc(0, payload, stderr="Futu lifecycle noise\n")
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+
+    code, out = quant_cli.run_historical_prices(
+        ["AAPL", "SPY"],
+        "2025-06-01",
+        "2026-07-10",
+    )
+
+    assert code == 0
+    assert out == payload
+    assert seen["argv"][1:] == [
+        "data",
+        "prices",
+        "--symbol",
+        "AAPL",
+        "--symbol",
+        "SPY",
+        "--start",
+        "2025-06-01",
+        "--end",
+        "2026-07-10",
+        "--provider",
+        "futu",
+        "--adjustment",
+        "qfq",
+        "--format",
+        "json",
+    ]
+    assert seen["kwargs"]["stderr"] is subprocess.PIPE
+
+
+def test_run_paper_strategy_observations_uses_bounded_read_only_json_contract(
+    monkeypatch,
+):
+    seen = {}
+    payload = '{"schema_version":"1.0","read_status":"empty","observations":[]}\n'
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        seen["kwargs"] = kwargs
+        return _FakeProc(0, payload, stderr="diagnostic noise\n")
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+
+    code, out = quant_cli.run_paper_strategy_observations(
+        from_date="2026-07-01",
+        to_date="2026-07-12",
+        signal_id="signal-abc123",
+        limit=200,
+    )
+
+    assert code == 0
+    assert out == payload
+    assert seen["argv"][1:] == [
+        "paper",
+        "strategies",
+        "observations",
+        "--from-date",
+        "2026-07-01",
+        "--to-date",
+        "2026-07-12",
+        "--signal-id",
+        "signal-abc123",
+        "--limit",
+        "200",
+        "--format",
+        "json",
+    ]
+    assert seen["kwargs"]["stderr"] is subprocess.PIPE
+
+
+def test_run_paper_strategy_observations_omits_unspecified_filters(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        return _FakeProc(0, "{}\n")
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+
+    quant_cli.run_paper_strategy_observations(limit=25)
+
+    assert seen["argv"][1:] == [
+        "paper",
+        "strategies",
+        "observations",
+        "--limit",
+        "25",
+        "--format",
+        "json",
+    ]
 
 
 def test_run_options_sample_scan_argv(monkeypatch):
@@ -134,7 +281,28 @@ def test_run_agent_review_argv(monkeypatch):
     ]
 
 
-def test_run_experiment_config_argv(monkeypatch):
+def test_run_experiment_config_default_provider_is_futu(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        return _FakeProc(0, "experiment_id=e-1")
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+    quant_cli.run_experiment_config("/tmp/exp.json")
+    assert seen["argv"][1:] == [
+        "experiment",
+        "run-config",
+        "--config",
+        "/tmp/exp.json",
+        "--provider",
+        "futu",
+        "--include-approved-candidates",
+        "--json",
+    ]
+
+
+def test_run_experiment_config_argv_tiingo_opt_in(monkeypatch):
     seen = {}
 
     def fake_run(argv, **kwargs):
@@ -163,7 +331,7 @@ def test_run_experiment_config_can_omit_approved_candidates(monkeypatch):
         return _FakeProc(0, "experiment_id=e-1")
 
     monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
-    quant_cli.run_experiment_config("/tmp/exp.json", provider="tiingo", include_approved=False)
+    quant_cli.run_experiment_config("/tmp/exp.json", provider="futu", include_approved=False)
     assert "--include-approved-candidates" not in seen["argv"]
     assert seen["argv"][-1] == "--json"
 

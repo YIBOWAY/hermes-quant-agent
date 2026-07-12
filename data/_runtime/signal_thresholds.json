@@ -1,0 +1,7 @@
+{
+  "min_score": 150,
+  "min_iv_rank": null,
+  "notes": "D-15 / audit PR-5: exit permanent collect. Based on 2026-07-07 futu scan (n=686, p90≈145, p95=160, max=160). Prefer quiet over noisy; lower after a week of real alerts. iv_rank disabled until platform fills iv_rank (currently all null).",
+  "decided_at": "2026-07-09",
+  "basis_scan_date": "2026-07-07"
+}
