@@ -6,17 +6,17 @@ Rules for AI agents working in this repository.
 
 - `Hermes-quant-agent` is the active orchestration/COO layer for the local
   `/Users/sunyibo/programs/ai-quant-platform` backend.
-- Start at `docs/README.md`; it distinguishes the product roadmap, the current
-  cross-repo implementation plan, queued work, and historical material.
+- Start at `docs/README.md`; it distinguishes the product roadmap, completed
+  cross-repo delivery records, the unselected next slice, and historical material.
 - The product roadmap is `docs/design/2026-07-01-roadmap-phases-0b-4.md`.
-  The current implementation plan is
-  `docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md`; execute only its
-  current next slice. Slices 9A through 9G and the read-only mini 9H artifact
-  shelf are delivered; full 9H cron/notify is the next slice and remains queued
-  until a bite-sized plan is written from current source facts. The platform frontend
-  plan is the Slice 0-8
-  record and future UI backlog. The 2026-07-07 Phase 1a-4 implementation plan is
-  superseded material and must not be followed task-by-task.
+  The completed Phase 1a-4 v2 implementation record is
+  `docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md`; Slices 9A through 9H
+  are all delivered. The current delivery record is
+  `docs/superpowers/plans/2026-07-12-full-9h-automation-notifications.md`.
+  No next implementation slice is selected: do not infer one from an older plan
+  or backlog. The platform frontend plan is the Slice 0-8 record and future UI
+  backlog. The 2026-07-07 Phase 1a-4 implementation plan is superseded material
+  and must not be followed task-by-task.
 - Treat `ai-quant-platform/docs/phases/phase_15_iteration_roadmap.md` as
   reference material only. Do not use it as an independent product roadmap.
 
@@ -47,8 +47,9 @@ Rules for AI agents working in this repository.
 ## Collaboration
 
 - Prefer docs/plans first, then implementation.
-- Do not infer current progress from an old plan's unchecked boxes. Reconcile
-  `docs/README.md`, the active plan, git state, tests, and the running process.
+- Do not infer current progress or a next slice from an old plan's unchecked
+  boxes. Reconcile `docs/README.md`, the current delivery record, git state,
+  tests, and the running process.
 - Preserve user and generated changes in the dirty worktree; do not revert
   unrelated files.
 - If `.codegraph/` is absent, skip CodeGraph for this repo; the platform repo

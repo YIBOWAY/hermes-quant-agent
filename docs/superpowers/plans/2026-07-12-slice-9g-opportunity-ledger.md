@@ -2,9 +2,10 @@
 
 > **Status (2026-07-12): COMPLETE.** This is the delivered bite-sized
 > expansion of Slice 9G from `2026-07-10-phase-1a-4-v2.md`. It replaces the
-> symbol-matching sketch in the superseded 2026-07-07 plan. Full cron, weekly
-> projection, notifications and freshness monitoring are the next queued Slice
-> 9H and require their own current plan.
+> symbol-matching sketch in the superseded 2026-07-07 plan. Full 9H cron, weekly
+> projection, notifications and freshness monitoring were subsequently completed
+> and accepted under `2026-07-12-full-9h-automation-notifications.md`. This is a
+> predecessor record, not a current queue pointer.
 
 ## Outcome
 

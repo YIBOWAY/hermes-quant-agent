@@ -47,6 +47,9 @@ def _runtime() -> HermesArtifactFeed:
         portfolio_risk_path=config.LOG_DIR / "portfolio_risk.jsonl",
         prediction_ledger=ledger,
         foresight_publisher=publisher,
+        weekly_review_path=config.WEEKLY_REVIEW_PROJECTION_PATH,
+        opportunity_summary_path=config.OPPORTUNITY_SUMMARY_PROJECTION_PATH,
+        automation_status_path=config.AUTOMATION_STATUS_PROJECTION_PATH,
         now=runlog.utc_now_iso,
     )
 

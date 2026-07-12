@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "timezone": "Asia/Shanghai",
+  "jobs": [
+    {
+      "job_id": "daily_close",
+      "name": "hqa-full-9h-daily-close",
+      "schedule": "15,25 8 * * 2-6",
+      "script": "hqa-full-9h-daily-close.sh",
+      "no_agent": true,
+      "deliver": "local"
+    },
+    {
+      "job_id": "freshness",
+      "name": "hqa-full-9h-freshness",
+      "schedule": "17 */2 * * *",
+      "script": "hqa-full-9h-freshness.sh",
+      "no_agent": true,
+      "deliver": "local"
+    },
+    {
+      "job_id": "weekly",
+      "name": "hqa-full-9h-weekly",
+      "schedule": "0,10 9 * * 0",
+      "script": "hqa-full-9h-weekly.sh",
+      "no_agent": true,
+      "deliver": "local",
+      "replaces_name": "hqa-weekly-review"
+    },
+    {
+      "job_id": "notification_drain",
+      "name": "hqa-full-9h-notification-drain",
+      "schedule": "7,22,37,52 * * * *",
+      "script": "hqa-full-9h-notification-drain.sh",
+      "no_agent": true,
+      "deliver": "local"
+    }
+  ]
+}

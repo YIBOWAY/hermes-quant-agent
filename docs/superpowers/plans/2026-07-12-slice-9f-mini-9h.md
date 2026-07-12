@@ -4,7 +4,9 @@
 > This bite-sized plan expanded the next queue item from
 > `2026-07-10-phase-1a-4-v2.md`. It delivered 9F and only the visible, read-only
 > artifact-consumption subset of 9H. Slice 9G was subsequently delivered by its
-> own 2026-07-12 plan; full cron/notify is now next and remains queued.
+> own 2026-07-12 plan; full 9H was subsequently completed and accepted under
+> `2026-07-12-full-9h-automation-notifications.md`. This is a predecessor record,
+> not a current queue pointer.
 
 ## Outcome
 

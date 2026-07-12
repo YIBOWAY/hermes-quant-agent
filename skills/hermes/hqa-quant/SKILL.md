@@ -1,7 +1,7 @@
 ---
 name: hqa-quant
 description: "HQA quant ops from Hermes — read-only market/signal/radar queries, local prediction and opportunity ledgers, human-gated research/account writes, artifact-first answers, and 30s async triage for long jobs."
-version: 1.7.0
+version: 1.8.0
 platforms: [macos]
 metadata:
   hermes:
@@ -95,8 +95,8 @@ the entry and outcome prices from the same later QFQ payload.
 `confidence` is the probability that the declared direction is correct. The
 reported score is a **binary Brier** for that declared-direction event, not a
 three-class Brier score. A target range, when supplied, is reported separately
-as `range_hit`. Automatic cron/notification and weekly aggregation remain
-deferred to full Slice 9H; do not claim they are already running.
+as `range_hit`. Full Slice 9H now performs bounded automatic prediction
+reconciliation after the US close; it never creates a prediction automatically.
 
 ### Market foresight + Hermes artifact shelf
 
@@ -116,8 +116,10 @@ prediction ledger requires a later human-confirmed `hqa-prediction.sh create`.
 The rebuildable feed at
 `__HQA_REPO_DIR__/artifacts/hermes-feed/manifest.v1.json` drives the platform's
 read-only `/hermes` artifact shelf. A source may be `empty` without making the
-whole feed degraded. Composer submission, cron, notifications, and automated
-prediction reconciliation are not wired.
+whole feed degraded. Feed schema 1.1 has six exact sources: portfolio risk,
+prediction, market foresight, weekly review, opportunity summary, and automation
+status. Composer submission remains disabled and is not wired to an agent-task
+POST route.
 
 ### Opportunity ledger — evidence only, never execution
 
@@ -148,8 +150,40 @@ options rows are `not_actionable` (or `unknown` when identity is incomplete)
 and cannot become missed. A `missed` assessment requires explicit eligible
 route/deadline, complete untruncated coverage through that deadline, and no
 timely linked action or decline. It means an action-window miss only—not missed
-profit and not advice to trade. Weekly review, shelf projection and
-notifications remain full Slice 9H.
+profit and not advice to trade. Full Slice 9H aggregates these folded states;
+it still never infers causality from a ticker or creates a decision/action.
+
+### Full Slice 9H automation — read-only/proposal-only
+
+The four installed no-agent wrappers are the only automation entry points:
+
+| Job | Wrapper | Asia/Shanghai schedule |
+|---|---|---|
+| Post-close reconcile | `__HERMES_SCRIPTS_DIR__/hqa-full-9h-daily-close.sh` | `15,25 8 * * 2-6` |
+| Freshness projection | `__HERMES_SCRIPTS_DIR__/hqa-full-9h-freshness.sh` | `17 */2 * * *` |
+| Weekly review | `__HERMES_SCRIPTS_DIR__/hqa-full-9h-weekly.sh` | `0,10 9 * * 0` |
+| Notification drain | `__HERMES_SCRIPTS_DIR__/hqa-full-9h-notification-drain.sh` | `7,22,37,52 * * * *` |
+
+Hermes cron registers them with `--no-agent --deliver local` and deliberately
+omits `--workdir`; each wrapper changes to the repository itself, while omitting
+workdir keeps long legacy collection jobs from serially blocking full 9H.
+The second daily/weekly minute is an idempotent retry of the same logical slot;
+drain is offset so it does not collide with either source job's start minute.
+Each drain processes at most five remote records, bounding its send portion to
+75 seconds even when every remote attempt reaches the timeout.
+
+`daily_close` consumes the latest existing scan without launching one, writes
+portfolio risk, performs bounded prediction reconciliation, reads platform
+coverage only for source-established eligible opportunities, reconciles missed
+states, and rebuilds the feed. `freshness` and `weekly` read local receipts and
+folded ledgers. `notification_drain` handles only durable outbox records.
+
+The default target is `local`: one private idempotent receipt is written and no
+external message is sent. A configured `discord:<channel>` uses bounded async
+delivery. Known failures retain a local fallback; ambiguous timeout/crash state
+is `delivery_unknown` and is never automatically retried. These jobs never
+generate a strategy, run a backtest, mutate a paper account, create an
+execution, send an order, or trade.
 
 ### Human-gated writes — approval required
 

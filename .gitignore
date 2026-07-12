@@ -9,6 +9,7 @@ predictions/
 opportunities/
 market_foresight/
 artifacts/hermes-feed/
+automation/
 # Ignore runtime data, but track Scene-A threshold config (audit PR-5).
 # Must use `data/*` (not `data/`) so negation of children works.
 data/*

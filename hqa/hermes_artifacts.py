@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import tempfile
 from datetime import date, datetime, timezone
 from hashlib import sha256
@@ -15,6 +16,11 @@ from hqa.predictions import PredictionLedger
 
 _SCHEMA_VERSION = "1.0"
 _KINDS = ("portfolio_risk", "prediction", "market_foresight")
+_KINDS_V11 = _KINDS + (
+    "weekly_review",
+    "opportunity_summary",
+    "automation_status",
+)
 _KIND_PRIORITY = {kind: index for index, kind in enumerate(_KINDS)}
 _RISK_STATUSES = {"available", "degraded", "not_applicable", "unavailable"}
 _RISK_STATES = {"account_missing", "cash_only", "invested", "unknown"}
@@ -72,6 +78,80 @@ _PREDICTION_DATA_FIELDS = {
     "direction_brier",
 }
 _FORESIGHT_DATA_FIELDS = {"run_id", "summary", "candidate_count", "candidates"}
+_PROJECTION_FIELDS = {
+    "schema_version",
+    "kind",
+    "generated_at",
+    "status",
+    "reason_codes",
+    "data",
+}
+_WEEKLY_DATA_FIELDS = {
+    "week_id",
+    "period_start",
+    "period_end",
+    "safety_alert_count",
+    "unique_signal_count",
+    "review_draft_count",
+    "review_confirmed_count",
+    "prediction_created_count",
+    "prediction_scored_count",
+    "prediction_hit_count",
+    "mean_direction_brier",
+    "opportunity_observed_count",
+    "opportunity_missed_count",
+    "opportunity_coverage_unknown_count",
+    "limitations",
+    "proposal_only",
+    "trading_allowed",
+}
+_OPPORTUNITY_DATA_FIELDS = {
+    "window_start",
+    "window_end",
+    "total_count",
+    "resolution_counts",
+    "miss_reason_counts",
+    "proposal_only",
+    "trading_allowed",
+}
+_AUTOMATION_DATA_FIELDS = {
+    "checked_at",
+    "overall_status",
+    "jobs",
+    "proposal_only",
+    "trading_allowed",
+}
+_OPPORTUNITY_RESOLUTIONS = {
+    "open",
+    "deferred",
+    "acted",
+    "action_failed",
+    "declined",
+    "missed",
+    "expired_coverage_unknown",
+    "not_actionable",
+    "unknown",
+}
+_MISSED_REASONS = {"no_decision", "act_without_action", "defer_expired"}
+_AUTOMATION_JOBS = {
+    "daily_close",
+    "freshness",
+    "weekly",
+    "notification_drain",
+}
+_AUTOMATION_JOB_FIELDS = {
+    "job_id",
+    "expected_schedule",
+    "timezone",
+    "freshness_budget_seconds",
+    "last_attempt_at",
+    "last_success_at",
+    "fresh_until",
+    "status",
+    "reason_code",
+    "last_run_id",
+    "notification_status",
+}
 _CANDIDATE_FIELDS = {
     "id",
     "symbol",
@@ -250,12 +330,38 @@ class HermesArtifactFeed:
         portfolio_risk_path: Path,
         prediction_ledger: PredictionLedger,
         foresight_publisher: MarketForesightPublisher,
+        weekly_review_path: Path | None = None,
+        opportunity_summary_path: Path | None = None,
+        automation_status_path: Path | None = None,
         now: Callable[[], str],
     ) -> None:
+        projection_paths = (
+            weekly_review_path,
+            opportunity_summary_path,
+            automation_status_path,
+        )
+        if any(path is not None for path in projection_paths) and not all(
+            path is not None for path in projection_paths
+        ):
+            raise ValueError("all three full-9H projection paths are required")
         self.feed_path = Path(feed_path)
         self.portfolio_risk_path = Path(portfolio_risk_path)
         self._prediction_ledger = prediction_ledger
         self._foresight_publisher = foresight_publisher
+        self.weekly_review_path = (
+            None if weekly_review_path is None else Path(weekly_review_path)
+        )
+        self.opportunity_summary_path = (
+            None if opportunity_summary_path is None else Path(opportunity_summary_path)
+        )
+        self.automation_status_path = (
+            None if automation_status_path is None else Path(automation_status_path)
+        )
+        self._schema_version = "1.0" if weekly_review_path is None else "1.1"
+        self._kinds = _KINDS if self._schema_version == "1.0" else _KINDS_V11
+        self._kind_priority = {
+            kind: index for index, kind in enumerate(self._kinds)
+        }
         self._now = now
 
     def rebuild(self, *, limit: int = 50) -> dict[str, Any]:
@@ -267,11 +373,35 @@ class HermesArtifactFeed:
         items: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
         warnings: list[dict[str, str]] = []
-        collectors = (
+        collectors: tuple[tuple[str, Callable[[], list[dict[str, Any]]]], ...] = (
             ("portfolio_risk", self._portfolio_risk_items),
             ("prediction", self._prediction_items),
             ("market_foresight", self._foresight_items),
         )
+        if self._schema_version == "1.1":
+            assert self.weekly_review_path is not None
+            assert self.opportunity_summary_path is not None
+            assert self.automation_status_path is not None
+            collectors += (
+                (
+                    "weekly_review",
+                    lambda: self._projection_items(
+                        "weekly_review", self.weekly_review_path
+                    ),
+                ),
+                (
+                    "opportunity_summary",
+                    lambda: self._projection_items(
+                        "opportunity_summary", self.opportunity_summary_path
+                    ),
+                ),
+                (
+                    "automation_status",
+                    lambda: self._projection_items(
+                        "automation_status", self.automation_status_path
+                    ),
+                ),
+            )
         for kind, collect in collectors:
             try:
                 source_items = collect()
@@ -294,7 +424,7 @@ class HermesArtifactFeed:
         items.sort(
             key=lambda item: (
                 item["occurred_at"],
-                _KIND_PRIORITY[item["kind"]],
+                self._kind_priority[item["kind"]],
                 item["id"],
             ),
             reverse=True,
@@ -302,7 +432,7 @@ class HermesArtifactFeed:
         items = items[:limit]
         read_status = "degraded" if warnings else ("available" if items else "empty")
         manifest = {
-            "schema_version": _SCHEMA_VERSION,
+            "schema_version": self._schema_version,
             "read_status": read_status,
             "as_of": _utc_timestamp(self._now(), "as_of"),
             "items": items,
@@ -316,11 +446,11 @@ class HermesArtifactFeed:
     def read(self) -> dict[str, Any]:
         if not self.feed_path.exists():
             return {
-                "schema_version": _SCHEMA_VERSION,
+                "schema_version": self._schema_version,
                 "read_status": "empty",
                 "as_of": _utc_timestamp(self._now(), "as_of"),
                 "items": [],
-                "sources": [_source(kind, []) for kind in _KINDS],
+                "sources": [_source(kind, []) for kind in self._kinds],
                 "warnings": [],
             }
         try:
@@ -454,6 +584,46 @@ class HermesArtifactFeed:
             self._validate_item_data(item)
             items.append(item)
         return items
+
+    def _projection_items(self, kind: str, path: Path) -> list[dict[str, Any]]:
+        if not path.exists():
+            return []
+        if path.stat().st_size > 1024 * 1024:
+            raise ValueError(f"{kind} projection exceeds the size limit")
+        document = _strict_json(path.read_text(encoding="utf-8"))
+        _validate_tree(document)
+        if (
+            not isinstance(document, dict)
+            or set(document) != _PROJECTION_FIELDS
+            or document.get("schema_version") != "1.0"
+            or document.get("kind") != kind
+            or document.get("status") not in {"available", "degraded"}
+            or not isinstance(document.get("reason_codes"), list)
+            or len(document["reason_codes"]) > 20
+            or any(
+                not isinstance(reason, str) or not reason or len(reason) > 200
+                for reason in document["reason_codes"]
+            )
+        ):
+            raise ValueError(f"{kind} projection contract is invalid")
+        if (document["status"] == "available") != (not document["reason_codes"]):
+            raise ValueError(f"{kind} projection status is inconsistent")
+        generated_at = _utc_timestamp(
+            document.get("generated_at"), f"{kind}.generated_at"
+        )
+        item = {
+            "id": (
+                f"{kind}:"
+                f"{sha256(json.dumps(document, allow_nan=False, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()[:24]}"
+            ),
+            "kind": kind,
+            "occurred_at": generated_at,
+            "quality": document["status"],
+            "status": document["status"],
+            "data": document["data"],
+        }
+        self._validate_item_data(item)
+        return [item]
 
     @staticmethod
     def _quality(status: Any) -> str:
@@ -642,8 +812,9 @@ class HermesArtifactFeed:
             "warnings",
         }:
             raise ValueError("Hermes artifact manifest fields do not match schema")
-        if manifest["schema_version"] != _SCHEMA_VERSION:
+        if manifest["schema_version"] not in {"1.0", "1.1"}:
             raise ValueError("unsupported Hermes artifact manifest schema")
+        kinds = _KINDS if manifest["schema_version"] == "1.0" else _KINDS_V11
         if manifest["read_status"] not in {"empty", "available", "degraded"}:
             raise ValueError("Hermes artifact read_status is invalid")
         _utc_timestamp(manifest["as_of"], "as_of")
@@ -654,7 +825,7 @@ class HermesArtifactFeed:
         for item in manifest["items"]:
             if not isinstance(item, dict) or set(item) != _ITEM_FIELDS:
                 raise ValueError("Hermes artifact item fields do not match schema")
-            if item["kind"] not in _KINDS:
+            if item["kind"] not in kinds:
                 raise ValueError("unsupported Hermes artifact kind")
             if (
                 not isinstance(item["id"], str)
@@ -672,7 +843,10 @@ class HermesArtifactFeed:
             _utc_timestamp(item["occurred_at"], "item.occurred_at")
             HermesArtifactFeed._validate_item_data(item)
 
-        if not isinstance(manifest["sources"], list) or len(manifest["sources"]) != 3:
+        if (
+            not isinstance(manifest["sources"], list)
+            or len(manifest["sources"]) != len(kinds)
+        ):
             raise ValueError("Hermes artifact sources must report every kind")
         source_kinds: set[str] = set()
         source_statuses: dict[str, str] = {}
@@ -684,7 +858,7 @@ class HermesArtifactFeed:
             status = source["status"]
             latest_at = source["latest_at"]
             reason_code = source["reason_code"]
-            if kind not in _KINDS or kind in source_kinds or status not in _SOURCE_STATUSES:
+            if kind not in kinds or kind in source_kinds or status not in _SOURCE_STATUSES:
                 raise ValueError("Hermes artifact source identity is invalid")
             source_kinds.add(kind)
             source_statuses[kind] = status
@@ -699,7 +873,7 @@ class HermesArtifactFeed:
                 if latest_at is not None or not isinstance(reason_code, str) or not reason_code:
                     raise ValueError("failed artifact source is inconsistent")
                 failed_sources.add(kind)
-        if source_kinds != set(_KINDS):
+        if source_kinds != set(kinds):
             raise ValueError("Hermes artifact sources must report every kind")
         if any(source_statuses[kind] != "available" for kind in item_kinds):
             raise ValueError("artifact item belongs to a non-available source")
@@ -714,7 +888,7 @@ class HermesArtifactFeed:
             source = warning["source"]
             code = warning["code"]
             if (
-                source not in _KINDS
+                source not in kinds
                 or not isinstance(code, str)
                 or not code
                 or (source, code) in warning_pairs
@@ -839,6 +1013,195 @@ class HermesArtifactFeed:
             )
             if data["direction_brier"] is not None and not 0 <= data["direction_brier"] <= 1:
                 raise ValueError("prediction direction_brier is invalid")
+            return
+
+        if item["kind"] == "weekly_review":
+            if set(data) != _WEEKLY_DATA_FIELDS:
+                raise ValueError("weekly-review projection fields are invalid")
+            if (
+                not isinstance(data["week_id"], str)
+                or re.fullmatch(r"\d{4}-W\d{2}", data["week_id"]) is None
+            ):
+                raise ValueError("weekly-review week_id is invalid")
+            period_start = _utc_timestamp(
+                data["period_start"], "weekly_review.period_start"
+            )
+            period_end = _utc_timestamp(
+                data["period_end"], "weekly_review.period_end"
+            )
+            if period_start >= period_end:
+                raise ValueError("weekly-review period is invalid")
+            count_fields = _WEEKLY_DATA_FIELDS - {
+                "week_id",
+                "period_start",
+                "period_end",
+                "mean_direction_brier",
+                "limitations",
+                "proposal_only",
+                "trading_allowed",
+            }
+            for field in count_fields:
+                value = data[field]
+                if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1_000_000:
+                    raise ValueError(f"weekly-review {field} is invalid")
+            if data["prediction_hit_count"] > data["prediction_scored_count"]:
+                raise ValueError("weekly-review prediction counts are inconsistent")
+            brier = data["mean_direction_brier"]
+            if data["prediction_scored_count"] == 0:
+                if brier is not None:
+                    raise ValueError("weekly-review empty Brier must be null")
+            else:
+                _validate_finite_number(brier, "weekly-review mean_direction_brier")
+                if not 0 <= brier <= 1:
+                    raise ValueError("weekly-review mean_direction_brier is invalid")
+            limitations = data["limitations"]
+            if (
+                not isinstance(limitations, list)
+                or len(limitations) > 20
+                or any(
+                    not isinstance(value, str) or not value or len(value) > 200
+                    for value in limitations
+                )
+            ):
+                raise ValueError("weekly-review limitations are invalid")
+            if data["proposal_only"] is not True or data["trading_allowed"] is not False:
+                raise ValueError("weekly-review safety flags are invalid")
+            return
+
+        if item["kind"] == "opportunity_summary":
+            if set(data) != _OPPORTUNITY_DATA_FIELDS:
+                raise ValueError("opportunity-summary projection fields are invalid")
+            window_start = _utc_timestamp(
+                data["window_start"], "opportunity_summary.window_start"
+            )
+            window_end = _utc_timestamp(
+                data["window_end"], "opportunity_summary.window_end"
+            )
+            if window_start >= window_end:
+                raise ValueError("opportunity-summary window is invalid")
+            total = data["total_count"]
+            if isinstance(total, bool) or not isinstance(total, int) or not 0 <= total <= 1_000_000:
+                raise ValueError("opportunity-summary total_count is invalid")
+            resolutions = data["resolution_counts"]
+            missed_reasons = data["miss_reason_counts"]
+            if not isinstance(resolutions, dict) or set(resolutions) != _OPPORTUNITY_RESOLUTIONS:
+                raise ValueError("opportunity-summary resolutions are invalid")
+            if not isinstance(missed_reasons, dict) or set(missed_reasons) != _MISSED_REASONS:
+                raise ValueError("opportunity-summary missed reasons are invalid")
+            for value in [*resolutions.values(), *missed_reasons.values()]:
+                if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1_000_000:
+                    raise ValueError("opportunity-summary count is invalid")
+            if sum(resolutions.values()) != total:
+                raise ValueError("opportunity-summary resolution sum is invalid")
+            if sum(missed_reasons.values()) != resolutions["missed"]:
+                raise ValueError("opportunity-summary missed sum is invalid")
+            if data["proposal_only"] is not True or data["trading_allowed"] is not False:
+                raise ValueError("opportunity-summary safety flags are invalid")
+            return
+
+        if item["kind"] == "automation_status":
+            if set(data) != _AUTOMATION_DATA_FIELDS:
+                raise ValueError("automation-status projection fields are invalid")
+            checked_at = _utc_timestamp(data["checked_at"], "automation_status.checked_at")
+            if data["overall_status"] not in {"fresh", "degraded"}:
+                raise ValueError("automation-status overall status is invalid")
+            jobs = data["jobs"]
+            if not isinstance(jobs, list) or len(jobs) != len(_AUTOMATION_JOBS):
+                raise ValueError("automation-status jobs are invalid")
+            seen: set[str] = set()
+            for job in jobs:
+                if not isinstance(job, dict) or set(job) != _AUTOMATION_JOB_FIELDS:
+                    raise ValueError("automation-status job fields are invalid")
+                job_id = job["job_id"]
+                if job_id not in _AUTOMATION_JOBS or job_id in seen:
+                    raise ValueError("automation-status job identity is invalid")
+                seen.add(job_id)
+                if (
+                    not isinstance(job["expected_schedule"], str)
+                    or not job["expected_schedule"]
+                    or job["timezone"] != "Asia/Shanghai"
+                    or isinstance(job["freshness_budget_seconds"], bool)
+                    or not isinstance(job["freshness_budget_seconds"], int)
+                    or not 1 <= job["freshness_budget_seconds"] <= 10_000_000
+                    or job["status"] not in {"fresh", "stale", "failed", "never_run"}
+                    or job["notification_status"]
+                    not in {
+                        "delivered",
+                        "queued",
+                        "fallback_persisted",
+                        "not_required",
+                        "delivery_unknown",
+                    }
+                ):
+                    raise ValueError("automation-status job values are invalid")
+                for field in ("last_attempt_at", "last_success_at", "fresh_until"):
+                    value = job[field]
+                    if value is not None:
+                        timestamp = _utc_timestamp(value, f"automation_status.{field}")
+                        if field != "fresh_until" and timestamp > checked_at:
+                            raise ValueError("automation-status job timestamp is in the future")
+                reason = job["reason_code"]
+                if reason is not None and (
+                    not isinstance(reason, str) or not reason or len(reason) > 200
+                ):
+                    raise ValueError("automation-status reason is invalid")
+                if job["status"] == "never_run":
+                    if any(
+                        job[field] is not None
+                        for field in (
+                            "last_attempt_at",
+                            "last_success_at",
+                            "fresh_until",
+                            "last_run_id",
+                        )
+                    ) or reason is None:
+                        raise ValueError("automation-status never-run job is inconsistent")
+                elif job["status"] == "fresh":
+                    if any(
+                        job[field] is None
+                        for field in (
+                            "last_attempt_at",
+                            "last_success_at",
+                            "fresh_until",
+                            "last_run_id",
+                        )
+                    ) or reason is not None:
+                        raise ValueError("automation-status fresh job is inconsistent")
+                    if checked_at > job["fresh_until"]:
+                        raise ValueError("automation-status fresh job exceeded fresh_until")
+                elif (
+                    job["last_attempt_at"] is None
+                    or job["last_run_id"] is None
+                    or reason is None
+                ):
+                    raise ValueError("automation-status degraded job is inconsistent")
+                if (
+                    job["last_success_at"] is not None
+                    and job["fresh_until"] is not None
+                    and job["fresh_until"] <= job["last_success_at"]
+                ):
+                    raise ValueError("automation-status fresh_until is invalid")
+                if (
+                    job["status"] == "stale"
+                    and job["fresh_until"] is not None
+                    and checked_at <= job["fresh_until"]
+                ):
+                    raise ValueError("automation-status stale job is still fresh")
+                if job["last_run_id"] is not None:
+                    _validate_string(
+                        job["last_run_id"],
+                        "automation-status last_run_id",
+                        max_length=256,
+                    )
+            if seen != _AUTOMATION_JOBS:
+                raise ValueError("automation-status must report every job")
+            expected_overall = (
+                "fresh" if all(job["status"] == "fresh" for job in jobs) else "degraded"
+            )
+            if data["overall_status"] != expected_overall:
+                raise ValueError("automation-status aggregate is inconsistent")
+            if data["proposal_only"] is not True or data["trading_allowed"] is not False:
+                raise ValueError("automation-status safety flags are invalid")
             return
 
         if set(data) != _FORESIGHT_DATA_FIELDS:

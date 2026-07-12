@@ -33,6 +33,10 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
         "hqa-aihot-alerts.sh",
         "hqa-artifacts.sh",
         "hqa-doctor-watchdog.sh",
+        "hqa-full-9h-daily-close.sh",
+        "hqa-full-9h-freshness.sh",
+        "hqa-full-9h-notification-drain.sh",
+        "hqa-full-9h-weekly.sh",
         "hqa-market-foresight.sh",
         "hqa-notify.sh",
         "hqa-opportunities.sh",
@@ -65,6 +69,10 @@ def test_wrappers_pass_hermes_escape_check(tmp_path):
         "hqa-aihot-alerts.sh",
         "hqa-artifacts.sh",
         "hqa-doctor-watchdog.sh",
+        "hqa-full-9h-daily-close.sh",
+        "hqa-full-9h-freshness.sh",
+        "hqa-full-9h-notification-drain.sh",
+        "hqa-full-9h-weekly.sh",
         "hqa-market-foresight.sh",
         "hqa-notify.sh",
         "hqa-options-collect.sh",
@@ -118,6 +126,10 @@ def test_python_wrappers_use_install_time_repo_placeholder():
         "hqa-aihot-alerts.sh",
         "hqa-artifacts.sh",
         "hqa-doctor-watchdog.sh",
+        "hqa-full-9h-daily-close.sh",
+        "hqa-full-9h-freshness.sh",
+        "hqa-full-9h-notification-drain.sh",
+        "hqa-full-9h-weekly.sh",
         "hqa-market-foresight.sh",
         "hqa-opportunities.sh",
         "hqa-options-radar.sh",
@@ -129,6 +141,66 @@ def test_python_wrappers_use_install_time_repo_placeholder():
     ):
         body = (REPO / "scripts" / "hermes" / name).read_text(encoding="utf-8")
         assert "cd __HQA_REPO_DIR__" in body
+
+
+def test_full_9h_wrappers_are_thin_fixed_job_adapters() -> None:
+    expected = {
+        "hqa-full-9h-daily-close.sh": "daily_close",
+        "hqa-full-9h-freshness.sh": "freshness",
+        "hqa-full-9h-notification-drain.sh": "notification_drain",
+        "hqa-full-9h-weekly.sh": "weekly",
+    }
+    for name, job in expected.items():
+        body = (REPO / "scripts" / "hermes" / name).read_text(encoding="utf-8")
+        assert "cd __HQA_REPO_DIR__" in body
+        assert f"-m hqa.research_automation_cli {job}" in body
+        assert "--workdir" not in body
+
+
+def test_full_9h_desired_cron_contract_is_versioned_and_parallel_pool_safe() -> None:
+    contract = json.loads(
+        (REPO / "config" / "hermes-cron.v1.json").read_text(encoding="utf-8")
+    )
+
+    assert set(contract) == {"schema_version", "timezone", "jobs"}
+    assert contract["schema_version"] == "1.0"
+    assert contract["timezone"] == "Asia/Shanghai"
+    assert contract["jobs"] == [
+        {
+            "job_id": "daily_close",
+            "name": "hqa-full-9h-daily-close",
+            "schedule": "15,25 8 * * 2-6",
+            "script": "hqa-full-9h-daily-close.sh",
+            "no_agent": True,
+            "deliver": "local",
+        },
+        {
+            "job_id": "freshness",
+            "name": "hqa-full-9h-freshness",
+            "schedule": "17 */2 * * *",
+            "script": "hqa-full-9h-freshness.sh",
+            "no_agent": True,
+            "deliver": "local",
+        },
+        {
+            "job_id": "weekly",
+            "name": "hqa-full-9h-weekly",
+            "schedule": "0,10 9 * * 0",
+            "script": "hqa-full-9h-weekly.sh",
+            "no_agent": True,
+            "deliver": "local",
+            "replaces_name": "hqa-weekly-review",
+        },
+        {
+            "job_id": "notification_drain",
+            "name": "hqa-full-9h-notification-drain",
+            "schedule": "7,22,37,52 * * * *",
+            "script": "hqa-full-9h-notification-drain.sh",
+            "no_agent": True,
+            "deliver": "local",
+        },
+    ]
+    assert all("workdir" not in job for job in contract["jobs"])
 
 
 # --- D-25 read-only gate wrapper -------------------------------------------
@@ -309,7 +381,7 @@ def test_skill_card_documents_strict_portfolio_risk_v2() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.7.0" in body
+    assert "version: 1.8.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-portfolio-risk.sh" in body
     assert "logs/portfolio_risk.jsonl" in body
     assert "current snapshot" in lower
@@ -325,7 +397,7 @@ def test_skill_card_documents_prediction_ledger_contract() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.7.0" in body
+    assert "version: 1.8.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-prediction.sh" in body
     assert "create" in lower and "list" in lower and "reconcile" in lower
     assert "predictions/entries.jsonl" in body
@@ -339,7 +411,7 @@ def test_skill_card_documents_market_foresight_and_artifact_shelf() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.7.0" in body
+    assert "version: 1.8.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-market-foresight.sh" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-artifacts.sh" in body
     assert "artifacts/hermes-feed/manifest.v1.json" in body
@@ -352,7 +424,7 @@ def test_skill_card_documents_opportunity_ledger_contract() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.7.0" in body
+    assert "version: 1.8.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-opportunities.sh" in body
     assert "opportunities/entries.jsonl" in body
     assert "sync-signals" in lower and "record-action" in lower
@@ -360,6 +432,25 @@ def test_skill_card_documents_opportunity_ledger_contract() -> None:
     assert "not_actionable" in lower and "expired_coverage_unknown" in lower
     assert "matching ticker is not causality" in lower
     assert "never invoke generate-signal" in lower
+
+
+def test_skill_card_documents_full_9h_automation_contract() -> None:
+    body = SKILL_SRC.read_text(encoding="utf-8")
+    lower = body.lower()
+
+    assert "version: 1.8.0" in body
+    for wrapper in (
+        "hqa-full-9h-daily-close.sh",
+        "hqa-full-9h-freshness.sh",
+        "hqa-full-9h-weekly.sh",
+        "hqa-full-9h-notification-drain.sh",
+    ):
+        assert f"__HERMES_SCRIPTS_DIR__/{wrapper}" in body
+    assert "schema 1.1" in lower and "six" in lower
+    assert "local" in lower and "delivery_unknown" in lower
+    assert "no-agent" in lower and "--workdir" in body
+    assert "prediction reconciliation" in lower and "weekly" in lower
+    assert "never" in lower and "trade" in lower
 
 
 def test_skill_card_readonly_templates_use_gate_wrapper():

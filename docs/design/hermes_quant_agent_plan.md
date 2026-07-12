@@ -1,7 +1,7 @@
 # Hermes 个性化量化交易 Agent 设计方案
 
 > 状态：修订草案（2026-07-01），已迁移到 `Hermes-quant-agent` 作为后续开发主目录。
-> **路线与阶段以 `docs/design/2026-07-01-roadmap-phases-0b-4.md` 的决策台账（D-1…D-29）为准**；本文为背景调研与总设计，个别章节（如 §10 分阶段计划的细节）可能已被台账取代。当前执行状态先看 `docs/README.md`。
+> **路线与阶段以 `docs/design/2026-07-01-roadmap-phases-0b-4.md` 的决策台账（D-1…D-30）为准**；本文为背景调研与总设计，个别章节（如 §10 分阶段计划的细节）可能已被台账取代。当前执行状态先看 `docs/README.md`。
 > 定位：用本机已安装的 Hermes 编排 `ai-quant-platform`，搭建一个以“数字员工 + 研究助手 + 人工审批交易助理”为核心的个人量化 agent。最终目标是 human-in-loop 半自动实盘，但实盘执行层必须独立设计、独立验收，不能靠打开旧开关实现。
 > 安全红线：在实盘执行层完成前，保持 `paper_trading` / `live_trading_enabled=false` / `kill_switch` / 人工审批门。任何策略、agent、cron、MCP 都不得绕过这些边界。
 
@@ -147,19 +147,22 @@ cd /Users/sunyibo/programs/ai-quant-platform
 /Users/sunyibo/programs/ai-quant-platform/ai-quant/bin/quant-system doctor
 ```
 
-### 6.1 通知渠道决策：Discord
+### 6.1 通知渠道决策：local 默认，Discord 可选外发
 
 已核验本机 Hermes 源码（`hermes_cli/platforms.py` / `send_cmd.py`）真实支持的平台，结论如下：
 
 | 渠道 | Hermes 原生支持 | 结论 |
 |---|---|---|
-| **Discord** | 一等公民（与 telegram/slack/signal 同级完整实现） | **首选**：用户常用、bot 生态成熟、支持频道分流（宏观/期权/异动分开）、代码块/表格/图表友好 |
+| **Discord** | 一等公民（与 telegram/slack/signal 同级完整实现） | **首选外部渠道**：用户常用、bot 生态成熟、支持频道分流（宏观/期权/异动分开）、代码块/表格/图表友好 |
 | 微信（个人 weixin） | 源码有条目，但个人微信无官方 bot API，靠非官方 hack，极易封号 | 不用（封号风险，不适合挂量化通知） |
 | 企业微信 WeCom | 有 `wecom` / `wecom_callback`（官方机器人 webhook） | 备选（需用户有企业微信） |
 | 飞书 Feishu / 钉钉 DingTalk | 官方支持 | 备选（用户未使用） |
 | QQ | 源码零命中 | 放弃（原生不支持，自写 adapter 不值当） |
 
-**决策**：本方案所有通知默认走 **Discord**，替换文章作者用的 Telegram（能力对等）。个人微信因封号风险排除；QQ 因 Hermes 不支持排除。若用户后续有企业微信，可加 `wecom` 作为第二渠道。
+**决策**：自动化通知默认走 **local**，形成可审计收据且不依赖外部渠道。Discord 是首选
+外部渠道，但只有人工显式配置并启用后才发送；完整 9H 运行验收没有实际外发 Discord。
+个人微信因封号风险排除；QQ 因 Hermes 不支持排除。若用户后续有企业微信，可加
+`wecom` 作为第二外部渠道。
 
 Discord 频道建议分流：`#盘前digest`、`#盘中异动`、`#期权radar`、`#回测结果`、`#复盘`、`#审批`（Phase 2+）。
 
@@ -217,7 +220,8 @@ Longbridge + Futu/Moomoo live accounts
 - 触发：`hermes cron`，按美股交易时段调度（北京时间约 21:30–次日 04:00，夏令时/冬令时各差 1h，需按季节切换 cron）。
 - 频率：盘中每 N 分钟（默认 30 min，可调）跑一次扫描。
 - 数据源：复用 `ai-quant-platform` 本地能力——期权 radar 扫描、因子/动量信号、异动检测。**不依赖外部 API**（相比文章作者用 RapidAPI 的方案更自主）。
-- 投递：`[SILENT]` 模式——无信号时静默，有信号才推 Discord `#盘中异动`。
+- 投递：`[SILENT]` 模式——无信号时静默，有信号才投递到显式 target；默认 local，
+  人工启用 Discord 后可投 `#盘中异动`。
 - 输出示例：`NVDA 触发动量信号 + 期权 IV 分位 85%，详情…`。
 
 验收标准：
@@ -235,7 +239,8 @@ Longbridge + Futu/Moomoo live accounts
 2. Hermes 在会话内把论文翻译成因子定义与 Python 源码，先让用户确认公式和字段语义（Gate 1）。
 3. Hermes 将确认后的源码写入临时文件，调用平台 `agent propose-factor --source-file <path>`，只生成 `.candidate` 候选。
 4. 用户审候选源码并手动 approve（Gate 2），Hermes 再调用 `experiment run-config --provider tiingo --include-approved-candidates` 做一次性真实历史回测。
-5. 结果（夏普/回撤/IC/holdout/试验次数）→ 评审池 pending + 推 Discord `#回测结果`。
+5. 结果（夏普/回撤/IC/holdout/试验次数）→ 评审池 pending + 投递到显式通知 target；
+   默认 local，人工启用 Discord 后可投 `#回测结果`。
 6. 用户满意后调用 `agent promote-candidate` 生成正式代码 diff；人工 `git diff` + commit 是 Gate 3，之后才能进入 paper sleeve。
 
 关键优势：平台提供候选池、评审池、回测引擎和转正落代码机制；LLM 生成职责收归 Hermes，会话外的平台后端保持确定性接缝。
@@ -362,11 +367,11 @@ IBKR 和期货相关能力延后处理。只有当股票/期权链路稳定后�
 本文是原始总设计，不再维护逐日实现进度。Phase 0a 到 1a-3、D-25 的计划与
 实现记录已迁入 roadmap 和对应 implementation plan。
 
-现在先读 `docs/README.md`。当前具体工程主线是
-`docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md`；Slice 9A-9G 与 mini 9H
-只读产物架已交付。完整 9H cron/notify 是下一待展开切片，仍需按当前源码另立
-bite-sized plan。平台仓库的 2026-07-08 前端计划保留 Slice 0-8
-实现记录与未来 UI backlog，不得把本节的旧顺序当作待执行指令。
+现在先读 `docs/README.md`。Phase 1a-4 v2 的 Slice 9A-9H 已全部完成：
+`docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md` 是完成顺序记录，
+`docs/superpowers/plans/2026-07-12-full-9h-automation-notifications.md` 是当前交付与
+运行验收记录。当前没有选定下一 slice；平台仓库的 2026-07-08 前端计划只保留
+Slice 0-8 实现记录与未来 UI backlog，不得把本节旧顺序或 backlog 当作待执行指令。
 
 第一阶段的成功标准不是赚钱，而是：
 
@@ -381,9 +386,9 @@ bite-sized plan。平台仓库的 2026-07-08 前端计划保留 Slice 0-8
 ## 12. 已迁移的早期开放问题
 
 这些早期问题已经进入 roadmap 决策台账和后续 plan，不在本文重复维护：通知与
-Discord 见 D-7/D-25，复盘双格式见 D-2/D-3，CLI/MCP/鉴权边界见 D-9/D-22，
-当前实现顺序见 D-28/D-29。尚未定案的运营参数应在对应 slice kickoff 时记录，不在
-`AGENTS.md` 或本总设计中追加会话流水账。
+Discord 见 D-7/D-25/D-30，复盘双格式见 D-2/D-3，CLI/MCP/鉴权边界见 D-9/D-22，
+Phase 1a-4 v2 完成事实见 D-26/D-29/D-30。尚未定案的运营参数应在未来单独选定的
+slice kickoff 时记录，不在 `AGENTS.md` 或本总设计中追加会话流水账。
 
 ---
 

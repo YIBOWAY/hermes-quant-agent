@@ -12,8 +12,10 @@ read model and explicit crash recovery, Slice 9B's unified paper snapshot,
 Slice 9C's current-snapshot portfolio risk v1, Slice 9D's strict historical
 price seam + risk v2, Slice 9E's prediction ledger, Slice 9F's proposal-only
 market foresight, the mini 9H read-only Hermes artifact shelf, and Slice 9G's
-auditable opportunity ledger are delivered. Full 9H cron/notify is next and
-remains queued until it has a current bite-sized plan. The
+auditable opportunity ledger are delivered. Full 9H now adds the four-job
+read-only automation loop, strict weekly/opportunity/freshness projections,
+durable notification receipts, feed schema 1.1 and the visible `/hermes` cards.
+The
 platform frontend plan is the
 Slice 0-8 delivery record and UI backlog. Platform Phase 15 is reference only.
 
@@ -39,8 +41,9 @@ Slice 0-8 delivery record and UI backlog. Platform Phase 15 is reference only.
   supported paper-options execution route. Use `hqa-opportunities.sh
   sync-signals|decide|record-action|sync-actions|reconcile|list`; symbol matching
   is forbidden and no command creates a signal, execution or trade.
-- **Weekly review** (`hqa.weekly_review`) — summarizes the last 7 days of
-  review-log and run-log records.
+- **Weekly review** (`hqa.weekly_review`) — emits a strict seven-day aggregate
+  across safety, signals, reviews, prediction calibration and opportunity state;
+  malformed sources degrade locally instead of breaking the whole projection.
 - **Scene-B factor reproduction** (`hqa.factor_repro_cli`) — human-gated
   `propose|approve|backtest` flow covering the three human gates: factor
   formula confirm → candidate source approve → `agent promote-candidate`
@@ -73,8 +76,9 @@ Slice 0-8 delivery record and UI backlog. Platform Phase 15 is reference only.
   corrupt ledgers fail closed. The score is a declared-direction binary Brier,
   not a three-class probability score. There is no sample/local/Tiingo/
   Longbridge fallback and no account, strategy, backtest, or trading side
-  effect. Use `hqa-prediction.sh create|list|reconcile`; 9H automation is not
-  wired yet. Runtime data defaults to `predictions/`; override it with
+  effect. Use `hqa-prediction.sh create|list|reconcile`; full 9H now runs a
+  bounded post-close reconcile but never creates predictions. Runtime data
+  defaults to `predictions/`; override it with
   `HQA_PREDICTION_DIR` or `--prediction-dir` (use a temporary override for
   smoke tests rather than fabricating a formal prediction).
 - **Market foresight** (`hqa.market_foresight`,
@@ -85,18 +89,23 @@ Slice 0-8 delivery record and UI backlog. Platform Phase 15 is reference only.
   under the same request ID fails closed.
 - **Hermes artifact feed** (`hqa.hermes_artifacts`,
   `hqa.hermes_artifacts_cli`) — rebuilds or reads
-  `artifacts/hermes-feed/manifest.v1.json`, projecting portfolio risk, folded
-  prediction states, and market-foresight candidates for the platform's
-  read-only `/hermes` shelf. Use `hqa-artifacts.sh refresh|show`. Scheduling,
-  reconciliation cadence, weekly aggregation, and notifications remain full
-  9H work.
+  `artifacts/hermes-feed/manifest.v1.json`. Schema 1.1 adds weekly review,
+  opportunity summary and per-job automation freshness to the original risk,
+  prediction and market-foresight sources. The platform consumes it through the
+  same read-only API; use `hqa-artifacts.sh refresh|show`.
+- **Full 9H automation** (`hqa.research_automation`) — runs post-close,
+  two-hour freshness, Sunday weekly and 15-minute notification-drain jobs through
+  Hermes no-agent cron. Stable receipts, a non-blocking process lock and a
+  private outbox make replays auditable. The default notification target is
+  local; external delivery is not exercised by acceptance. No job generates a
+  strategy, runs a backtest, mutates paper state, creates an execution or trades.
 
 - **AI-HOT alerts** (`hqa.aihot_alerts`) — `[SILENT]` notable-news watchdog;
   prints only when score/category filters find something worth attention.
 
-Slice 9G is an audit/CLI capability. It does not add a new `/hermes` card,
-database table, scheduler or notification; those UI projections and automation
-remain future full-9H work.
+Slice 9G remains the decision/action fact source; full 9H only schedules its safe
+read/reconcile interfaces and publishes aggregates. It adds no database table,
+POST route, platform scheduler, execution path or trading permission.
 
 Hermes-facing affordances (D-25): read-only platform queries run through
 `scripts/hermes/hqa-quant-readonly.sh` (allowlist-gated; **no** full options

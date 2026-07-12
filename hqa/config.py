@@ -34,6 +34,30 @@ HERMES_ARTIFACT_FEED_PATH = Path(
         str(REPO_DIR / "artifacts" / "hermes-feed" / "manifest.v1.json"),
     )
 )
+AUTOMATION_DIR = Path(
+    os.environ.get("HQA_AUTOMATION_DIR", str(REPO_DIR / "automation"))
+)
+AUTOMATION_RUNS_PATH = AUTOMATION_DIR / "runs.jsonl"
+NOTIFICATION_OUTBOX_PATH = Path(
+    os.environ.get(
+        "HQA_NOTIFICATION_OUTBOX_PATH",
+        str(AUTOMATION_DIR / "notification-outbox.jsonl"),
+    )
+)
+FULL9H_PROJECTION_DIR = Path(
+    os.environ.get(
+        "HQA_FULL9H_PROJECTION_DIR",
+        str(REPO_DIR / "artifacts" / "hermes-feed" / "projections"),
+    )
+)
+WEEKLY_REVIEW_PROJECTION_PATH = FULL9H_PROJECTION_DIR / "weekly-review.v1.json"
+OPPORTUNITY_SUMMARY_PROJECTION_PATH = (
+    FULL9H_PROJECTION_DIR / "opportunity-summary.v1.json"
+)
+AUTOMATION_STATUS_PROJECTION_PATH = (
+    FULL9H_PROJECTION_DIR / "automation-status.v1.json"
+)
+FULL9H_NOTIFY_TARGET = os.environ.get("HQA_FULL9H_NOTIFY_TARGET", "local")
 OPTIONS_SCAN_DIR = Path(
     os.environ.get("HQA_OPTIONS_SCAN_DIR", str(AIQP_DIR / "data" / "options_scans"))
 )

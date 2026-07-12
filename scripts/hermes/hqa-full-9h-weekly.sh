@@ -1,5 +1,5 @@
 #!/bin/bash
-# Compatibility wrapper: the legacy weekly job now executes full 9H weekly.
+# Full 9H structured weekly review and feed projection.
 set -euo pipefail
 unset PYTHONPATH PYTHONHOME
 cd __HQA_REPO_DIR__
