@@ -1,7 +1,7 @@
 # Hermes 个性化量化交易 Agent 设计方案
 
 > 状态：修订草案（2026-07-01），已迁移到 `Hermes-quant-agent` 作为后续开发主目录。
-> **路线与阶段以 `docs/design/2026-07-01-roadmap-phases-0b-4.md` 的决策台账（D-1…D-27）为准**；本文为背景调研与总设计，个别章节（如 §10 分阶段计划的细节）可能已被台账取代。
+> **路线与阶段以 `docs/design/2026-07-01-roadmap-phases-0b-4.md` 的决策台账（D-1…D-29）为准**；本文为背景调研与总设计，个别章节（如 §10 分阶段计划的细节）可能已被台账取代。当前执行状态先看 `docs/README.md`。
 > 定位：用本机已安装的 Hermes 编排 `ai-quant-platform`，搭建一个以“数字员工 + 研究助手 + 人工审批交易助理”为核心的个人量化 agent。最终目标是 human-in-loop 半自动实盘，但实盘执行层必须独立设计、独立验收，不能靠打开旧开关实现。
 > 安全红线：在实盘执行层完成前，保持 `paper_trading` / `live_trading_enabled=false` / `kill_switch` / 人工审批门。任何策略、agent、cron、MCP 都不得绕过这些边界。
 
@@ -357,17 +357,16 @@ IBKR 和期货相关能力延后处理。只有当股票/期权链路稳定后�
 
 ---
 
-## 11. 当前最小下一步
+## 11. 当前执行入口
 
-不要再从 Phase 0a 开始。Phase 0a/0b/1a-0/1a-1/1a-2 的路线已迁入
-`docs/design/2026-07-01-roadmap-phases-0b-4.md` 与对应 `docs/plans/*.md`。
+本文是原始总设计，不再维护逐日实现进度。Phase 0a 到 1a-3、D-25 的计划与
+实现记录已迁入 roadmap 和对应 implementation plan。
 
-当前最小下一步是 **Phase 1a-3 close-the-loop**：
-
-1. 平台实现单一 factor registry factory、promoted factor package、`agent promote-candidate`、关键 CLI `--json`。
-2. HQA 改为 JSON-first 解析，增加 trial counter、默认 holdout、`--final` 与满月 gate。
-3. 完整链路以三道人工门验收：确认公式 → 审候选源码 → 审转正 diff。
-4. 完成后再进入 Hermes 工作台改造，而不是继续扩张平台独立 Phase 15。
+现在先读 `docs/README.md`。当前具体工程主线是
+`docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md`；Slice 9A-9G 与 mini 9H
+只读产物架已交付。完整 9H cron/notify 是下一待展开切片，仍需按当前源码另立
+bite-sized plan。平台仓库的 2026-07-08 前端计划保留 Slice 0-8
+实现记录与未来 UI backlog，不得把本节的旧顺序当作待执行指令。
 
 第一阶段的成功标准不是赚钱，而是：
 
@@ -379,13 +378,12 @@ IBKR 和期货相关能力延后处理。只有当股票/期权链路稳定后�
 
 ---
 
-## 12. 待用户后续拍板
+## 12. 已迁移的早期开放问题
 
-- Phase 0 通知渠道：先本地日志，还是直接 Discord？
-- 每日 digest 时间：盘前美股、盘后美股，还是北京时间早晚各一次？
-- 第一批关注标的：沿用 `ai-quant-platform` 现有 universe，还是单独维护 Hermes watchlist？
-- 错误日志是否需要单独做成可检索 Markdown / JSONL 双格式？
-- 进入 Phase 1b 前，是否优先做 API 鉴权，还是先保持 CLI-only？
+这些早期问题已经进入 roadmap 决策台账和后续 plan，不在本文重复维护：通知与
+Discord 见 D-7/D-25，复盘双格式见 D-2/D-3，CLI/MCP/鉴权边界见 D-9/D-22，
+当前实现顺序见 D-28/D-29。尚未定案的运营参数应在对应 slice kickoff 时记录，不在
+`AGENTS.md` 或本总设计中追加会话流水账。
 
 ---
 

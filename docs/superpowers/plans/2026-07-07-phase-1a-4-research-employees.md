@@ -1,5 +1,10 @@
 # Phase 1a-4 — 研究员工扩容 Implementation Plan (D-26)
 
+> **Superseded (2026-07-10):** 本 implementation plan 已由
+> [`2026-07-10-phase-1a-4-v2.md`](2026-07-10-phase-1a-4-v2.md) 替代。
+> 产品需求可继续作为历史输入，但 paper repository、价格、signal identity、
+> prediction ledger 与 cron/notify 代码模板均不得直接执行。
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship three read-only research employees — ④ missed-opportunity tracker, ③ portfolio risk daily, ② market-foresight + prediction ledger — plus the three platform read-only JSON seams they consume. All proposal-only, zero approval complexity.

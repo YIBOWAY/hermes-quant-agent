@@ -1,9 +1,12 @@
 # Phase 1a-4 — 研究员工扩容 设计 spec（D-26）
 
-> 状态：设计修订版（2026-07-07），已按综合审批意见修正。
+> 状态：设计修订版（2026-07-07），**已被 v2 实现计划替代，仅保留历史产品素材**。
+> 当前唯一实现入口是
+> `docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md`；其 Slice 9A-9G + mini 9H 已完成，
+> 完整 9H cron/notify 是下一待展开切片。不得按本文旧模板或顺序继续实现。
 > 上游：`docs/design/2026-07-01-roadmap-phases-0b-4.md` §2.6b / D-26。
 > 前置：Phase 1a-3 闭环补全已交付（含安全加固）；1a-0 平台接线包已交付。
-> 本文定位：1a-4 的设计 spec；实现计划在 spec 批准后由 `superpowers:writing-plans` 单独产出。
+> 本文定位：1a-4 的历史设计 spec；当前进度和验收事实只在 v2 计划维护。
 > 安全红线（继承）：三员工全 read-only / proposal-only，零审批复杂度，不碰 paper mutation / 交易链路，凭证不进 LLM 上下文。
 
 ---
