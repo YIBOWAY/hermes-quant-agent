@@ -694,14 +694,26 @@ CI/常规测试不得调用真实 Grok/Codex、不得外网、不得触发回测
 
 ## 14. 下一步
 
+The first implementation wave is split into three independently testable plans:
+gateway capability contract, candidate integrity/Gate 3, and professional
+frontend/read-only shell. The bridge/chat plan is admitted only when
+verify-chat returns ready against a Git-reviewed default contract and current
+installed Hermes evidence.
+
 1. 第一批正式计划已经拆为 Hermes gateway capability contract、candidate
-   integrity/Gate 3、professional frontend/read-only shell 三个独立子系统；
+   integrity/Gate 3、professional frontend/read-only shell 三个独立子系统（已选
+   wave；真实 Hermes chat mutation 不在本波次）；
 2. 用户选择执行方式后，优先并行执行 capability/candidate 基线与专业前端 F0；
 3. F0、F1 都必须单独取得用户书面确认，candidate 真实数据 migration 也必须另行授权；
 4. 只有 capability evaluator 针对 Git 绑定、独立审查为 `ready` 的默认合同和当时干净安装态
-   Hermes 返回 chat ready，才能根据真实合同另写 bridge/chat plan；不得提前实现或 fallback
-   到旧 AgentRunner；
+   Hermes 返回 chat ready（`hqa.hermes_capability_cli verify-chat` exit 0，
+   `review.verdict=ready` 且 `installation.matches_snapshot=true`），才能根据真实合同
+   另写 bridge/chat plan；不得提前实现，也不得把旧 `/api/agent/tasks` 或 AgentRunner
+   当作 fallback；
 5. 后续 HQA Task/统一结果、受控研究/三 Gate、逐页切流、硬化删除仍按各自前置证据
    just-in-time 写独立 implementation plan。
 
-当前状态是“D-31 已批准、第一批计划已写、等待执行选择”，不是任何新生产能力已交付。
+当前状态是“D-31 已批准、第一批三计划已选为 wave、capability 合同与证据在推进，但
+chat 写端仍 fail-closed”，不是任何新 chat/execution 生产能力已交付。
+指纹与缺失语义以 `docs/contracts/hermes-gateway-0.18.2.md` 与
+`config/hermes-gateway-capabilities.v1.json` 为准。

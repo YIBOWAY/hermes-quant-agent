@@ -13,9 +13,9 @@ plan、audit 和 git history 中。
 |---|---|---|
 | 产品方向 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；平台是领域后端。该 roadmap 管长期阶段、决策与安全门。 |
 | 已批准下一产品设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | D-31：`/hermes` 成为默认首页，真实连接本地 Hermes，并逐步吞并 factor-lab、backtest、experiments、agent-studio 的页面体验。 |
-| 第一批正式计划：Hermes 合同 | [`superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md`](superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md) | 将本机 Hermes 0.18.2 的 WebSocket JSON-RPC 能力、Git 绑定独立审查和安装指纹冻结为 fail-closed 合同；当前缺少 request recovery、Run identity、event replay、immutable provider/fallback policy 和 actual-provider evidence，所以真实 chat/resume 写端继续关闭。 |
-| 第一批正式计划：候选安全 | [`superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md`](superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md) | 统一 candidate root，交付 immutable manifest、Gate 2 digest/CAS、legacy_unbound、最后读取再校验与隔离 Gate 3 worktree。 |
-| 第一批正式计划：专业前端 | [`superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md`](superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md) | 先做专业 F0/F1 并分别取得用户书面确认，再实现 F2 只读新壳和可回滚默认首页；不开放 chat/execution/旧页 redirect。 |
+| 第一批正式计划：Hermes 合同（已选 wave） | [`superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md`](superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md) | 将本机 Hermes 0.18.2 的 WebSocket JSON-RPC 能力、Git 绑定独立审查和安装指纹冻结为 fail-closed 合同；证据见 [`contracts/hermes-gateway-0.18.2.md`](contracts/hermes-gateway-0.18.2.md)。当前缺少 request recovery、Run identity、event replay、immutable provider/fallback policy 和 actual-provider evidence，所以真实 chat/resume 写端继续关闭。 |
+| 第一批正式计划：候选安全（已选 wave） | [`superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md`](superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md) | 统一 candidate root，交付 immutable manifest、Gate 2 digest/CAS、legacy_unbound、最后读取再校验与隔离 Gate 3 worktree。 |
+| 第一批正式计划：专业前端（已选 wave） | [`superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md`](superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md) | 先做专业 F0/F1 并分别取得用户书面确认，再实现 F2 只读新壳和可回滚默认首页；不开放 chat/execution/旧页 redirect。 |
 | 已完成实现记录 | [`superpowers/plans/2026-07-10-phase-1a-4-v2.md`](superpowers/plans/2026-07-10-phase-1a-4-v2.md) | Phase 1a-4 v2 的 Slice 9A-9H 已全部完成；其中“没有下一 slice”仅是该交付完成时的历史状态，不代表当前 D-31 计划状态。 |
 | 当前交付记录 | [`superpowers/plans/2026-07-12-full-9h-automation-notifications.md`](superpowers/plans/2026-07-12-full-9h-automation-notifications.md) | 完整 9H 的只读自动化、周复盘、freshness、feed 1.1、页面可见性、local 通知与四个 Hermes cron 的代码交付和运行验收。 |
 | 前序交付记录 | [`superpowers/plans/2026-07-12-slice-9g-opportunity-ledger.md`](superpowers/plans/2026-07-12-slice-9g-opportunity-ledger.md) | 9G 稳定 signal identity、decision/action ledger、精确平台行动关联与 missed 安全判定。 |
@@ -37,11 +37,21 @@ migration/table。
 
 Git、远端和运行进程是易变状态，不在本入口维护“ahead/dirty/尚未推送”快照。每次交接
 都应以 `git status --short --branch`、`git log`、`curl /api/health` 和对应测试重新核验。
-下一产品设计已经通过 D-31 单独确认，三份第一批正式 implementation plan 已按 2026-07-13
-源码事实写成，但尚未开始执行。下一步由用户在 subagent-driven 与 inline execution 中选择；
-不得从旧 1a-4 模板、旧前端 P2/P3 或历史 audit 自行增加施工步骤。真实 Hermes chat
-mutation 不是已选 slice：只有 capability plan 的 `verify-chat` 针对已提交、独立审查为
-`ready` 的默认合同和当时干净安装态证据返回 ready，才能另写 bridge/chat implementation plan。
+下一产品设计已经通过 D-31 单独确认。**第一批已选 wave** 是三份独立可测计划：Hermes
+gateway capability contract、candidate integrity/Gate 3、professional frontend/read-only
+shell。不得从旧 1a-4 模板、旧前端 P2/P3 或历史 audit 自行增加施工步骤。
+
+The real Hermes chat mutation slice is not selected. The fingerprinted Hermes
+0.18.2 installation exposes the
+needed JSON-RPC method names but does not yet satisfy D-31 request-recovery,
+event-replay, Run identity, immutable session provider/fallback policy, or
+actual-provider evidence. The checked-in capability evaluator and Git-bound
+independent review therefore keep chat/resume/approval/stop disabled.
+
+只有 capability plan 的 `verify-chat` 针对已提交、独立审查为 `ready` 的默认合同和当时
+干净安装态证据返回 ready（`review.verdict=ready` 且
+`installation.matches_snapshot=true`），才能另写 bridge/chat implementation plan。
+旧 `/api/agent/tasks` / AgentRunner **不是** fallback。
 
 ## 状态用词
 
@@ -91,9 +101,11 @@ mutation 不是已选 slice：只有 capability plan 的 `verify-chat` 针对已
 Hermes 统一研究工作台设计已经确认并记录在
 `superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`。第一批工作被拆成
 Hermes capability、candidate integrity/Gate 3、professional frontend/read-only shell
-三份可独立验证的正式计划；当前状态是“计划已写、等待执行方式选择”，不是“代码已开始”。
-原 Phase 1a-4 spec/plan 仅保留为历史输入；`2026-07-10-phase-1a-4-v2.md` 和完整 9H 计划
-均是已完成记录，不得把其中的旧 deferred 条目自动升级为下一步。
+三份可独立验证的正式计划（已选 wave）。capability 合同与 0.18.2 证据在推进，但
+真实 Hermes chat mutation 未选中；chat/resume/approval/stop 仍 fail-closed，
+旧 `/api/agent/tasks` 不是 fallback。原 Phase 1a-4 spec/plan 仅保留为历史输入；
+`2026-07-10-phase-1a-4-v2.md` 和完整 9H 计划均是已完成记录，不得把其中的旧 deferred
+条目自动升级为下一步。
 
 ### 历史审计
 
