@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "observed_at": "2026-07-13T09:13:45Z",
+  "hermes_version": "0.18.2",
+  "upstream_commit": "b03c94db",
+  "source_checkout_commit": "4281151ae859241351ba14d8c7682dc67ff4c126",
+  "server_source_sha256": "2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17",
+  "transport": "websocket_jsonrpc",
+  "endpoint": "ws://127.0.0.1:9119/api/ws",
+  "loopback_only": true,
+  "relevant_methods_observed": [
+    "approval.respond",
+    "config.set",
+    "prompt.submit",
+    "session.create",
+    "session.history",
+    "session.interrupt",
+    "session.list",
+    "session.resume",
+    "session.status"
+  ],
+  "evidence": {
+    "session_provider_override": true,
+    "session_primary_provider_policy_immutable": false,
+    "session_provider_fallback_policy_immutable": false,
+    "client_idempotency_key": false,
+    "request_correlation_metadata": false,
+    "request_lookup_by_client_id": false,
+    "run_id": false,
+    "event_id": false,
+    "event_cursor": false,
+    "run_provider_evidence": false,
+    "approval_command_digest_binding": false,
+    "approval_ttl": false,
+    "approval_single_use": false,
+    "stop_idempotent": false,
+    "stop_reconcilable": false
+  }
+}

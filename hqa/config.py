@@ -68,6 +68,24 @@ SIGNAL_THRESHOLDS_PATH = Path(
     os.environ.get("HQA_SIGNAL_THRESHOLDS", str(RUNTIME_DIR / "signal_thresholds.json"))
 )
 
+# These two admission anchors are intentionally not environment-overridable.
+# Tests monkeypatch the module constants directly.
+HERMES_GATEWAY_CAPABILITIES_PATH = (
+    REPO_DIR / "config" / "hermes-gateway-capabilities.v1.json"
+)
+HERMES_GATEWAY_REVIEW_PATH = (
+    REPO_DIR / "config" / "hermes-gateway-capabilities.v1.review.json"
+)
+HERMES_BIN_PATH = Path(
+    os.environ.get("HQA_HERMES_BIN_PATH", "/Users/sunyibo/.local/bin/hermes")
+)
+HERMES_SOURCE_DIR = Path(
+    os.environ.get(
+        "HQA_HERMES_SOURCE_DIR",
+        "/Users/sunyibo/.hermes/hermes-agent",
+    )
+)
+
 # Nominal safety baseline. Any deviation from these values is an alert.
 EXPECTED_SAFETY = {
     "dry_run": "true",
