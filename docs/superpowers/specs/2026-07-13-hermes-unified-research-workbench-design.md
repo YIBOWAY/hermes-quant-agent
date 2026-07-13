@@ -1,7 +1,9 @@
 # Hermes 统一研究工作台设计 spec（D-31）
 
 > 状态：**产品与架构设计已确认**（2026-07-13）；第一批三份正式 implementation
-> plan 已编写、尚未开始执行，本文仍不能直接当作逐项施工清单。
+> plan 已选 wave：gateway capability 已冻结且 chat fail-closed；candidate
+> integrity/Gate 3 已代码交付；professional frontend/read-only shell 已代码交付
+> （2026-07-14）。本文仍不能直接当作 chat/bridge 或旧页退场的施工清单。
 >
 > 决策来源：2026-07-13 `superpowers:brainstorming`，逐节确认了产品范围、信息架构、
 > Hermes 对接、provider 规则、研究生命周期、数据归属、故障恢复与迁移顺序。
@@ -719,7 +721,8 @@ installed Hermes evidence.
 5. 后续 HQA Task/统一结果、受控研究/三 Gate、逐页切流、硬化删除仍按各自前置证据
    just-in-time 写独立 implementation plan。
 
-当前状态是“D-31 已批准、第一批三计划已选为 wave、capability 合同与证据在推进，但
-chat 写端仍 fail-closed”，不是任何新 chat/execution 生产能力已交付。
-指纹与缺失语义以 `docs/contracts/hermes-gateway-0.18.2.md` 与
-`config/hermes-gateway-capabilities.v1.json` 为准。
+当前状态是“D-31 已批准；gateway capability 合同已冻结且 chat 写端 fail-closed；
+candidate integrity/Gate 3 已代码交付；professional frontend F2 只读壳与可回滚默认
+首页已代码交付”，不是任何新 chat/execution 生产能力已交付。能力提示仍是静态
+`blocked_in_this_slice`。指纹与缺失语义以 `docs/contracts/hermes-gateway-0.18.2.md`
+与 `config/hermes-gateway-capabilities.v1.json` 为准。
