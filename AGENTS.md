@@ -7,16 +7,18 @@ Rules for AI agents working in this repository.
 - `Hermes-quant-agent` is the active orchestration/COO layer for the local
   `/Users/sunyibo/programs/ai-quant-platform` backend.
 - Start at `docs/README.md`; it distinguishes the product roadmap, completed
-  cross-repo delivery records, the unselected next slice, and historical material.
+  cross-repo delivery records, the drafted first implementation wave, and historical material.
 - The product roadmap is `docs/design/2026-07-01-roadmap-phases-0b-4.md`.
   The completed Phase 1a-4 v2 implementation record is
   `docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md`; Slices 9A through 9H
   are all delivered. The current delivery record is
   `docs/superpowers/plans/2026-07-12-full-9h-automation-notifications.md`.
-  No next implementation slice is selected: do not infer one from an older plan
-  or backlog. The platform frontend plan is the Slice 0-8 record and future UI
-  backlog. The 2026-07-07 Phase 1a-4 implementation plan is superseded material
-  and must not be followed task-by-task.
+  D-31's first implementation wave is drafted in the three 2026-07-13 plans for
+  Hermes gateway capabilities, candidate integrity/Gate 3, and the professional
+  frontend/read-only shell; execution has not started. Do not infer additional
+  work from an older plan or backlog. The platform frontend plan is the Slice 0-8
+  delivery record, not the active backlog. The 2026-07-07 Phase 1a-4
+  implementation plan is superseded material and must not be followed task-by-task.
 - Treat `ai-quant-platform/docs/phases/phase_15_iteration_roadmap.md` as
   reference material only. Do not use it as an independent product roadmap.
 

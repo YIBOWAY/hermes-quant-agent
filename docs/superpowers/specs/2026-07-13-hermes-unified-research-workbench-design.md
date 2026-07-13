@@ -1,7 +1,7 @@
 # Hermes 统一研究工作台设计 spec（D-31）
 
-> 状态：**产品与架构设计已确认**（2026-07-13）；实现计划尚未编写、尚未选择
-> implementation slice，本文不能直接当作逐项施工清单。
+> 状态：**产品与架构设计已确认**（2026-07-13）；第一批三份正式 implementation
+> plan 已编写、尚未开始执行，本文仍不能直接当作逐项施工清单。
 >
 > 决策来源：2026-07-13 `superpowers:brainstorming`，逐节确认了产品范围、信息架构、
 > Hermes 对接、provider 规则、研究生命周期、数据归属、故障恢复与迁移顺序。
@@ -694,10 +694,14 @@ CI/常规测试不得调用真实 Grok/Codex、不得外网、不得触发回测
 
 ## 14. 下一步
 
-1. 用户审阅本文书面规格；
-2. 书面规格确认后调用 `superpowers:writing-plans`，把候选阶段 0-7 拆成逐文件、TDD、
-   可独立提交并重新命名的 implementation slices；
-3. implementation plan 再次获批后，才使用专业前端 Agent、TDD 与 subagent-driven
-   development 开始生产实现。
+1. 第一批正式计划已经拆为 Hermes gateway capability contract、candidate
+   integrity/Gate 3、professional frontend/read-only shell 三个独立子系统；
+2. 用户选择执行方式后，优先并行执行 capability/candidate 基线与专业前端 F0；
+3. F0、F1 都必须单独取得用户书面确认，candidate 真实数据 migration 也必须另行授权；
+4. 只有 capability evaluator 针对 Git 绑定、独立审查为 `ready` 的默认合同和当时干净安装态
+   Hermes 返回 chat ready，才能根据真实合同另写 bridge/chat plan；不得提前实现或 fallback
+   到旧 AgentRunner；
+5. 后续 HQA Task/统一结果、受控研究/三 Gate、逐页切流、硬化删除仍按各自前置证据
+   just-in-time 写独立 implementation plan。
 
-在第 2 步完成前，项目仍然是“已批准下一产品设计、尚未选定下一 implementation slice”。
+当前状态是“D-31 已批准、第一批计划已写、等待执行选择”，不是任何新生产能力已交付。
