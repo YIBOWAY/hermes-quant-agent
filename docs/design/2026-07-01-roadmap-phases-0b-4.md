@@ -4,7 +4,7 @@
 > 上游：`docs/design/hermes_quant_agent_plan.md`（总设计）。前置：Phase 0a 已交付（只读数字员工，见 `docs/plans/2026-07-01-phase-0a-readonly-digital-employee.md`）。
 > 本文定位：把 0a 之后的全部阶段一次性对齐方向。**分层规划**——近期阶段给完整 TDD 计划，中期给设计 spec，远期给方向大纲。
 > 安全红线（贯穿全程，继承总设计）：实盘执行层完成前，保持 `paper_trading` / `live_trading_enabled=false` / `kill_switch` / 人工审批门。任何策略、agent、cron、MCP 都不得绕过。
-> **产品路线事实源**：本文决策台账（D-1…D-30）管理 Hermes-quant-agent 与
+> **产品路线事实源**：本文决策台账（D-1…D-31）管理 Hermes-quant-agent 与
 > `ai-quant-platform` 的跨仓产品方向；平台 Phase 15 只保留素材价值。当前交付状态、
 > 是否已选定下一 slice 和 git 分层口径先看 [`../README.md`](../README.md)。
 
@@ -16,7 +16,7 @@
 
 | 层 | 阶段 | 产出形式 | 文档 |
 |---|---|---|---|
-| 近 | 0b, 1a-0, 1a-1, 1a-2, 1a-3, 工作台 | 完整 TDD 实现计划（可逐步执行） | HQA `docs/plans/*.md`；当前工作台计划在平台仓库 |
+| 近 | 0b, 1a-0, 1a-1, 1a-2, 1a-3, 工作台 | 完整 TDD 实现计划（可逐步执行） | 已完成阶段见 HQA/platform `plans/`；当前工作台只有 D-31 设计 spec，implementation plan 尚未编写 |
 | 中 | 1b, 2 | 设计 spec（架构 / 接口契约 / 验收门；不到步骤级） | 本文 §3、§4 |
 | 远 | 3, 4 | 方向大纲（硬约束 / 开放问题 / 决策标准；不做实现设计） | 本文 §5、§6 |
 
@@ -57,6 +57,7 @@
 | D-28 | （2026-07-08，2026-07-10 按 git/运行事实回填；**当前状态已由 D-29/D-30 取代**）**当时的执行顺序修订**：产品 roadmap 仍由 HQA 管理，但具体工程主线切到 `ai-quant-platform/docs/superpowers/plans/2026-07-08-frontend-redesign-hermes-integration.md`。先以 expand-contract 方式交付 `/brief`、PostgreSQL brief/AI/paper 业务事实、`/hermes` 一等入口和渐进式前端重设计，再重新排 Phase 1a-4。该计划中的 `/hermes` 先做只读骨架，不复活平台 LLM runner，不提前删除 factor-lab/agent-studio；1a-4 当时保留为 queued plan，恢复前必须按当时平台契约复审。当前交付状态仍以 `docs/README.md` 为准。 |
 | D-29 | （2026-07-10 决策，**2026-07-12 完成**）**Phase 1a-4 接受目标、拒绝原计划照抄，改为 v2 小切片顺序**：复审发现旧计划的 account/provider/signal/cron 契约漂移和 paper 查询隐式 mutation 安全缺口，因此以 `docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md` 依次交付 9A 纯只读 ops read-model、9B 统一 paper snapshot、9C-9D 组合风险、9E prediction ledger、9F market-foresight、mini 9H 三源产物架、9G opportunity ledger，最后以完整 9H 补齐四个 Hermes cron、周复盘、freshness、通知和 feed 1.1。该 v2 顺序现已全部完成；旧 `2026-07-07-phase-1a-4-research-employees.md` 只保留历史素材。 |
 | D-30 | （2026-07-12 交付决策）**完整 9H 代码交付与运行验收完成，Phase 1a-4 v2 收口，暂不选择下一 slice**：HQA `530 passed, 2 skipped`；daily-close、freshness、weekly、notification-drain 四个 Hermes `no-agent`、local-delivery cron 均真实触发并为 `ok`；feed schema 1.1 精确六源，weekly/opportunity/automation 已在 `/hermes` 可见；机会投影为 `59 not_actionable / 0 missed`。通知默认 local，验收未实际外发 Discord；未触发策略、回测、paper mutation、broker 或交易；完整 9H 未新增平台数据库 migration/table。当前交付记录为 `docs/superpowers/plans/2026-07-12-full-9h-automation-notifications.md`，后续工作必须先有新的用户/产品决策。 |
+| D-31 | （2026-07-13 产品设计决策，**已批准、尚未编写实现计划**）**Hermes 统一研究工作台**：`/hermes` 成为平台默认首页并通过同源 BFF 真实连接 loopback 本地 Hermes；factor-lab、backtest、experiments、agent-studio 四套页面体验按功能等价和安全 Gate 逐步重做、切流并最终退场，领域引擎/API/CLI/artifact 不删除。Hermes 管对话/Run，HQA append-only bridge journal + task ledger 管跨系统关联、幂等和研究 Task，平台管领域事实，PostgreSQL 只镜像可重建投影/加密离线缓存。新 session 选择并锁定 Grok/Codex provider policy，fallback 必须显式。Gate 1/2/3 与 Hermes command approval 严格分离，Gate 2 必须绑定 candidate 内容摘要并先修现有 TOCTOU。首版本地 BFF/服务只绑定 loopback，所有 mutation 强制 same-origin、session 和 CSRF；远程访问先做 TLS/认证/授权。生产 UI 必须由专业前端 Agent 重新做高保真/响应式全状态设计并经用户批准；实施采用“先扩展、再切流、最后收缩”。完整设计见 `docs/superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`。 |
 
 ---
 
@@ -183,7 +184,19 @@
 `docs/superpowers/plans/2026-07-12-full-9h-automation-notifications.md`。当前没有选定下一
 slice；旧 2026-07-07 implementation plan 不再是可执行清单。
 
-### 2.7 Hermes 工作台（平台前端，D-17/D-28；当前渐进实现）
+### 2.7 Hermes 工作台（平台前端，D-17/D-28；具体方向已由 D-31 修订）
+
+> 本节保留 2026-07-03 的原始四区设计和历史核验。2026-07-13 已批准 D-31，扩大为
+> 因子实验室、回测器、实验管理、智能体工作室四套页面体验的统一重做，并增加真实
+> Hermes Session/Run 桥、HQA Task ledger、摘要绑定审批和专业前端 Gate。当前实施边界以
+> `docs/superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md` 为准；
+> implementation plan 尚未编写。
+
+> **历史快照警告：以下折叠内容记录 D-17 的旧四区方案，其中“需新增/复用/改造”均不是
+> 当前施工要求。不要从本段抽取下一步；只用它核对已交付背景和 parity 证据。**
+
+<details>
+<summary>展开 D-17/D-28 历史四区设计</summary>
 
 平台前端（Next.js 15，`src/frontend`）的因子实验室与智能体工作室两页**改造吞并**为单一「Hermes 工作台」页面（建议作为首页），四区：
 
@@ -202,6 +215,8 @@ slice；旧 2026-07-07 implementation plan 不再是可执行清单。
 - 此页同时是 Phase 2 满月运营面板底座（phase_15 P3 届时并入时间线）。
 
 **安全前置**：平台 API 零鉴权（`apiClient.ts` 指向 `127.0.0.1:8765`），工作台仅限 localhost；一旦需要远程点 approve，1b 鉴权必须先行。进入实现前单独走 brainstorming→plan 流程。
+
+</details>
 
 ---
 
@@ -344,9 +359,9 @@ Phase 3 不是「把模拟改成 real」，是从零设计的实盘执行系统�
    - `2026-07-06-interaction-latency-hermes-ux.md`（D-25 交互延迟三件套；横切项，与 1a-3 并行）
    - `2026-07-10-phase-1a-4-v2.md`（D-29，§2.6b）：已完成的 Phase 1a-4 v2 实现记录；旧 2026-07-07 计划已被替代。
    - `2026-07-12-full-9h-automation-notifications.md`（D-30，§2.6b）：当前交付与运行验收记录；完成后未自动选择下一 slice。
-   - Hermes 工作台（D-17/D-28，§2.7）：已纳入平台仓库
-     `docs/superpowers/plans/2026-07-08-frontend-redesign-hermes-integration.md`，按只读骨架、
-     artifact/evidence parity、最后才软下线旧页面的顺序渐进实现。
+   - Hermes 工作台旧 Slice 0-8（D-17/D-28，§2.7）：平台
+     `docs/superpowers/plans/2026-07-08-frontend-redesign-hermes-integration.md` 是已完成实现
+     记录和 parity inventory，不是当前 backlog；D-31 implementation plan 尚未编写。
 3. 1b / 2 的 spec 即本文 §3 / §4；3 / 4 大纲即本文 §5 / §6。它们进入实现前各自再展开为独立计划。
 
 ## 投资与安全声明
