@@ -217,8 +217,14 @@ Notes on the write path:
   configured; otherwise the platform will fail. Non-final runs reserve the last
   183 days as holdout unless `--final` is passed (D-21); a per-factor trial
   counter prints an overfit warning after 3 runs (D-21).
-- Promotion to the live review pool is always a separate human decision
-  (`agent promote-candidate` on the platform CLI, then human `git diff` + commit).
+- Promotion (Gate 3) is always a separate human decision on the platform CLI:
+  `agent promote-candidate --candidate-id <id> --expected-digest <sha256>
+  --base-commit <HEAD>` prepares an isolated managed review worktree and prints
+  exactly `{promotion_id, worktree, patch, manifest}`. Status/cleanup use
+  `--promotion-id` only; destructive cleanup needs reviewed-commit evidence or
+  explicit `--abandon`. The system never auto-commits; the human `git diff` +
+  commit completes Gate 3. New Hermes approval UI stays disabled until
+  frontend/bridge gates land.
 
 ### `--json` output (D-22 status)
 

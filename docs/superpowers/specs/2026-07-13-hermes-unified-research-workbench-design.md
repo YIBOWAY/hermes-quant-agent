@@ -487,29 +487,35 @@ CSRF、target ID、revision digest 和 expected status，由服务端 CAS 后写
 repository。Gate 3 的最终完成事实仍是人类审查后的 git commit；网页只能展示/刷新 diff，
 不能代为 commit。
 
-### 8.3 当前 candidate TOCTOU 必须先修
+### 8.3 Candidate integrity baseline（2026-07-13 已代码交付）
 
-当前 `CandidatePool.write_candidate()` 对稳定 candidate ID 目录和文件直接覆写；
-`approved.lock` 只记录 ID/decision/note；`promote_candidate()` 只检查 lock 是否存在，然后读取
-当下 `factor.py.candidate`。这意味着“批准后同 ID 源码变化”可能被错误继承批准。
+历史 TOCTOU（同 ID 覆写、仅 lock 存在即授权、promotion 再读可变源码）已由
+`2026-07-13-candidate-integrity-and-gate3` 修复。**当前实现事实**：
 
-新工作台开放审批或执行前必须：
+1. Canonical root 统一到 `resolve_candidates_dir(resolve_agent_output_dir())` →
+   默认 `data/agent_run/agent/candidates`；仅 `QS_AGENT_OUTPUT_DIR` 可覆盖；
+   CWD/`QS_DATA_DIR` 不迁移候选池。
+2. `agent migrate-candidates` 默认 dry-run；仅当 manifest digest 一致时合并，冲突
+   不覆盖。真实 `--apply` 需单独授权 + `--backup-dir`。本机 dry-run 仍为
+   `applied=false`，一个 canonical-unversioned pending 项待加 v1 manifest。
+3. candidate 目录独占创建；相同 ID + 相同 digest 幂等返回；相同 ID + 不同 digest
+   冲突且零写入；发布后 metadata/artifacts 不可覆写。
+4. `approved.lock` 绑定 candidate ID + manifest digest；review 为
+   expected-digest + `expected_status=pending` CAS。
+5. 一次性研究加载、回测和 Gate 3 prepare 都在最后责任点再校验 digest。
+6. 旧无摘要批准为 `legacy_unbound`，永不授权执行/晋级，必须重新审批。
 
-1. 将 canonical root 统一到 `data/agent_run/agent/candidates`；
-2. 审计旧 `data/agent/candidates`，仅当 manifest digest 一致时合并，冲突不覆盖；
-3. candidate 目录独占创建；相同 candidate ID + 相同 manifest digest 的重试返回既有对象，
-   不重写文件；相同 ID + 不同 digest 返回冲突并 fail closed；已批准内容永不可覆写；
-4. `approved.lock` 保存 manifest version + digest；
-5. 一次性研究加载、回测和 promotion 都重新计算并核对 digest；
-6. 所有旧无摘要批准标记为 `legacy_unbound`，必须重新审批，不 grandfather。
+manifest 构建拒绝路径穿越、symlink、非普通文件和目录外引用；dirfd/no-follow/
+no-replace 发布。读状态互斥：`verified` / `migration_required` / `corrupt`。
 
-manifest 构建必须拒绝路径穿越、symlink、非普通文件和目录外引用，并对规范化相对路径稳定
-排序；审批、重复生成和 promotion 并发时仍以锁 + CAS 保证 digest 不漂移。
+Gate 3 公共 CLI 需要 `--candidate-id`、`--expected-digest`、`--base-commit`，在
+隔离 managed review worktree 生成四字段
+`{promotion_id, worktree, patch, manifest}` scoped patch；status/cleanup 只认
+`--promotion-id`；abandon 仅显式；系统永不自动 commit。主工作树无关 dirty 不碰。
 
-Gate 3 仍由 `agent promote-candidate` 只生成 working-tree diff，人工 `git diff` 审查和 commit
-完成；系统永不自动 commit。promotion 必须在记录的 base commit 上使用独立临时 git
-worktree，且只允许写 manifest 白名单路径；目标已存在、scoped path 已 dirty 或将覆盖用户
-修改时立即拒绝。Gate 3 只展示并摘要 scoped patch，主工作树及其无关 dirty 变更永远不碰。
+**仍未开放（D-31 后续）**：新 Hermes 工作台审批/执行 UI、真实 migration apply、
+chat/bridge mutation。在 professional frontend/bridge gates 完成前，不得把新
+`/hermes` 审批面接到这些写路径。
 
 ---
 

@@ -102,8 +102,11 @@ python3 -m hqa.factor_repro_cli propose \
 # 你打开生成的 factor.py.candidate，仔细读了代码逻辑，确认翻译正确
 cat .../factor-amihud_liquidity-a1b2c3d4e5/factor.py.candidate
 
-# Gate 2：人工 approve
-python3 -m hqa.factor_repro_cli approve --candidate-id factor-amihud_liquidity-a1b2c3d4e5 \
+# Gate 2：人工 digest CAS approve（四值均由人类从 verified 明细抄写，禁止 refetch）
+python3 -m hqa.factor_repro_cli approve \
+  --candidate-id factor-amihud_liquidity-a1b2c3d4e5 \
+  --expected-digest <sha256-from-verified-detail> \
+  --expected-status pending \
   --note "Amihud 公式翻译确认无误，dollar_volume 字段已验证"
 
 # 1a-3 落地后：真实数据回测（Tiingo EOD；默认保留最近 183 天 holdout 不参与迭代——D-21）
@@ -129,11 +132,14 @@ Results are proposal-only; promotion to the review pool is a human decision.
 # 1a-3 落地后：转正前唯一一次全窗口回测（含 holdout 段）——holdout 明显衰减就回炉
 python3 -m hqa.factor_repro_cli backtest --factor-id amihud_liquidity_factor ... --final
 
-# Gate 3：生成正式代码 diff（绝不自动 commit），你在 git 层面做最后审查
+# Gate 3：在隔离 review worktree 生成 scoped patch（绝不自动 commit）
 cd /Users/sunyibo/programs/ai-quant-platform
-./ai-quant/bin/quant-system agent promote-candidate --candidate-id factor-amihud_liquidity-a1b2c3d4e5
-git diff        # 审查 library/promoted/amihud_liquidity_factor.py + 测试脚手架
-git add -A && git commit -m "promote: amihud_liquidity_factor (Gate 3)"
+./ai-quant/bin/quant-system agent promote-candidate \
+  --candidate-id factor-amihud_liquidity-a1b2c3d4e5 \
+  --expected-digest <sha256-from-verified-detail> \
+  --base-commit "$(git rev-parse HEAD)"
+# stdout: {promotion_id, worktree, patch, manifest}
+# 在返回的 worktree 中审查 scoped patch，人工 git switch/commit 完成 Gate 3
 ```
 
 commit 之后，因子成为平台一等公民：前端因子目录可见、回测可用、可以创建 strategy config 绑定它、开一个 strategy sleeve、分配一笔 sleeve cash——纸面模拟开始跑。跑满 30 天、通过 `hqa-gate check`，才有资格进入券商模拟的讨论。

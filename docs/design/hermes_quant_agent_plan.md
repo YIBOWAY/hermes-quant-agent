@@ -238,10 +238,18 @@ Longbridge + Futu/Moomoo live accounts
 1. 用户把论文 PDF/链接/因子公式发进 Discord 或直接对 Hermes 说。
 2. Hermes 在会话内把论文翻译成因子定义与 Python 源码，先让用户确认公式和字段语义（Gate 1）。
 3. Hermes 将确认后的源码写入临时文件，调用平台 `agent propose-factor --source-file <path>`，只生成 `.candidate` 候选。
-4. 用户审候选源码并手动 approve（Gate 2），Hermes 再调用 `experiment run-config --provider tiingo --include-approved-candidates` 做一次性真实历史回测。
+4. 用户审候选源码并手动 Gate 2 approve（必须显式提供
+   `candidate-id + expected-digest + expected-status=pending + note`；禁止在
+   approve 路径 refetch/替换观测值），Hermes 再调用
+   `experiment run-config --provider futu --include-approved-candidates` 做
+   一次性真实历史回测（digest 在 compile 前再校验）。
 5. 结果（夏普/回撤/IC/holdout/试验次数）→ 评审池 pending + 投递到显式通知 target；
    默认 local，人工启用 Discord 后可投 `#回测结果`。
-6. 用户满意后调用 `agent promote-candidate` 生成正式代码 diff；人工 `git diff` + commit 是 Gate 3，之后才能进入 paper sleeve。
+6. 用户满意后调用
+   `agent promote-candidate --candidate-id --expected-digest --base-commit`，
+   在隔离 managed review worktree 生成四字段
+   `{promotion_id, worktree, patch, manifest}` scoped patch；人工 `git diff` +
+   commit 是 Gate 3，之后才能进入 paper sleeve。系统永不自动 commit。
 
 关键优势：平台提供候选池、评审池、回测引擎和转正落代码机制；LLM 生成职责收归 Hermes，会话外的平台后端保持确定性接缝。
 

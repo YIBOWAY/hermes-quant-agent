@@ -46,12 +46,16 @@ Slice 0-8 delivery record and UI backlog. Platform Phase 15 is reference only.
   malformed sources degrade locally instead of breaking the whole projection.
 - **Scene-B factor reproduction** (`hqa.factor_repro_cli`) — human-gated
   `propose|approve|backtest` flow covering the three human gates: factor
-  formula confirm → candidate source approve → `agent promote-candidate`
-  Gate-3 diff (human `git diff` review + commit). Factor code is generated in
-  the Hermes session, ingested via platform `agent propose-factor --source-file`,
-  approved only by an explicit human command, then backtested through
+  formula confirm → Gate 2 digest CAS approve
+  (`--candidate-id` + `--expected-digest` + `--expected-status pending` +
+  `--note`; never refetch) → Gate 3 platform
+  `agent promote-candidate --candidate-id --expected-digest --base-commit`
+  isolated review worktree (human `git diff` + commit; never auto-commits).
+  Factor code is generated in the Hermes session, ingested via platform
+  `agent propose-factor --source-file`, then backtested through
   `experiment run-config --provider futu --include-approved-candidates` (futu
-  is the only configured provider; tiingo is not set up). Anti-overfit
+  is the only configured provider; tiingo is not set up). Candidates share the
+  platform repo-anchored `data/agent_run/agent/candidates` root. Anti-overfit
   guardrails: per-factor trial counter (warns at 3rd run), 183-day holdout by
   default (`--final` runs the full window), and `hqa-gate` requiring
   `paper_days_completed >= 30` before broker-sim promotion.
