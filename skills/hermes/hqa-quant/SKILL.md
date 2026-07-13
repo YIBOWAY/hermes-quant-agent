@@ -1,7 +1,7 @@
 ---
 name: hqa-quant
 description: "HQA quant ops from Hermes — read-only market/signal/radar queries, local prediction and opportunity ledgers, human-gated research/account writes, artifact-first answers, and 30s async triage for long jobs."
-version: 1.8.0
+version: 1.9.0
 platforms: [macos]
 metadata:
   hermes:
@@ -195,14 +195,23 @@ read-only gate.
 | Operation | Command |
 |---|---|
 | Propose factor (Scene-B gate 1) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli propose --goal "<hypothesis>" --source-file <factor.py> --universe SPY,QQQ` |
-| Approve translation (gate 2, human-only) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli approve --candidate-id <id> --note "<translation-review>"` |
+| List candidates (Gate 2 inspect) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli list` |
+| Detail one candidate | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli detail --candidate-id <id>` |
+| Approve translation (gate 2, human-only) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli approve --candidate-id <id> --expected-digest <sha256> --expected-status pending --note "<translation-review>"` |
 | Backtest an approved factor | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli backtest --factor-id <id> --symbol SPY --start 2020-01-01 --end 2024-12-31` |
 | Review draft (post-mortem) | `cd __HQA_REPO_DIR__ && python3 -m hqa.review_cli draft --event "<what happened>" --kind note` |
 | Review confirm | `cd __HQA_REPO_DIR__ && python3 -m hqa.review_cli confirm <id> --judgment "<call>" --basis "<why>"` |
 
 Notes on the write path:
-- `propose` prints `candidate_id=<id>` then the human gate instruction — do not
-  auto-approve; a human inspects the generated factor before `approve`.
+- `propose` / `list` / `detail` print `candidate_id`, authoritative
+  `manifest_digest`, `status=pending`, and a complete copyable approve command
+  for **verified** items only. All four Gate 2 values
+  (`--candidate-id`, `--expected-digest`, `--expected-status pending`, `--note`)
+  come from one human-inspected verified item. The approve handler must
+  **never refetch** digest or status; pass the printed values explicitly.
+- `migration_required` items print only `observed_manifest_digest` as migration
+  evidence with approval disabled. `corrupt` items print no digest/source.
+- Do not auto-approve; a human inspects the generated factor before `approve`.
 - `backtest` defaults to **`--provider futu`** (the only configured live data
   source on this machine). Pass `--provider tiingo` only when a Tiingo token is
   configured; otherwise the platform will fail. Non-final runs reserve the last

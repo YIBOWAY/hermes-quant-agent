@@ -8,16 +8,32 @@ from hqa import factor_repro_cli as cli
 
 
 def test_propose_prints_candidate_id_and_human_gate(monkeypatch, capsys):
+    digest = "a" * 64
     monkeypatch.setattr(
         cli.quant_cli,
         "run_propose_factor",
-        lambda goal, source_file, universe="SPY,QQQ": (0, "candidate_id=factor-x-1 status=pending"),
+        lambda goal, source_file, universe="SPY,QQQ": (
+            0,
+            f"candidate_id=factor-x-1 status=pending manifest_digest={digest}\n"
+            + json.dumps(
+                {
+                    "candidate_id": "factor-x-1",
+                    "status": "pending",
+                    "manifest_digest": digest,
+                }
+            ),
+        ),
     )
     rc = cli.main(["propose", "--goal", "momentum 20d reversal", "--source-file", "/tmp/factor_src.py"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "factor-x-1" in out
+    assert f"manifest_digest={digest}" in out
+    assert "status=pending" in out
+    assert f"--expected-digest {digest}" in out
+    assert "--expected-status pending" in out
     assert "HUMAN GATE" in out
+    assert "never refetch" in out.lower()
 
 
 def test_propose_returns_nonzero_when_candidate_id_missing(monkeypatch, capsys):
@@ -31,17 +47,148 @@ def test_propose_returns_nonzero_when_candidate_id_missing(monkeypatch, capsys):
     assert "candidate_id=?" in capsys.readouterr().out
 
 
-def test_approve_invokes_agent_review_approve(monkeypatch, capsys):
+def test_approve_requires_explicit_human_cas_values_and_never_refetches(
+    monkeypatch, capsys
+) -> None:
     seen = {}
     monkeypatch.setattr(
         cli.quant_cli,
-        "run_agent_review",
-        lambda cid, decision, note: seen.update(cid=cid, decision=decision, note=note) or (0, "ok"),
+        "run_list_candidates",
+        lambda *args, **kwargs: pytest.fail("approve must not refetch"),
     )
-    rc = cli.main(["approve", "--candidate-id", "factor-x-1", "--note", "translation confirmed"])
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_agent_review",
+        lambda **kwargs: seen.update(kwargs) or (0, "ok"),
+    )
+
+    rc = cli.main(
+        [
+            "approve",
+            "--candidate-id", "factor-x-1",
+            "--expected-digest", "a" * 64,
+            "--expected-status", "pending",
+            "--note", "translation confirmed",
+        ]
+    )
+
     assert rc == 0
-    assert seen == {"cid": "factor-x-1", "decision": "approve", "note": "translation confirmed"}
-    assert "ok" in capsys.readouterr().out
+    assert seen == {
+        "candidate_id": "factor-x-1",
+        "decision": "approve",
+        "note": "translation confirmed",
+        "expected_manifest_digest": "a" * 64,
+        "expected_status": "pending",
+    }
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        # omit candidate-id
+        [
+            "approve",
+            "--expected-digest", "a" * 64,
+            "--expected-status", "pending",
+            "--note", "n",
+        ],
+        # omit expected-digest
+        [
+            "approve",
+            "--candidate-id", "factor-x-1",
+            "--expected-status", "pending",
+            "--note", "n",
+        ],
+        # omit expected-status
+        [
+            "approve",
+            "--candidate-id", "factor-x-1",
+            "--expected-digest", "a" * 64,
+            "--note", "n",
+        ],
+        # omit note
+        [
+            "approve",
+            "--candidate-id", "factor-x-1",
+            "--expected-digest", "a" * 64,
+            "--expected-status", "pending",
+        ],
+        # empty/whitespace note
+        [
+            "approve",
+            "--candidate-id", "factor-x-1",
+            "--expected-digest", "a" * 64,
+            "--expected-status", "pending",
+            "--note", "   ",
+        ],
+        # malformed digest
+        [
+            "approve",
+            "--candidate-id", "factor-x-1",
+            "--expected-digest", "not-a-digest",
+            "--expected-status", "pending",
+            "--note", "n",
+        ],
+        # non-pending status
+        [
+            "approve",
+            "--candidate-id", "factor-x-1",
+            "--expected-digest", "a" * 64,
+            "--expected-status", "approved",
+            "--note", "n",
+        ],
+    ],
+)
+def test_approve_argument_validation_exits_2_before_review(monkeypatch, argv):
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_agent_review",
+        lambda **kwargs: pytest.fail("run_agent_review must not be called"),
+    )
+    try:
+        rc = cli.main(argv)
+    except SystemExit as exc:
+        # argparse usage errors raise SystemExit(2).
+        assert exc.code == 2
+    else:
+        # Local validation returns 2 without calling review.
+        assert rc == 2
+
+
+def test_list_prints_verified_digest_and_disables_migration_corrupt(monkeypatch, capsys):
+    digest = "b" * 64
+    observed = "c" * 64
+    platform_out = "\n".join(
+        [
+            f"candidate_id=factor-good integrity=verified status=pending "
+            f"approval_enabled=True manifest_digest={digest}",
+            f"candidate_id=legacy-pending integrity=migration_required status=pending "
+            f"approval_enabled=False observed_manifest_digest={observed} "
+            f"note=migration_evidence_approval_disabled",
+            "candidate_id=broken integrity=corrupt status=None approval_enabled=False",
+        ]
+    )
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_list_candidates",
+        lambda *a, **k: (0, platform_out),
+    )
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_agent_review",
+        lambda **kwargs: pytest.fail("list must never invoke review"),
+    )
+    rc = cli.main(["list"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert f"manifest_digest={digest}" in out
+    assert f"--expected-digest {digest}" in out
+    assert "--expected-status pending" in out
+    assert f"observed_manifest_digest={observed}" in out
+    assert "migration evidence; approval disabled" in out
+    assert "corrupt; no digest/source" in out
+    # Observed digest is never substituted into an approve command.
+    assert f"--expected-digest {observed}" not in out
 
 
 def test_backtest_builds_config_runs_experiment_and_prints_metrics(monkeypatch, capsys, tmp_path):

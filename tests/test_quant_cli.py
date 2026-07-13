@@ -267,7 +267,14 @@ def test_run_agent_review_argv(monkeypatch):
         return _FakeProc(0, "ok")
 
     monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
-    quant_cli.run_agent_review("factor-x-1", "approve", "translation confirmed")
+    digest = "a" * 64
+    quant_cli.run_agent_review(
+        candidate_id="factor-x-1",
+        decision="approve",
+        note="translation confirmed",
+        expected_manifest_digest=digest,
+        expected_status="pending",
+    )
     assert seen["argv"][1:] == [
         "agent",
         "review",
@@ -277,8 +284,23 @@ def test_run_agent_review_argv(monkeypatch):
         "approve",
         "--note",
         "translation confirmed",
+        "--expected-digest",
+        digest,
+        "--expected-status",
+        "pending",
         "--json",
     ]
+
+
+def test_run_agent_review_is_keyword_only():
+    with pytest.raises(TypeError):
+        quant_cli.run_agent_review(  # type: ignore[misc]
+            "factor-x-1",
+            "approve",
+            "note",
+            "a" * 64,
+            "pending",
+        )
 
 
 def test_run_experiment_config_default_provider_is_futu(monkeypatch):

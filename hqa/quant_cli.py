@@ -152,14 +152,32 @@ def run_list_candidates(bin_path: Optional[Path] = None, cwd: Optional[Path] = N
 
 
 def run_agent_review(
+    *,
     candidate_id: str,
     decision: str,
     note: str,
+    expected_manifest_digest: str,
+    expected_status: str,
     bin_path: Optional[Path] = None,
     cwd: Optional[Path] = None,
 ) -> tuple[int, str]:
+    """Gate 2 CAS review — all values must be caller-supplied; never refetch."""
     return _run(
-        ["agent", "review", "--candidate-id", candidate_id, "--decision", decision, "--note", note, "--json"],
+        [
+            "agent",
+            "review",
+            "--candidate-id",
+            candidate_id,
+            "--decision",
+            decision,
+            "--note",
+            note,
+            "--expected-digest",
+            expected_manifest_digest,
+            "--expected-status",
+            expected_status,
+            "--json",
+        ],
         bin_path=bin_path,
         cwd=cwd,
     )
