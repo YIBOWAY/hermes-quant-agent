@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "contract_sha256": "d52d375aafb3f9bbff391ea4a5000ee1060c5962fd4852f000a1d377e45c27b9",
+  "reviewed_commit": "c767b758e524e2a3ee15f66ab7618eafbcd87057",
+  "reviewed_at": "2026-07-13T09:30:52Z",
+  "verdict": "blocked",
+  "reason": "current Hermes contract lacks deterministic request recovery, replayable event identity, Run identity, immutable provider/fallback policy and actual-provider evidence."
+}

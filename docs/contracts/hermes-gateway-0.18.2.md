@@ -218,3 +218,50 @@ review.verdict=ready and installation.matches_snapshot=true. Until then the
 platform may display read-only/offline capability state, but session creation,
 session resume, prompt submit, streaming, approval and stop remain disabled. The old
 /api/agent/tasks endpoint is not a fallback.
+
+## Independent review
+
+Two-stage independent review of Tasks 1–3 completed before writing this
+record. Stage A (plan/spec compliance) and Stage B (professional code review)
+each returned CLEAR with no unresolved P0/P1 on checklists 1–11. Neither
+stage shared its conclusion with the other before completion.
+
+### Worktree baseline (Step 1)
+
+Exact pre-existing `git status --short` at review start (retained verbatim;
+not cleaned, staged, reverted, or reinterpreted):
+
+```text
+?? .superpowers/
+```
+
+### Immutable review inputs (verbatim)
+
+```bash
+$ git rev-parse HEAD
+c767b758e524e2a3ee15f66ab7618eafbcd87057
+
+$ shasum -a 256 config/hermes-gateway-capabilities.v1.json
+d52d375aafb3f9bbff391ea4a5000ee1060c5962fd4852f000a1d377e45c27b9  config/hermes-gateway-capabilities.v1.json
+
+$ date -u +%Y-%m-%dT%H:%M:%SZ
+2026-07-13T09:30:52Z
+```
+
+`git show c767b758e524e2a3ee15f66ab7618eafbcd87057:config/hermes-gateway-capabilities.v1.json`
+is byte-identical to the working default contract (digest above).
+
+| Field | Value |
+|---|---|
+| Reviewed at | `2026-07-13T09:30:52Z` |
+| Contract SHA-256 | `d52d375aafb3f9bbff391ea4a5000ee1060c5962fd4852f000a1d377e45c27b9` |
+| Commit reviewed | `c767b758e524e2a3ee15f66ab7618eafbcd87057` |
+| Verdict | **BLOCKED** |
+| Reason | current Hermes contract lacks deterministic request recovery, replayable event identity, Run identity, immutable provider/fallback policy and actual-provider evidence. |
+
+Machine-readable twin:
+[`config/hermes-gateway-capabilities.v1.review.json`](../../config/hermes-gateway-capabilities.v1.review.json)
+(`verdict: "blocked"`). Chat write/stream admission remains fail-closed;
+`verify-chat` must not exit 0 until a later source-backed contract and a
+committed independent `ready` review exist against a clean matching
+installation.
