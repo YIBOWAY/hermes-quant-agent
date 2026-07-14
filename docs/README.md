@@ -179,8 +179,8 @@ Hermes capability、candidate integrity/Gate 3、professional frontend/read-only
 三份可独立验证的正式计划（Wave 1，已收口）。**Wave 2**
 （`2026-07-14-d31-wave2-bridge-approvals-parity.md`）在 2026-07-14 证据下**大部完成但仍非完整 D-31**：
 真实 migration apply、Hermes Gate 2 CAS Approvals、Tasks 证据读模型、只读 bridge 接线、
-Scene-B Gate1→Futu final→Gate3 prepare 已交付；**人类 Gate3 commit、chat write、旧页
-retirement、unified results** 仍关闭。`verify-chat` exit 3。
+Scene-B Gate1→Futu final→Gate3 prepare+人类 commit（`524e791`）已交付；
+**chat write、旧页 retirement、unified results** 仍关闭。`verify-chat` exit 3。
 `legacyRedirects` / `unifiedResults` / `execution` 仍 hard-off。
 旧 `/api/agent/tasks` 不是 fallback。原 Phase 1a-4 spec/plan 仅保留为历史输入；
 `2026-07-10-phase-1a-4-v2.md` 和完整 9H 计划均是已完成记录，不得把其中的旧 deferred
