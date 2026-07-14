@@ -54,7 +54,7 @@ integrity/Gate 3、professional frontend/read-only shell）已代码交付并经
 | A — Candidate migration `--apply` | **DONE** | 真实候选 `factor-momentum_20d_reversal-323b045e4b`：`integrity=verified`，`approval_enabled=True`，digest `294bbe7b846ae86384e56deae8ba8df2576ac6ffa8a5937e4f82a2352fdd8558` |
 | B — Hermes Approvals Gate 2 CAS UI | **DONE（平台代码）** | platform `8052fe6`：仅 `approval_enabled` + `verified` + `pending` 显示批准/拒绝；确认时 re-fetch detail digest + 必填 note；CAS 提交 `expected_manifest_digest` + `expected_status=pending` |
 | C — Tasks 证据读模型 | **DONE（平台代码）** | 同 `8052fe6`：自动化/周报/机会摘要只读；**无** research task 写账本 / create-submit |
-| D — Scene-B 实跑 | **DONE 至 Gate3 prepare** | 权威 smoke：`factor-wave2_scene_b_smoke_v3_loadable_factor-da01df1188`；Gate1 `gate1-67ccff32…`；digest `5ca064d5…`；Futu final receipt `backtest-f4da78d66b4ee6eaab6e7226740ac6ac`；Gate3 `promo-7c8a74e9c333a2eb1eadc49ab488c24d` 状态 `awaiting_human_commit`。**人类 commit 未做**。证据 `.superpowers/sdd/wave2-sceneb-smoke-evidence.md` |
+| D — Scene-B 实跑 | **DONE（含人类 Gate3 commit）** | 权威 smoke：`factor-wave2_scene_b_smoke_v3_loadable_factor-da01df1188`；Futu final `backtest-f4da78d66b4ee6eaab6e7226740ac6ac`；Gate3 `promo-b7bbab8cf571a5f4ff43aa652aebf3bc` → reviewed `524e791` → cleaned；因子 `agent_candidate_wave2_sceneb_mom20_v3` 已进平台 `promoted` 库。证据 `.superpowers/sdd/wave2-sceneb-smoke-evidence.md` |
 | E — Capability re-audit + read bridge | **DONE（只读接线）** | re-audit `753f153` + wire `6bb366c`：loopback JSON-RPC WS transport + CLI `list-sessions/status/history`；`chat_write=false`；`verify-chat` exit 3；9119 无 listener 时 live smoke 跳过 |
 | F — 旧页 parity | **PARTIAL** | platform `3400659`：Factor Lab / Backtester / Experiments / Agent Studio **soft banners only**；**未**删除、**未** redirect；inventory 见工作区 `.superpowers/sdd/wave2-parity-inventory.md`（本地 SDD，可能未入库） |
 | G — Docs / 双仓核验 | **DONE（本轮）** | 本文件与平台 INDEX 已按证据回写；平台已 push 至含 `4263b7f`（candidate `property` safe-builtin 修复） |
@@ -62,7 +62,7 @@ integrity/Gate 3、professional frontend/read-only shell）已代码交付并经
 **Wave 2 明确未完成 / 仍关闭：**
 
 - 真实网页 **chat write / stream / resume**（`verify-chat` exit 3；合同 review 仍 `blocked`；composer 硬禁用）。
-- Scene-B **人类 Gate 3 commit**（prepare 已完成；agent 永不代 commit/merge）。
+- Scene-B 人类 Gate 3 commit：**已完成**（user-authorized；`524e791`）。
 - 旧四页 **deletion / hard redirect**（仍完整保留能力；仅 soft banner）。
 - Hermes **unified results** 动态详情（`unifiedResults` hard-off；Results 只链到既有平台面）。
 - 平台 BFF 代理 Hermes 会话读（可选后续；当前为 HQA CLI/library）。
