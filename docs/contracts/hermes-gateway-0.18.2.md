@@ -14,7 +14,7 @@ Git-bound independent review record and a matching installation fingerprint.
 | Field | Value |
 |---|---|
 | Hermes version banner | `Hermes Agent v0.18.2 (2026.7.7.2) · upstream b03c94db` |
-| Upstream identity note | Implementation plan text recorded plan-era `e4ea0a0e`; the frozen contract was live-reviewed at `b03c94db`, which remains its snapshot truth. The 2026-07-14 local installation reports `226e8de8`, so `verify-chat` fails closed with `installation_fingerprint_mismatch`; this drift does not rewrite the reviewed snapshot. |
+| Upstream identity note | Implementation plan text recorded plan-era `e4ea0a0e`; the frozen contract was live-reviewed at `b03c94db`. Hermes banner `upstream` is `origin/main`'s tip (`hermes_cli/banner.py`), not the installed checkout. 2026-07-14 local banner reports `226e8de8` while checkout `4281151ae…` and `server.py` SHA remain freeze-identical. HQA installation match uses version + checkout + server digest only; banner tip is diagnostic (`banner_upstream_drift`) and does not rewrite the reviewed snapshot or open write gates. |
 | Source checkout commit | `4281151ae859241351ba14d8c7682dc67ff4c126` (unchanged vs plan/contract) |
 | `tui_gateway/server.py` SHA-256 | `2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17` (unchanged) |
 | Working tree (tracked) | clean (`git status --porcelain --untracked-files=no` empty) |

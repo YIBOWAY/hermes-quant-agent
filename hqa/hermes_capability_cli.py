@@ -201,6 +201,17 @@ def _apply_review_gate(document: dict, contract_path: Path) -> dict:
     }
 
 
+# Local installation fingerprint fields that authorize admission.
+# Hermes banner "upstream" is origin/main's tip (see hermes_cli/banner.py
+# get_git_banner_state), not the installed checkout. Remote-fetch drift of
+# that tip must not close gates when the pinned checkout + server bytes match.
+_INSTALLATION_MATCH_KEYS = (
+    "hermes_version",
+    "source_checkout_commit",
+    "server_source_sha256",
+)
+
+
 def _probe_installation() -> dict:
     version = subprocess.run(
         [str(config.HERMES_BIN_PATH), "--version"],
@@ -243,6 +254,9 @@ def _probe_installation() -> dict:
     server_bytes = (config.HERMES_SOURCE_DIR / "tui_gateway" / "server.py").read_bytes()
     return {
         "hermes_version": match.group("version"),
+        # Diagnostic only: remote-tracking tip from the version banner.
+        "banner_upstream_commit": match.group("upstream"),
+        # Retained for older consumers; same value as banner_upstream_commit.
         "upstream_commit": match.group("upstream"),
         "source_checkout_commit": checkout,
         "server_source_sha256": hashlib.sha256(server_bytes).hexdigest(),
@@ -252,17 +266,11 @@ def _probe_installation() -> dict:
 
 def _apply_installation_gate(document: dict) -> dict:
     expected = {
-        key: document["contract"][key]
-        for key in (
-            "hermes_version",
-            "upstream_commit",
-            "source_checkout_commit",
-            "server_source_sha256",
-        )
+        key: document["contract"][key] for key in _INSTALLATION_MATCH_KEYS
     }
     try:
         actual = _probe_installation()
-        actual_identity = {key: actual.get(key) for key in expected}
+        actual_identity = {key: actual.get(key) for key in _INSTALLATION_MATCH_KEYS}
         if actual.get("source_tracked_clean") is not True:
             blocker = "installation_source_dirty"
         else:
@@ -271,6 +279,19 @@ def _apply_installation_gate(document: dict) -> dict:
                 if actual_identity == expected
                 else "installation_fingerprint_mismatch"
             )
+        banner_upstream = actual.get("banner_upstream_commit") or actual.get(
+            "upstream_commit"
+        )
+        contract_upstream = document["contract"].get("upstream_commit")
+        actual = {
+            **actual,
+            "fingerprint_match_keys": list(_INSTALLATION_MATCH_KEYS),
+            "banner_upstream_drift": (
+                banner_upstream is not None
+                and contract_upstream is not None
+                and banner_upstream != contract_upstream
+            ),
+        }
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         actual = {"error": type(exc).__name__}
         blocker = "installation_probe_failed"

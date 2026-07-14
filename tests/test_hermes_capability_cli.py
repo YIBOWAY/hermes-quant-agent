@@ -140,6 +140,37 @@ def test_matching_ready_snapshot_stays_blocked_when_installation_drifted(
     assert "installation_fingerprint_mismatch" in document["gate"]["blockers"]
 
 
+def test_banner_upstream_drift_does_not_close_matching_local_fingerprint(
+    monkeypatch, capsys
+) -> None:
+    """Hermes banner 'upstream' is origin/main tip; remote fetch must not fail local match."""
+    _install_declared(monkeypatch, _gate(write=True, stream=True))
+    monkeypatch.setattr(
+        hermes_capability_cli,
+        "_probe_review",
+        lambda _path: {"trusted": True, "verdict": "ready", "blocker": None},
+    )
+    monkeypatch.setattr(
+        hermes_capability_cli,
+        "_probe_installation",
+        lambda: {
+            **_contract(),
+            # Banner remote tip advanced; pinned checkout + server bytes unchanged.
+            "upstream_commit": "226e8de8",
+            "banner_upstream_commit": "226e8de8",
+        },
+    )
+
+    assert hermes_capability_cli.main(["verify-chat"]) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["status"] == "ready"
+    assert document["installation"]["matches_snapshot"] is True
+    assert document["installation"]["actual"]["banner_upstream_drift"] is True
+    assert document["gate"]["chat_read_enabled"] is True
+    assert document["gate"]["chat_write_enabled"] is True
+    assert "installation_fingerprint_mismatch" not in document["gate"]["blockers"]
+
+
 def test_missing_review_closes_reads_and_writes(monkeypatch, capsys) -> None:
     _install_declared(monkeypatch, _gate(write=True, stream=True))
     monkeypatch.setattr(
