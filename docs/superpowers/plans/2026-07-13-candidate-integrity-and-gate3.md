@@ -1,5 +1,35 @@
 # Candidate Integrity and Scoped Gate 3 Implementation Plan
 
+> **Delivery status (2026-07-14): DELIVERED AND POST-REVIEW HARDENED.** The
+> repo-anchored candidate repository, immutable manifest, exact Gate 2 CAS,
+> dry-run migration, exact-ID/digest one-shot loader, and isolated Gate 3
+> lifecycle are delivered. Follow-up adversarial review also made unsafe or
+> dangling roots fail closed, detects root drift even for an empty migration
+> report, makes cleanup/abandon crash-recoverable, preserves abandoned audit
+> history while allowing a new prepare ID, rejects all bulk candidate loading,
+> and adds HQA Scene-B Gate 1 exact-source confirmation/binding plus a Gate-1-
+> revalidated `factor_repro_cli promote` wrapper. HQA list output is explicitly
+> non-authoritative; only exact JSON propose/detail receipts may advertise the
+> HQA Gate 2 command. The final workflow review then closed three parallel/state
+> gaps: external source bytes now round-trip without newline normalization and
+> HQA requires the platform's verified `source_sha256`; raw candidate listing no
+> longer emits approval authority and old Agent Studio is read-only; and the HQA
+> Gate 3 entry now requires a content-addressed successful `--final` one-shot
+> backtest receipt for the exact candidate/digest, revalidated before and after
+> prepare. A final 2026-07-14 adversarial pass additionally rejects synthetic
+> provider defaults, binds the exact persisted config/summary/generated report
+> to a unique non-overwriting experiment namespace, verifies the actual Gate 3
+> three-file bytes/modes/dirty set/Git patch, re-attests that workspace through
+> digest-linked platform status, supports retry IDs beyond `-r9`, treats
+> subprocess timeouts as recoverable unknown outcomes, and prevents symlinked
+> audit ancestors or macOS `/var` aliases from weakening no-follow traversal.
+> Fresh HQA evidence is `659 passed, 2 skipped`; platform canonical verification
+> is green with `1,377 passed, 15 skipped` plus frontend `35 files / 133 tests`.
+> Real migration
+> `--apply`, a real promotion, and Hermes approval mutations were not executed.
+> The unchecked boxes below are the original execution checklist, not current
+> progress; use this block, `docs/README.md`, tests, and runtime evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the platform candidate pool one immutable, digest-bound source of truth and make Gate 3 produce a reviewable scoped diff in an isolated worktree without touching or inheriting approval from changed candidate bytes.
@@ -18,6 +48,7 @@
 - Gate 2 approval binds the exact manifest digest and uses expected-digest CAS; legacy locks without a digest are <code>legacy_unbound</code> and never authorize execution or promotion.
 - HQA Gate 2 is an explicit human command requiring <code>--candidate-id</code>, <code>--expected-digest</code>, literal <code>--expected-status pending</code>, and non-empty <code>--note</code>. HQA never lists, refetches, or substitutes an observed digest/status while handling approval.
 - One-shot approved-candidate research re-verifies the manifest immediately before candidate code is compiled; resident paper/live registries remain promoted-only.
+- The supported HQA Scene-B Gate 3 entry additionally requires the exact content-addressed receipt from a successful <code>backtest --final</code> for the same candidate/digest; non-final trials never authorize Gate 3. The platform's three-argument public prepare remains a generic primitive and is not the supported HQA provenance chain.
 - Gate 3 still ends with human <code>git diff</code> review and a human commit. The system never commits, merges, pushes, or touches the user's dirty main worktree.
 - Public Gate 3 prepare requires <code>--candidate-id</code>, <code>--expected-digest</code>, and <code>--base-commit</code>; a missing option is Typer usage error/exit 2 with zero candidate, git, promotion-state, or worktree writes. Status and cleanup locate state by <code>--promotion-id</code> only; destructive cleanup additionally requires either durable reviewed-commit evidence or the operator's explicit <code>--abandon</code> flag.
 - Tests use temporary directories and temporary git repositories. They do not touch real candidate data, call a provider, run a real research job, mutate paper accounts, contact a broker, or use live trading.
@@ -1057,7 +1088,7 @@ git commit -m "fix(agent): recheck candidate digest before research or promotion
 - Review of <code>migration_required</code> maps to HTTP 409 <code>candidate_migration_required</code>; corrupt maps to HTTP 409 <code>candidate_integrity_failed</code>. List stays 200 when another candidate is bad.
 - Platform CLI review requires both <code>--expected-digest</code> and <code>--expected-status pending</code>.
 - <code>hqa.quant_cli.run_agent_review(*, candidate_id, decision, note, expected_manifest_digest, expected_status, ...)</code> requires caller-supplied values as keyword arguments; it never lists/refetches a candidate to fill either value.
-- <code>hqa-factor-repro approve</code> requires <code>--candidate-id</code>, <code>--expected-digest</code>, <code>--expected-status pending</code>, and <code>--note</code>. Propose/list/detail print the authoritative digest and exact approval syntax for the human to copy; observed migration evidence is never substituted.
+- <code>python3 -m hqa.factor_repro_cli approve</code> requires <code>--candidate-id</code>, <code>--expected-digest</code>, <code>--expected-status pending</code>, and <code>--note</code>. Propose/detail print the authoritative digest and exact approval syntax for the human to copy; list is informational-only and redacts any platform approval command. Observed migration evidence is never substituted.
 - <code>skills/hermes/hqa-quant/SKILL.md</code> is part of the executable Gate 2 surface, not deferred documentation. Bump its version to <code>1.9.0</code>, replace the old two-value approve example, state that all four values come from one human-inspected verified item, and prohibit an approval handler from refetching them. <code>tests/test_install.py</code> proves both source and installed cards preserve that exact command.
 
 - [ ] **Step 1: Write API/CLI RED contracts**

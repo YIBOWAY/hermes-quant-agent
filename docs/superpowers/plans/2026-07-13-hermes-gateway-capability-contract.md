@@ -1,5 +1,17 @@
 # Hermes Gateway Capability Contract Implementation Plan
 
+> **Delivery status (2026-07-14): DELIVERED, WRITE GATES BLOCKED.** The
+> versioned snapshot, pure evaluator, CLI, Git-bound independent review, live
+> installation fingerprint, tests, and evidence document were delivered. Live
+> `verify-chat` currently exits 3: the frozen fingerprint is `b03c94db` while
+> the 2026-07-14 current local installation reports `226e8de8`. It also remains non-ready
+> because deterministic request recovery, Run
+> identity/event replay, immutable provider/fallback policy, actual-provider
+> evidence, and a runtime handshake are not proven. Therefore chat/resume/
+> approval/stop remain fail-closed. The unchecked boxes below are the original
+> execution checklist, not the current progress ledger; use this status block,
+> `docs/README.md`, current tests, and runtime evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the installed Hermes 0.18.2 gateway facts into a versioned, machine-readable, fail-closed capability contract so later chat work cannot expose a mutation path that lacks deterministic request recovery, replayable events, or actual provider evidence.

@@ -303,6 +303,62 @@ def test_run_agent_review_is_keyword_only():
         )
 
 
+def test_run_promote_candidate_uses_exact_gate3_binding_and_clean_json(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        seen["kwargs"] = kwargs
+        return _FakeProc(0, '{"promotion_id":"promotion-1"}\n', stderr="instructions\n")
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+    code, out = quant_cli.run_promote_candidate(
+        candidate_id="factor-x-1",
+        expected_manifest_digest="a" * 64,
+        base_commit="b" * 40,
+    )
+
+    assert code == 0
+    assert out == '{"promotion_id":"promotion-1"}\n'
+    assert seen["argv"][1:] == [
+        "agent",
+        "promote-candidate",
+        "--candidate-id",
+        "factor-x-1",
+        "--expected-digest",
+        "a" * 64,
+        "--base-commit",
+        "b" * 40,
+    ]
+    assert seen["kwargs"]["stderr"] is subprocess.PIPE
+
+
+def test_run_promotion_status_uses_only_the_promotion_identity(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        seen["kwargs"] = kwargs
+        return _FakeProc(
+            0,
+            '{"promotion_id":"promo-abc","status":"awaiting_human_commit"}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+    code, out = quant_cli.run_promotion_status("promo-abc")
+
+    assert code == 0
+    assert '"status":"awaiting_human_commit"' in out
+    assert seen["argv"][1:] == [
+        "agent",
+        "promotion-status",
+        "--promotion-id",
+        "promo-abc",
+    ]
+    assert seen["kwargs"]["stderr"] is subprocess.PIPE
+
+
 def test_run_experiment_config_default_provider_is_futu(monkeypatch):
     seen = {}
 
@@ -311,7 +367,12 @@ def test_run_experiment_config_default_provider_is_futu(monkeypatch):
         return _FakeProc(0, "experiment_id=e-1")
 
     monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
-    quant_cli.run_experiment_config("/tmp/exp.json")
+    quant_cli.run_experiment_config(
+        "/tmp/exp.json",
+        candidate_id="cand-exact",
+        expected_manifest_digest="a" * 64,
+        output_dir="/tmp/factor-experiments",
+    )
     assert seen["argv"][1:] == [
         "experiment",
         "run-config",
@@ -319,7 +380,12 @@ def test_run_experiment_config_default_provider_is_futu(monkeypatch):
         "/tmp/exp.json",
         "--provider",
         "futu",
-        "--include-approved-candidates",
+        "--candidate-id",
+        "cand-exact",
+        "--expected-digest",
+        "a" * 64,
+        "--output-dir",
+        "/tmp/factor-experiments",
         "--json",
     ]
 
@@ -332,7 +398,13 @@ def test_run_experiment_config_argv_tiingo_opt_in(monkeypatch):
         return _FakeProc(0, "experiment_id=e-1")
 
     monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
-    quant_cli.run_experiment_config("/tmp/exp.json", provider="tiingo")
+    quant_cli.run_experiment_config(
+        "/tmp/exp.json",
+        candidate_id="cand-exact",
+        expected_manifest_digest="b" * 64,
+        output_dir="/tmp/factor-experiments",
+        provider="tiingo",
+    )
     assert seen["argv"][1:] == [
         "experiment",
         "run-config",
@@ -340,22 +412,25 @@ def test_run_experiment_config_argv_tiingo_opt_in(monkeypatch):
         "/tmp/exp.json",
         "--provider",
         "tiingo",
-        "--include-approved-candidates",
+        "--candidate-id",
+        "cand-exact",
+        "--expected-digest",
+        "b" * 64,
+        "--output-dir",
+        "/tmp/factor-experiments",
         "--json",
     ]
 
 
-def test_run_experiment_config_can_omit_approved_candidates(monkeypatch):
-    seen = {}
-
-    def fake_run(argv, **kwargs):
-        seen["argv"] = argv
-        return _FakeProc(0, "experiment_id=e-1")
-
-    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
-    quant_cli.run_experiment_config("/tmp/exp.json", provider="futu", include_approved=False)
-    assert "--include-approved-candidates" not in seen["argv"]
-    assert seen["argv"][-1] == "--json"
+def test_run_experiment_config_has_no_legacy_load_all_argument():
+    with pytest.raises(TypeError):
+        quant_cli.run_experiment_config(  # type: ignore[call-arg]
+            "/tmp/exp.json",
+            candidate_id="cand-exact",
+            expected_manifest_digest="c" * 64,
+            output_dir="/tmp/factor-experiments",
+            include_approved=False,
+        )
 
 
 @pytest.mark.skipif(

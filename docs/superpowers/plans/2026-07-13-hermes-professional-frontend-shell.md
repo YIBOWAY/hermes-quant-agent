@@ -1,5 +1,15 @@
 # Hermes Professional Frontend and Read-Only Shell Implementation Plan
 
+> **Delivery status (2026-07-14): F0/F1 APPROVED, F2 DELIVERED.** Direction A,
+> the full-state clickable prototype, token rebind, responsive production shell,
+> Today/Tasks/Approvals/Results read surfaces, one safety strip, reversible
+> Hermes default home, and hard-off feature gates are delivered. The composer
+> and Approvals remain non-mutating; real Hermes chat/provider use, unified
+> results parity, and legacy redirects/deletion are deliberately outside F2 and
+> remain unfinished. The unchecked boxes below are the original execution
+> checklist, not current progress; use this block, `docs/README.md`, current
+> tests, and live browser evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Produce a professionally reviewed, responsive Hermes visual system and ship a truthful read-only default workbench that makes action, exceptions, current work, recent results, and the disabled/offline conversation boundary understandable within five seconds.

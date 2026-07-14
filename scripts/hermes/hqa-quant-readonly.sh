@@ -29,7 +29,6 @@ READONLY_ALLOWLIST=(
   "data prices"
   "factor list"
   "paper account-show"
-  "agent list-candidates"
 )
 
 refuse() {

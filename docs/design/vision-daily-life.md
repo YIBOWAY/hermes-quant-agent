@@ -109,19 +109,21 @@ python3 -m hqa.factor_repro_cli approve \
   --expected-status pending \
   --note "Amihud 公式翻译确认无误，dollar_volume 字段已验证"
 
-# 1a-3 落地后：真实数据回测（Tiingo EOD；默认保留最近 183 天 holdout 不参与迭代——D-21）
-python3 -m hqa.factor_repro_cli backtest --factor-id amihud_liquidity_factor \
+# 真实数据回测（默认 Futu QFQ；保留最近 183 天 holdout 不参与迭代——D-21）
+python3 -m hqa.factor_repro_cli backtest \
+  --candidate-id factor-amihud_liquidity-a1b2c3d4e5 \
+  --expected-digest <sha256-from-verified-detail> \
   --symbol SPY --symbol QQQ --start 2020-01-02 --end 2026-06-30
 ```
 
-几分钟后，回测完成。以下 holdout 与 `--final` 约束是 1a-3 落地后的目标体验；当前已实现 CLI 只覆盖 `propose|approve|backtest` 的前两道门：
+几分钟后，回测完成。当前 CLI 已把 holdout、`--final` receipt 与 Gate 3 串成受约束状态链：
 
 ```
 HOLDOUT: last 183 days reserved; run --final ONCE before promotion (D-21)
-experiment_id=factor-repro-20260702T... best_run_id=run-001
+experiment_id=factor-repro-factor-amihud_liquidity-a1b2c3d4e5-20260714T120000123456Z-<12hex> best_run_id=run-001
 sharpe=1.18 total_return=0.42 max_drawdown=0.14
-report=/Users/.../reports/factor-repro-.../report.md
-Results are proposal-only; promotion to the review pool is a human decision.
+report=/Users/.../reports/factor_repro_.../experiment_comparison_report.md
+Results are research evidence; a successful --final receipt is required before the separate Gate 3 code-review workspace.
 ```
 
 夏普 1.18，回撤 14%。还不错但不算惊艳。你调整了一次参数重跑（trial 2）。如果你忍不住再调第三次，系统会打印 `OVERFIT WARNING: trial 3`——提醒你正在走"迭代到回测好看为止"的翻车老路。
@@ -130,14 +132,18 @@ Results are proposal-only; promotion to the review pool is a human decision.
 
 ```bash
 # 1a-3 落地后：转正前唯一一次全窗口回测（含 holdout 段）——holdout 明显衰减就回炉
-python3 -m hqa.factor_repro_cli backtest --factor-id amihud_liquidity_factor ... --final
+python3 -m hqa.factor_repro_cli backtest \
+  --candidate-id factor-amihud_liquidity-a1b2c3d4e5 \
+  --expected-digest <sha256-from-verified-detail> ... --final
+# stdout: final_backtest_receipt=backtest-<content-address>
 
 # Gate 3：在隔离 review worktree 生成 scoped patch（绝不自动 commit）
-cd /Users/sunyibo/programs/ai-quant-platform
-./ai-quant/bin/quant-system agent promote-candidate \
+cd /Users/sunyibo/programs/Hermes-quant-agent
+python3 -m hqa.factor_repro_cli promote \
   --candidate-id factor-amihud_liquidity-a1b2c3d4e5 \
   --expected-digest <sha256-from-verified-detail> \
-  --base-commit "$(git rev-parse HEAD)"
+  --final-backtest-receipt backtest-<content-address> \
+  --base-commit "$(git -C /Users/sunyibo/programs/ai-quant-platform rev-parse HEAD)"
 # stdout: {promotion_id, worktree, patch, manifest}
 # 在返回的 worktree 中审查 scoped patch，人工 git switch/commit 完成 Gate 3
 ```

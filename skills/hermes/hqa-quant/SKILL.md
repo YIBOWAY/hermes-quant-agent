@@ -1,7 +1,7 @@
 ---
 name: hqa-quant
 description: "HQA quant ops from Hermes — read-only market/signal/radar queries, local prediction and opportunity ledgers, human-gated research/account writes, artifact-first answers, and 30s async triage for long jobs."
-version: 1.9.0
+version: 1.14.0
 platforms: [macos]
 metadata:
   hermes:
@@ -41,7 +41,6 @@ anything else with `REFUSED: not in read-only allowlist` (exit 2).
 | Strict daily history evidence | `__HERMES_SCRIPTS_DIR__/hqa-quant-readonly.sh data prices --symbol AAPL --symbol SPY --start 2025-06-01 --end 2026-07-10 --provider futu --adjustment qfq --format json` | one multi-symbol Futu/QFQ envelope; no local/sample fallback |
 | Registered research factors | `__HERMES_SCRIPTS_DIR__/hqa-quant-readonly.sh factor list` | `factor_id=… name=… version=… lookback=… direction=…` lines |
 | Paper account cash/positions | `__HERMES_SCRIPTS_DIR__/hqa-quant-readonly.sh paper account-show --account default --format json` | unified `{account_id, account_exists, account}` snapshot with valuation, price provenance, storage mode, warnings, and reconciliation |
-| Pending agent candidates | `__HERMES_SCRIPTS_DIR__/hqa-quant-readonly.sh agent list-candidates` | `candidate_id=… type=… status=pending path=…` lines |
 
 The gate forwards trailing flags verbatim (e.g. `paper account-show --account
 <main> --format json`). Anything not on the allowlist is refused — including **full options
@@ -194,43 +193,84 @@ read-only gate.
 
 | Operation | Command |
 |---|---|
-| Propose factor (Scene-B gate 1) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli propose --goal "<hypothesis>" --source-file <factor.py> --universe SPY,QQQ` |
+| Propose factor (Scene-B Gate 1) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli propose --goal "<hypothesis>" --source-file <factor.py> --expected-source-digest <reviewed-source-sha256> --confirmation-note "<formula-and-translation-review>" --universe SPY,QQQ` |
 | List candidates (Gate 2 inspect) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli list` |
 | Detail one candidate | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli detail --candidate-id <id>` |
 | Approve translation (gate 2, human-only) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli approve --candidate-id <id> --expected-digest <sha256> --expected-status pending --note "<translation-review>"` |
-| Backtest an approved factor | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli backtest --factor-id <id> --symbol SPY --start 2020-01-01 --end 2024-12-31` |
+| Backtest an approved factor | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli backtest --candidate-id <id> --expected-digest <sha256> --symbol SPY --start 2020-01-01 --end 2024-12-31` |
+| Prepare Gate 3 review workspace | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli promote --candidate-id <id> --expected-digest <sha256> --final-backtest-receipt <backtest-id> --base-commit <40-char-HEAD>` |
 | Review draft (post-mortem) | `cd __HQA_REPO_DIR__ && python3 -m hqa.review_cli draft --event "<what happened>" --kind note` |
 | Review confirm | `cd __HQA_REPO_DIR__ && python3 -m hqa.review_cli confirm <id> --judgment "<call>" --basis "<why>"` |
 
 Notes on the write path:
-- `propose` / `list` / `detail` print `candidate_id`, authoritative
-  `manifest_digest`, `status=pending`, and a complete copyable approve command
-  for **verified** items only. All four Gate 2 values
+- `propose` is itself Gate 1: before any platform call it verifies the exact
+  non-symlink source bytes against the human-supplied SHA-256, requires a
+  non-empty confirmation note, stages content-addressed bytes, and writes a
+  durable confirmation plus candidate binding under `data/_runtime/factor-gate1`.
+- `list` is informational only and strips any platform approval command from its
+  human-readable output. Run `detail --candidate-id <id>` to obtain one exact
+  machine-JSON-backed review bundle. `propose` / `detail` print `candidate_id`,
+  authoritative `manifest_digest`, `status=pending`, and a complete copyable
+  HQA approve command only when the exact Gate 1 binding verifies. All four Gate 2 values
   (`--candidate-id`, `--expected-digest`, `--expected-status pending`, `--note`)
   come from one human-inspected verified item. The approve handler must
   **never refetch** digest or status; pass the printed values explicitly.
+  The raw platform `agent list-candidates` leaf is intentionally absent from the
+  Hermes read-only gate because it is generic diagnostic evidence, not Scene-B
+  approval authority.
 - `migration_required` items print only `observed_manifest_digest` as migration
   evidence with approval disabled. `corrupt` items print no digest/source.
 - Do not auto-approve; a human inspects the generated factor before `approve`.
 - `backtest` defaults to **`--provider futu`** (the only configured live data
   source on this machine). Pass `--provider tiingo` only when a Tiingo token is
-  configured; otherwise the platform will fail. Non-final runs reserve the last
+  configured; otherwise the platform will fail. `sample`, local, and any
+  environment-provided synthetic default are rejected before Gate 1/config or
+  platform execution. Non-final runs reserve the last
   183 days as holdout unless `--final` is passed (D-21); a per-factor trial
-  counter prints an overfit warning after 3 runs (D-21).
-- Promotion (Gate 3) is always a separate human decision on the platform CLI:
-  `agent promote-candidate --candidate-id <id> --expected-digest <sha256>
-  --base-commit <HEAD>` prepares an isolated managed review worktree and prints
+  counter prints an overfit warning after 3 runs (D-21). The human supplies only
+  the verified `candidate_id` and exact approved digest; the platform derives
+  `factor_id` from that same snapshot and records all three values in the
+  experiment config and receipt.
+- A successful non-final backtest never authorizes Gate 3. A successful
+  `--final` run writes a canonical content-addressed
+  `final_backtest_receipt=backtest-…` bound to the exact candidate, manifest
+  digest, factor, experiment/run, provider, symbols, full window and report.
+  HQA safe-reads and hashes the persisted platform config, agent summary and
+  report; requires the platform's unique per-invocation experiment namespace,
+  rooted exactly below the configured `HQA_FACTOR_EXPERIMENT_OUTPUT_DIR`, exact
+  single `run-001`, safety/provenance schema, and byte-for-byte generated report;
+  then re-verifies those artifacts whenever the receipt is consumed.
+  Promotion must consume that exact receipt ID and revalidates it both before
+  and after preparing the review workspace.
+- Promotion (Gate 3) is always a separate human decision through the HQA wrapper:
+  `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli promote
+  --candidate-id <id> --expected-digest <sha256>
+  --final-backtest-receipt <backtest-id> --base-commit <40-char-HEAD>`
+  revalidates the exact Gate 1 binding and successful final one-shot receipt, then prepares
+  an isolated managed review worktree and prints
   exactly `{promotion_id, worktree, patch, manifest}`. Status/cleanup use
-  `--promotion-id` only; destructive cleanup needs reviewed-commit evidence or
-  explicit `--abandon`. The system never auto-commits; the human `git diff` +
-  commit completes Gate 3. New Hermes approval UI stays disabled until
-  frontend/bridge gates land.
+  `__HQA_PLATFORM_DIR__/ai-quant/bin/quant-system agent promotion-status
+  --promotion-id <promotion_id>` and
+  `__HQA_PLATFORM_DIR__/ai-quant/bin/quant-system agent cleanup-promotion
+  --promotion-id <promotion_id>` only; destructive cleanup needs reviewed-commit
+  evidence or explicit `--abandon`. HQA verifies the receipt manifest's exact
+  candidate/digest/base/promotion binding, exact three-path allowlist, actual
+  worktree bytes/modes/dirty set, and byte-identical Git patch before showing
+  it. The immediate platform status must return the same manifest/patch/candidate/
+  base/path provenance and must re-attest the still-uncommitted workspace.
+  A timeout is an unknown outcome, never a failure proof: retain any safely
+  parsed `promotion_id`, otherwise inspect the printed promotion root before a
+  controlled retry.
+  The system never auto-commits; the human
+  `git diff` + commit completes Gate 3. The raw platform promotion command is a
+  generic primitive and is not the supported Scene-B entry. New Hermes approval UI stays disabled
+  until frontend/bridge gates land.
 
 ### `--json` output (D-22 status)
 
-- **HQA write-path wrappers** are JSON-first: `factor_repro_cli` reads
-  `candidate_id`/`experiment_id` from a JSON payload when the platform emits one
-  and falls back to regex otherwise.
+- **HQA authority-bearing write paths** are JSON-only: propose, approve,
+  backtest candidate binding, and promote all fail closed unless exact machine
+  receipts match their caller-supplied IDs/digests and expected state.
 - **Platform `doctor --json` is supported** and is what HQA's doctor watchdog
   already calls. Paper account reads use the verified
   `paper account-show --format json` snapshot contract. Do **not** invent JSON

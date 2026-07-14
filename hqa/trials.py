@@ -36,7 +36,7 @@ def count_trials(factor_id: str, log_path: Path) -> int:
                 continue
             try:
                 entry = json.loads(line)
-            except (json.JSONDecodeError, ValueError):
+            except (json.JSONDecodeError, RecursionError, ValueError):
                 continue
             if isinstance(entry, dict) and entry.get("factor_id") == factor_id:
                 count += 1

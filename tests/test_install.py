@@ -263,7 +263,6 @@ def _run_gate(tmp_path, args):
             ["paper", "account-show", "--account", "main", "--format", "json"],
             "ARGV|paper|account-show|--account|main|--format|json",
         ),
-        (["agent", "list-candidates"], "ARGV|agent|list-candidates"),
     ],
 )
 def test_gate_allows_readonly_commands(tmp_path, args, expected_argv):
@@ -280,6 +279,7 @@ def test_gate_allows_readonly_commands(tmp_path, args, expected_argv):
         ["paper", "rebalance"],  # write: mutates account
         ["paper", "run-sample"],  # write: runs a loop
         ["agent", "review", "--approve"],  # write: approval lock
+        ["agent", "list-candidates"],  # generic evidence bypasses HQA Gate 1
         ["agent", "propose-factor"],  # write: creates candidate file
         ["options", "daily-scan"],  # write: scan snapshot (audit F4)
         ["options", "daily-scan", "--top", "20"],
@@ -316,11 +316,11 @@ def test_gate_source_declares_readonly_allowlist():
         '"data prices"',
         '"factor list"',
         '"paper account-show"',
-        '"agent list-candidates"',
     ):
         assert entry in body
     assert '"options daily-scan"' not in body
     assert '"options buyside-screen"' not in body
+    assert '"agent list-candidates"' not in body
 
 
 # --- D-25 HQA skill card ----------------------------------------------------
@@ -337,7 +337,6 @@ _READONLY_SUBCOMMANDS = (
     "data prices",
     "factor list",
     "paper account-show",
-    "agent list-candidates",
 )
 
 
@@ -375,7 +374,9 @@ def test_skill_card_frontmatter_mirrors_hermes_contract():
 def test_installed_skill_documents_exact_gate2_cas_command(tmp_path) -> None:
     scripts_dest = _install(tmp_path)
     body = (scripts_dest.parent / "skills" / "hqa-quant" / "SKILL.md").read_text()
-    assert "version: 1.9.0" in body
+    assert "version: 1.14.0" in body
+    assert "--expected-source-digest <reviewed-source-sha256>" in body
+    assert '--confirmation-note "<formula-and-translation-review>"' in body
     assert (
         "approve --candidate-id <id> --expected-digest <sha256> "
         "--expected-status pending --note \"<translation-review>\""
@@ -383,12 +384,36 @@ def test_installed_skill_documents_exact_gate2_cas_command(tmp_path) -> None:
     assert "never refetch" in body.lower()
     # Source card must match the installed card for the Gate 2 surface.
     source = SKILL_SRC.read_text(encoding="utf-8")
-    assert "version: 1.9.0" in source
+    assert "version: 1.14.0" in source
     assert (
         "approve --candidate-id <id> --expected-digest <sha256> "
         "--expected-status pending --note \"<translation-review>\""
     ) in source
     assert "never refetch" in source.lower()
+
+
+def test_skill_uses_exact_candidate_backtest_and_unambiguous_platform_commands(
+    tmp_path,
+) -> None:
+    source = SKILL_SRC.read_text(encoding="utf-8")
+    assert "version: 1.14.0" in source
+    assert (
+        "backtest --candidate-id <id> --expected-digest <sha256>"
+    ) in source
+    assert "backtest --factor-id" not in source
+    assert (
+        "python3 -m hqa.factor_repro_cli promote"
+    ) in source
+    assert "--final-backtest-receipt <backtest-id>" in source
+    assert "__HQA_PLATFORM_DIR__/ai-quant/bin/quant-system agent promote-candidate" not in source
+
+    scripts_dest = _install(tmp_path)
+    installed = (
+        scripts_dest.parent / "skills" / "hqa-quant" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert "version: 1.14.0" in installed
+    assert "python3 -m hqa.factor_repro_cli promote" in installed
+    assert "__HQA_PLATFORM_DIR__" not in installed
 
 
 def test_skill_card_uses_unified_paper_snapshot_json_contract():
@@ -400,7 +425,7 @@ def test_skill_card_documents_strict_portfolio_risk_v2() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.9.0" in body
+    assert "version: 1.14.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-portfolio-risk.sh" in body
     assert "logs/portfolio_risk.jsonl" in body
     assert "current snapshot" in lower
@@ -416,7 +441,7 @@ def test_skill_card_documents_prediction_ledger_contract() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.9.0" in body
+    assert "version: 1.14.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-prediction.sh" in body
     assert "create" in lower and "list" in lower and "reconcile" in lower
     assert "predictions/entries.jsonl" in body
@@ -430,7 +455,7 @@ def test_skill_card_documents_market_foresight_and_artifact_shelf() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.9.0" in body
+    assert "version: 1.14.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-market-foresight.sh" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-artifacts.sh" in body
     assert "artifacts/hermes-feed/manifest.v1.json" in body
@@ -443,7 +468,7 @@ def test_skill_card_documents_opportunity_ledger_contract() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.9.0" in body
+    assert "version: 1.14.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-opportunities.sh" in body
     assert "opportunities/entries.jsonl" in body
     assert "sync-signals" in lower and "record-action" in lower
@@ -457,7 +482,7 @@ def test_skill_card_documents_full_9h_automation_contract() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.9.0" in body
+    assert "version: 1.14.0" in body
     for wrapper in (
         "hqa-full-9h-daily-close.sh",
         "hqa-full-9h-freshness.sh",

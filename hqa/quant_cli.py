@@ -151,6 +151,25 @@ def run_list_candidates(bin_path: Optional[Path] = None, cwd: Optional[Path] = N
     return _run(["agent", "list-candidates"], bin_path=bin_path, cwd=cwd)
 
 
+def run_inspect_factor_candidate(
+    candidate_id: str,
+    *,
+    expected_manifest_digest: Optional[str] = None,
+    bin_path: Optional[Path] = None,
+    cwd: Optional[Path] = None,
+) -> tuple[int, str]:
+    args = [
+        "agent",
+        "inspect-factor-candidate",
+        "--candidate-id",
+        candidate_id,
+    ]
+    if expected_manifest_digest is not None:
+        args.extend(["--expected-digest", expected_manifest_digest])
+    args.append("--json")
+    return _run(args, bin_path=bin_path, cwd=cwd)
+
+
 def run_agent_review(
     *,
     candidate_id: str,
@@ -183,18 +202,72 @@ def run_agent_review(
     )
 
 
+def run_promote_candidate(
+    *,
+    candidate_id: str,
+    expected_manifest_digest: str,
+    base_commit: str,
+    bin_path: Optional[Path] = None,
+    cwd: Optional[Path] = None,
+) -> tuple[int, str]:
+    """Prepare Gate 3 for one exact candidate; keep stdout JSON parseable."""
+    return _run(
+        [
+            "agent",
+            "promote-candidate",
+            "--candidate-id",
+            candidate_id,
+            "--expected-digest",
+            expected_manifest_digest,
+            "--base-commit",
+            base_commit,
+        ],
+        bin_path=bin_path,
+        cwd=cwd,
+        merge_stderr=False,
+    )
+
+
 def run_experiment_config(
     config_path: str,
+    *,
+    candidate_id: str,
+    expected_manifest_digest: str,
+    output_dir: str,
     provider: str = "futu",
-    include_approved: bool = True,
     bin_path: Optional[Path] = None,
     cwd: Optional[Path] = None,
     timeout: int = 900,
 ) -> tuple[int, str]:
     # Default futu: platform tiingo.token is often unset; pass --provider tiingo
     # explicitly only when a Tiingo token is configured (audit PR-2).
-    args = ["experiment", "run-config", "--config", config_path, "--provider", provider]
-    if include_approved:
-        args.append("--include-approved-candidates")
+    args = [
+        "experiment",
+        "run-config",
+        "--config",
+        config_path,
+        "--provider",
+        provider,
+        "--candidate-id",
+        candidate_id,
+        "--expected-digest",
+        expected_manifest_digest,
+        "--output-dir",
+        output_dir,
+    ]
     args.append("--json")
     return _run(args, bin_path=bin_path, cwd=cwd, timeout=timeout)
+
+
+def run_promotion_status(
+    promotion_id: str,
+    *,
+    bin_path: Optional[Path] = None,
+    cwd: Optional[Path] = None,
+) -> tuple[int, str]:
+    return _run(
+        ["agent", "promotion-status", "--promotion-id", promotion_id],
+        bin_path=bin_path,
+        cwd=cwd,
+        merge_stderr=False,
+    )

@@ -5,19 +5,21 @@ Hermes orchestration layer for the local `ai-quant-platform`. Current Phase
 trading chain:
 
 Start with [`docs/README.md`](docs/README.md): it separates the long-term HQA
-roadmap from the current cross-repo implementation plan and records which work
-is active, queued, or historical. The current engineering track is
-`docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md`: Slice 9A's paper-strategy
+roadmap from delivered records and the remaining D-31 gates. The
+`docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md` delivery record covers Slice 9A's paper-strategy
 read model and explicit crash recovery, Slice 9B's unified paper snapshot,
 Slice 9C's current-snapshot portfolio risk v1, Slice 9D's strict historical
 price seam + risk v2, Slice 9E's prediction ledger, Slice 9F's proposal-only
 market foresight, the mini 9H read-only Hermes artifact shelf, and Slice 9G's
-auditable opportunity ledger are delivered. Full 9H now adds the four-job
+auditable opportunity ledger. Full 9H adds the four-job
 read-only automation loop, strict weekly/opportunity/freshness projections,
 durable notification receipts, feed schema 1.1 and the visible `/hermes` cards.
-The
-platform frontend plan is the
-Slice 0-8 delivery record and UI backlog. Platform Phase 15 is reference only.
+The first D-31 wave has also delivered the fail-closed Hermes capability
+contract, candidate integrity/Gate 3, and the professional read-only Hermes
+default shell. Real Hermes chat/provider use, Hermes approval mutations,
+unified-results parity, and retirement of the four legacy research pages are
+not implemented yet. The platform frontend plan is the Slice 0-8 delivery
+record, not an executable queue. Platform Phase 15 is reference only.
 
 - **Safety watchdog** (`hqa.doctor_watchdog`) — `[SILENT]`; JSON-first safety
   parse; splits `[INFRA]` (doctor/platform failure) vs `[SAFETY]` (baseline
@@ -45,15 +47,26 @@ Slice 0-8 delivery record and UI backlog. Platform Phase 15 is reference only.
   across safety, signals, reviews, prediction calibration and opportunity state;
   malformed sources degrade locally instead of breaking the whole projection.
 - **Scene-B factor reproduction** (`hqa.factor_repro_cli`) — human-gated
-  `propose|approve|backtest` flow covering the three human gates: factor
-  formula confirm → Gate 2 digest CAS approve
+  `propose|detail|approve|backtest|promote` flow covering the three human gates: factor
+  formula confirm (exact reviewed source SHA-256 + non-empty note, persisted and
+  bound to the resulting candidate manifest) → Gate 2 digest CAS approve
   (`--candidate-id` + `--expected-digest` + `--expected-status pending` +
-  `--note`; never refetch) → Gate 3 platform
-  `agent promote-candidate --candidate-id --expected-digest --base-commit`
-  isolated review worktree (human `git diff` + commit; never auto-commits).
+  `--note`; never refetch and require the exact machine receipt) → successful
+  content-addressed `--final` one-shot backtest receipt → Gate 3 HQA
+  `promote --candidate-id --expected-digest --final-backtest-receipt --base-commit`
+  Gate-1/backtest-revalidated isolated review worktree (human `git diff` + commit; never
+  auto-commits). Raw platform review/promotion commands are generic primitives,
+  not proof of the supported Scene-B provenance chain.
+  The receipt accepts only Futu/Tiingo evidence and re-verifies the platform's
+  persisted config, summary, exact generated report, unique experiment
+  namespace rooted at the explicitly passed HQA artifact authority directory,
+  and fixed one-run identity. Gate 3 additionally checks the actual
+  three-file worktree, Git patch, and the platform's same-provenance status;
+  timeouts remain an explicit unknown outcome with recovery evidence.
   Factor code is generated in the Hermes session, ingested via platform
-  `agent propose-factor --source-file`, then backtested through
-  `experiment run-config --provider futu --include-approved-candidates` (futu
+  `agent propose-factor --source-file`, then backtested through the exact
+  candidate ID + expected manifest digest path of
+  `experiment run-config --provider futu` (futu
   is the only configured provider; tiingo is not set up). Candidates share the
   platform repo-anchored `data/agent_run/agent/candidates` root. Anti-overfit
   guardrails: per-factor trial counter (warns at 3rd run), 183-day holdout by

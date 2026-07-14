@@ -64,6 +64,15 @@ OPTIONS_SCAN_DIR = Path(
 RUNTIME_DIR = Path(
     os.environ.get("HQA_RUNTIME_DIR", str(REPO_DIR / "data" / "_runtime"))
 )
+FACTOR_GATE1_DIR = Path(
+    os.environ.get("HQA_FACTOR_GATE1_DIR", str(RUNTIME_DIR / "factor-gate1"))
+)
+FACTOR_EXPERIMENT_OUTPUT_DIR = Path(
+    os.environ.get(
+        "HQA_FACTOR_EXPERIMENT_OUTPUT_DIR",
+        str(RUNTIME_DIR / "factor-experiments"),
+    )
+)
 SIGNAL_THRESHOLDS_PATH = Path(
     os.environ.get("HQA_SIGNAL_THRESHOLDS", str(RUNTIME_DIR / "signal_thresholds.json"))
 )

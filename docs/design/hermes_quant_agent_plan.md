@@ -241,15 +241,21 @@ Longbridge + Futu/Moomoo live accounts
 4. 用户审候选源码并手动 Gate 2 approve（必须显式提供
    `candidate-id + expected-digest + expected-status=pending + note`；禁止在
    approve 路径 refetch/替换观测值），Hermes 再调用
-   `experiment run-config --provider futu --include-approved-candidates` 做
-   一次性真实历史回测（digest 在 compile 前再校验）。
+   `experiment run-config --provider futu --candidate-id <id>
+   --expected-digest <sha256>` 做
+   一次性真实历史回测（digest 在 compile 前再校验）；HQA 只接受 Futu/Tiingo，
+   并复核唯一实验命名空间、persisted config、exact summary/run 和完整报告。
 5. 结果（夏普/回撤/IC/holdout/试验次数）→ 评审池 pending + 投递到显式通知 target；
    默认 local，人工启用 Discord 后可投 `#回测结果`。
-6. 用户满意后调用
-   `agent promote-candidate --candidate-id --expected-digest --base-commit`，
+6. 用户满意后先运行一次 `backtest --final` 并取得绑定 exact
+   candidate/digest/run 的 content-addressed receipt，再通过 HQA 调用
+   `factor_repro_cli promote --candidate-id --expected-digest
+   --final-backtest-receipt --base-commit`，
    在隔离 managed review worktree 生成四字段
    `{promotion_id, worktree, patch, manifest}` scoped patch；人工 `git diff` +
-   commit 是 Gate 3，之后才能进入 paper sleeve。系统永不自动 commit。
+   commit 是 Gate 3，之后才能进入 paper sleeve。HQA 与 platform status 会共同
+   复核 actual 三文件、dirty set、patch 与 provenance；timeout 保持 outcome unknown，
+   只允许按恢复证据核查。系统永不自动 commit。
 
 关键优势：平台提供候选池、评审池、回测引擎和转正落代码机制；LLM 生成职责收归 Hermes，会话外的平台后端保持确定性接缝。
 
