@@ -43,10 +43,29 @@ Git、远端和运行进程是易变状态，不在本入口维护“ahead/dirty
 integrity/Gate 3、professional frontend/read-only shell）已代码交付并经用户确认收口：
 完整 D-31 仍是**按设计部分完成**，不得表述成 Hermes 已全部接通。
 **Wave 2 执行入口：**
-[`superpowers/plans/2026-07-14-d31-wave2-bridge-approvals-parity.md`](superpowers/plans/2026-07-14-d31-wave2-bridge-approvals-parity.md)
-（migration apply、Hermes Approvals CAS UI、Tasks 真读模型、Scene-B 实跑证据、
-fail-closed bridge scaffold、旧页 parity 分阶段）。不得从旧 1a-4 模板或历史 audit
-自行加步骤。`verify-chat` 未 ready 前禁止打开真实网页 chat 写端。
+[`superpowers/plans/2026-07-14-d31-wave2-bridge-approvals-parity.md`](superpowers/plans/2026-07-14-d31-wave2-bridge-approvals-parity.md)。
+2026-07-14 证据下 Wave 2 **部分完成**（见下表）；不得表述成 Hermes 已全部接通或旧四页已退役。
+不得从旧 1a-4 模板或历史 audit 自行加步骤。`verify-chat` 未 ready（exit 3）前禁止打开真实网页 chat 写端。
+
+### D-31 Wave 2 状态（2026-07-14 证据）
+
+| Task | 状态 | 证据要点 |
+|---|---|---|
+| A — Candidate migration `--apply` | **DONE** | 真实候选 `factor-momentum_20d_reversal-323b045e4b`：`integrity=verified`，`approval_enabled=True`，digest `294bbe7b846ae86384e56deae8ba8df2576ac6ffa8a5937e4f82a2352fdd8558` |
+| B — Hermes Approvals Gate 2 CAS UI | **DONE（平台代码）** | platform `8052fe6`：仅 `approval_enabled` + `verified` + `pending` 显示批准/拒绝；确认时 re-fetch detail digest + 必填 note；CAS 提交 `expected_manifest_digest` + `expected_status=pending` |
+| C — Tasks 证据读模型 | **DONE（平台代码）** | 同 `8052fe6`：自动化/周报/机会摘要只读；**无** research task 写账本 / create-submit |
+| D — Scene-B 实跑 | **PARTIAL / BLOCKED at final** | `data/_runtime/sceneb-wave2/`：Gate 1 propose + Gate 2 approve 已对 smoke 候选 `factor-wave2_scene_b_smoke_momentum_20d_reversa-6106ea1c63` 落盘；`final-backtest.out` 因 `factor_id` 与既有候选冲突被拒绝；**无**成功 final receipt、**无** Gate 3 prepare/worktree |
+| E — Capability re-audit + read bridge | **DONE（scaffold）** | HQA `753f153`：`installation.matches_snapshot=true`，`chat_write=false`，`verify-chat` exit 3；`hqa/hermes_read_bridge.py` 只读 `session.list/status/history`，从不暴露 create/submit/approval |
+| F — 旧页 parity | **PARTIAL** | platform `3400659`：Factor Lab / Backtester / Experiments / Agent Studio **soft banners only**；**未**删除、**未** redirect；inventory 见工作区 `.superpowers/sdd/wave2-parity-inventory.md`（本地 SDD，可能未入库） |
+| G — Docs / 双仓核验 | **IN PROGRESS** | 本文件与平台 INDEX 按证据回写；chat write 与 legacy retirement 仍关闭 |
+
+**Wave 2 明确未完成 / 仍关闭：**
+
+- 真实网页 **chat write / stream / resume**（`verify-chat` exit 3；合同 review 仍 `blocked`；composer 硬禁用）。
+- Scene-B **完整** Gate1→final receipt→Gate3 prepare→human commit 路径（final 已 blocked）。
+- 旧四页 **deletion / hard redirect**（仍完整保留能力；仅 soft banner）。
+- Hermes **unified results** 动态详情（`unifiedResults` hard-off；Results 只链到既有平台面）。
+- 将 `POST /api/agent/tasks` 当作 Hermes fallback（禁止）。
 
 Candidate integrity / Gate 3 交付要点（以平台代码与两仓测试为准，非历史计划 checkbox）：
 
@@ -82,25 +101,30 @@ Candidate integrity / Gate 3 交付要点（以平台代码与两仓测试为准
   重新证明未提交工作区未漂移。超时只代表 outcome unknown，必须按 recovery handle/根目录
   只读核查，不能盲目 retry/abandon。输出前再次验证 Gate 1 与 final receipt。abandon 仅显式；隔离 review worktree；永不自动 commit。平台原始 promotion CLI 是通用
   primitive，不单独证明 HQA Gate 1 provenance。
-- 真实 migration 仍默认 dry-run。本机最新 dry-run：`applied=false`，legacy 不存在，
-  canonical 含一个 `migration_required` 的 pending
-  `factor-momentum_20d_reversal-323b045e4b`（observed digest
-  `294bbe7b846ae86384e56deae8ba8df2576ac6ffa8a5937e4f82a2352fdd8558`）。
-  未授权不得 `--apply`。
-- 新 Hermes 审批 mutation 在 bridge/approval gate 完成前保持关闭；F2 Approvals 仅只读。
+- 迁移命令默认仍 dry-run；**Wave 2 已对真实数据授权并执行一次 `--apply`**，使
+  `factor-momentum_20d_reversal-323b045e4b` 达到 `integrity=verified` /
+  `approval_enabled=True`（digest
+  `294bbe7b846ae86384e56deae8ba8df2576ac6ffa8a5937e4f82a2352fdd8558`）。后续新
+  legacy/canonical 冲突仍需单独授权，不得静默再 apply。
+- Hermes Approvals **Gate 2 CAS mutation UI 已在平台交付**（Wave 2）：仅
+  verified+pending+approval_enabled 可批；migration/corrupt 仍证据只读。这不是
+  chat bridge，也不等于 Scene-B Gate 1/3 完成。
 
-The real Hermes chat mutation slice is not selected. The frozen contract expects
-installation fingerprint `b03c94db`, while the 2026-07-14 current local Hermes installation
-reports `226e8de8`; `verify-chat` therefore exits 3 and keeps chat/read/write/
-stream/resume disabled. The inspected Hermes 0.18.2 surface exposes the
-needed JSON-RPC method names but does not yet satisfy D-31 request-recovery,
-event-replay, Run identity, immutable session provider/fallback policy, or
-actual-provider evidence. The checked-in capability evaluator and Git-bound
-independent review therefore keep chat/resume/approval/stop disabled.
+The real Hermes **chat write** slice is still not selected. Wave 2 re-audit
+(HQA `753f153`) treats banner `upstream` as diagnostic only: installation match
+is version + pinned checkout + `server.py` digest + tracked clean, so
+`installation.matches_snapshot=true` even when the banner shows `226e8de8` vs
+contract freeze `b03c94db`. `verify-chat` still exits **3** with
+`chat_write_enabled=false` / stream/resume disabled; `chat_read_enabled` may be
+true for the read-only scaffold. The inspected Hermes 0.18.2 surface still lacks
+D-31 request-recovery, event-replay, Run identity, immutable session
+provider/fallback policy, and actual-provider evidence. Contract review remains
+`blocked`. Read-only bridge scaffold: `hqa/hermes_read_bridge.py`
+(`session.list` / `status` / `history` only).
 
 只有 capability plan 的 `verify-chat` 针对已提交、独立审查为 `ready` 的默认合同和当时
 干净安装态证据返回 ready（`review.verdict=ready` 且
-`installation.matches_snapshot=true`），才能另写 bridge/chat implementation plan。
+`installation.matches_snapshot=true`），才能另写 **chat write** implementation plan。
 旧 `/api/agent/tasks` / AgentRunner **不是** fallback。
 
 ## 状态用词
@@ -151,10 +175,12 @@ independent review therefore keep chat/resume/approval/stop disabled.
 Hermes 统一研究工作台设计已经确认并记录在
 `superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`。第一批工作被拆成
 Hermes capability、candidate integrity/Gate 3、professional frontend/read-only shell
-三份可独立验证的正式计划。截至 2026-07-14：capability 合同与 0.18.2 证据已冻结且
-chat 仍 fail-closed；candidate integrity/Gate 3 已代码交付（真实 migration apply 与
-Hermes 新审批 UI 仍未开放）；professional frontend/read-only shell 已代码交付（F2
-只读壳 + 可回滚默认首页；chat/execution/unifiedResults/legacyRedirects 仍 hard-off）。
+三份可独立验证的正式计划（Wave 1，已收口）。**Wave 2**
+（`2026-07-14-d31-wave2-bridge-approvals-parity.md`）在 2026-07-14 证据下部分完成：
+真实 migration apply 与 Hermes Gate 2 CAS Approvals / Tasks 证据读模型已交付；
+capability re-audit + 只读 bridge scaffold 已提交；Scene-B 仅到 Gate1/2 smoke 且
+final 被拒；旧四页仅 soft banner，未 delete/redirect；**chat write 仍 fail-closed**
+（`verify-chat` exit 3）。`legacyRedirects` / `unifiedResults` / `execution` 仍 hard-off。
 旧 `/api/agent/tasks` 不是 fallback。原 Phase 1a-4 spec/plan 仅保留为历史输入；
 `2026-07-10-phase-1a-4-v2.md` 和完整 9H 计划均是已完成记录，不得把其中的旧 deferred
 条目自动升级为下一步。
@@ -173,10 +199,12 @@ Hermes 新审批 UI 仍未开放）；professional frontend/read-only shell 已�
 - Gate 2 必须携带人类提供的 digest/pending/note CAS 值；Gate 3 只在隔离 worktree
   生成 scoped patch，永不自动 commit。
 - 不绕过 `paper_trading`、`live_trading_enabled=false`、`kill_switch` 或人工门。
-- `/hermes` 已从 mini 9H 三源产物架升级为 feed schema 1.1 六源只读专业壳（F2）：
+- `/hermes` 已从 mini 9H 三源产物架升级为 feed schema 1.1 六源专业壳（F2 + Wave 2）：
   默认首页可回滚到 Dashboard；单一全局 SafetyStrip；Today 以行动/异常/结论为先；
-  Tasks/Approvals/Results 只读；composer 硬禁用；能力提示静态 `blocked_in_this_slice`。
+  Tasks 为平台证据读模型（自动化/周报/机会）；Approvals 在 verified CAS 条件下可
+  提交平台 Gate 2 review（非 chat）；Results 为 9H artifact 索引 + 链到既有平台面；
+  composer **仍硬禁用**；chat/stream/resume 与 `legacyRedirects` 仍 hard-off。
   它通过 `GET /api/hermes/artifacts` 展示 `portfolio_risk`、`prediction`、
   `market_foresight`、`weekly_review`、`opportunity_summary`、`automation_status`。
-  不调用 `POST /api/agent/tasks`、不开放 chat mutation 与旧页 redirect 是 D-31 真实
-  bridge、权限、幂等和 parity Gate 完成前的安全基线。
+  不调用 `POST /api/agent/tasks`、不开放 chat mutation、不删除旧四页是 D-31 真实
+  chat bridge 与 page-parity Gate 完成前的安全基线。
