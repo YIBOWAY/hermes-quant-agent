@@ -17,7 +17,7 @@ import struct
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Protocol
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from hqa.hermes_capabilities import HermesChatGate
 
@@ -142,9 +142,19 @@ def open_read_bridge(
     gate: HermesChatGate,
     endpoint: str,
     timeout_s: float = _DEFAULT_TIMEOUT_S,
+    session_token: Optional[str] = None,
 ) -> "HermesReadBridge":
-    """Construct a read bridge bound to a loopback JSON-RPC WebSocket transport."""
-    transport = LoopbackJsonRpcWsTransport(endpoint=endpoint, timeout_s=timeout_s)
+    """Construct a read bridge bound to a loopback JSON-RPC WebSocket transport.
+
+    ``session_token`` is the Hermes dashboard loopback ``?token=`` credential
+    (``HERMES_DASHBOARD_SESSION_TOKEN``). It is never written into the endpoint
+    URL validator surface; the transport appends it only at handshake time.
+    """
+    transport = LoopbackJsonRpcWsTransport(
+        endpoint=endpoint,
+        timeout_s=timeout_s,
+        session_token=session_token,
+    )
     return HermesReadBridge(gate=gate, transport=transport)
 
 
@@ -222,6 +232,7 @@ class LoopbackJsonRpcWsTransport:
         *,
         timeout_s: float = _DEFAULT_TIMEOUT_S,
         allowlisted_methods: frozenset[str] = _READ_METHODS,
+        session_token: Optional[str] = None,
     ) -> None:
         self._parsed = assert_loopback_ws_endpoint(endpoint)
         self.endpoint = endpoint.strip()
@@ -232,6 +243,19 @@ class LoopbackJsonRpcWsTransport:
                 "timeout_s must be positive",
             )
         self.allowlisted_methods = frozenset(allowlisted_methods)
+        token = (session_token or "").strip()
+        if session_token is not None and not token:
+            raise BridgeTransportError(
+                "invalid_session_token",
+                "session_token must be non-empty when provided",
+            )
+        # Reject characters that would break the query or enable smuggling.
+        if token and any(ch in token for ch in ("\r", "\n", " ", "\t", "&", "#")):
+            raise BridgeTransportError(
+                "invalid_session_token",
+                "session_token contains forbidden characters",
+            )
+        self._session_token = token or None
         self._next_id = 1
 
     def request(
@@ -269,6 +293,11 @@ class LoopbackJsonRpcWsTransport:
         port = self._parsed.port
         assert port is not None
         path = self._parsed.path or "/api/ws"
+        if self._session_token:
+            # Hermes loopback WS auth: ``?token=<_SESSION_TOKEN>`` (see hermes
+            # web_server._ws_auth_reason). Token is never accepted as endpoint
+            # URL input — only as a dedicated constructor field/env.
+            path = f"{path}?token={quote(self._session_token, safe='')}"
         deadline = time.monotonic() + self.timeout_s
         sock: Optional[socket.socket] = None
         try:

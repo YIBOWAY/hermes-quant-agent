@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -29,6 +30,9 @@ from hqa.hermes_read_bridge import (
     gate_from_mapping,
     open_read_bridge,
 )
+
+_SESSION_TOKEN_ENV = "HERMES_DASHBOARD_SESSION_TOKEN"
+_SESSION_TOKEN_FILE_ENV = "HQA_HERMES_SESSION_TOKEN_FILE"
 
 
 class _ArgumentError(ValueError):
@@ -67,6 +71,15 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "Optional loopback WebSocket endpoint override. "
             "Defaults to the contract endpoint. Non-loopback values fail closed."
+        ),
+    )
+    parser.add_argument(
+        "--session-token",
+        default=None,
+        help=(
+            "Hermes loopback WS ?token= credential. Defaults to "
+            f"${_SESSION_TOKEN_ENV} or the file named by "
+            f"${_SESSION_TOKEN_FILE_ENV}. Never logged."
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -115,16 +128,44 @@ def load_live_capability_document(
     return document
 
 
+def resolve_session_token(explicit: Optional[str] = None) -> Optional[str]:
+    """Resolve the Hermes loopback WS token without printing it.
+
+    Order: explicit CLI flag → ``HERMES_DASHBOARD_SESSION_TOKEN`` → contents of
+    ``HQA_HERMES_SESSION_TOKEN_FILE`` (single line). Empty means "no token";
+    live Hermes will then return websocket_upgrade_failed (403).
+    """
+    if explicit is not None:
+        token = explicit.strip()
+        return token or None
+    env_token = (os.environ.get(_SESSION_TOKEN_ENV) or "").strip()
+    if env_token:
+        return env_token
+    file_path = (os.environ.get(_SESSION_TOKEN_FILE_ENV) or "").strip()
+    if not file_path:
+        return None
+    path = Path(file_path)
+    if not path.is_file() or path.is_symlink():
+        raise BridgeTransportError(
+            "session_token_file_invalid",
+            f"{_SESSION_TOKEN_FILE_ENV} must point to a regular non-symlink file",
+        )
+    raw = path.read_text(encoding="utf-8").strip()
+    return raw or None
+
+
 def build_bridge_from_document(
     document: Mapping[str, Any],
     *,
     endpoint: Optional[str] = None,
     timeout_s: float = 10.0,
     transport: Optional[JsonRpcTransport] = None,
+    session_token: Optional[str] = None,
 ) -> tuple[HermesReadBridge, dict[str, Any]]:
     """Construct a read bridge or raise BridgeGateError if chat_read is closed.
 
     Returns ``(bridge, meta)`` where meta records endpoint + gate summary.
+    Meta never includes the session token.
     """
     gate_raw = document.get("gate")
     if not isinstance(gate_raw, Mapping):
@@ -149,6 +190,7 @@ def build_bridge_from_document(
             gate=gate,
             endpoint=resolved_endpoint,
             timeout_s=timeout_s,
+            session_token=session_token,
         )
     else:
         bridge = HermesReadBridge(gate=gate, transport=transport)
@@ -158,6 +200,7 @@ def build_bridge_from_document(
         "chat_write_enabled": gate.chat_write_enabled is True,
         "stream_enabled": gate.stream_enabled is True,
         "chat_ready": False,  # never claim fully connected from the read CLI
+        "session_token_present": bool(session_token),
         "gate_blockers": list(gate.blockers),
     }
     return bridge, meta
@@ -206,11 +249,13 @@ def main(
             live_document = document
         else:
             live_document = load_live_capability_document()
+        resolved_token = resolve_session_token(args.session_token)
         bridge, meta = build_bridge_from_document(
             live_document,
             endpoint=args.endpoint,
             timeout_s=float(args.timeout),
             transport=transport,
+            session_token=resolved_token,
         )
     except CapabilityContractError as exc:
         _emit(

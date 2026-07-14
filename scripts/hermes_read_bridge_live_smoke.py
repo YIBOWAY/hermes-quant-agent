@@ -78,6 +78,9 @@ def main() -> int:
         return 0
 
     # Live read only: list-sessions. Gate still rebuilt from contract+probe.
+    # Auth: HERMES_DASHBOARD_SESSION_TOKEN or HQA_HERMES_SESSION_TOKEN_FILE
+    # (must match the running hermes serve process). Without a token, Hermes
+    # returns WebSocket 403 and this smoke reports error (not chat_ready).
     code = hermes_read_bridge_cli.main(["list-sessions", "--limit", "5"])
     return code
 

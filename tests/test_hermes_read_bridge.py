@@ -141,6 +141,32 @@ def test_loopback_transport_refuses_mutations_without_connect() -> None:
     assert exc2.value.code == "mutation_forbidden"
 
 
+def test_loopback_transport_rejects_empty_or_smuggled_session_token() -> None:
+    with pytest.raises(BridgeTransportError) as empty:
+        LoopbackJsonRpcWsTransport(
+            endpoint="ws://127.0.0.1:9119/api/ws",
+            session_token="   ",
+        )
+    assert empty.value.code == "invalid_session_token"
+    with pytest.raises(BridgeTransportError) as smuggle:
+        LoopbackJsonRpcWsTransport(
+            endpoint="ws://127.0.0.1:9119/api/ws",
+            session_token="abc&other=1",
+        )
+    assert smuggle.value.code == "invalid_session_token"
+
+
+def test_open_read_bridge_accepts_session_token_without_claiming_chat_ready() -> None:
+    bridge = open_read_bridge(
+        gate=_gate(read=True),
+        endpoint="ws://127.0.0.1:9119/api/ws",
+        session_token="unit-test-token",
+    )
+    assert isinstance(bridge.transport, LoopbackJsonRpcWsTransport)
+    assert bridge.transport._session_token == "unit-test-token"
+    assert bridge.gate.chat_write_enabled is False
+
+
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
