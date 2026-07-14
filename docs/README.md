@@ -39,11 +39,14 @@ migration/table。
 
 Git、远端和运行进程是易变状态，不在本入口维护“ahead/dirty/尚未推送”快照。每次交接
 都应以 `git status --short --branch`、`git log`、`curl /api/health` 和对应测试重新核验。
-下一产品设计已经通过 D-31 单独确认。**第一批已选 wave** 是三份独立可测计划：Hermes
-gateway capability contract（已冻结，chat 仍 fail-closed）、candidate integrity/Gate 3
-（2026-07-13 代码交付）、professional frontend/read-only shell（2026-07-14 代码交付）。
-不得从旧 1a-4 模板、旧前端 P2/P3 或历史 audit 自行增加施工步骤。bridge/chat 仍须
-`verify-chat` ready 后另写计划；真实 migration `--apply` 与 Hermes 新审批 UI 仍关闭。
+下一产品设计已经通过 D-31 单独确认。**Wave 1** 三份计划（gateway 合同、candidate
+integrity/Gate 3、professional frontend/read-only shell）已代码交付并经用户确认收口：
+完整 D-31 仍是**按设计部分完成**，不得表述成 Hermes 已全部接通。
+**Wave 2 执行入口：**
+[`superpowers/plans/2026-07-14-d31-wave2-bridge-approvals-parity.md`](superpowers/plans/2026-07-14-d31-wave2-bridge-approvals-parity.md)
+（migration apply、Hermes Approvals CAS UI、Tasks 真读模型、Scene-B 实跑证据、
+fail-closed bridge scaffold、旧页 parity 分阶段）。不得从旧 1a-4 模板或历史 audit
+自行加步骤。`verify-chat` 未 ready 前禁止打开真实网页 chat 写端。
 
 Candidate integrity / Gate 3 交付要点（以平台代码与两仓测试为准，非历史计划 checkbox）：
 
