@@ -13,13 +13,18 @@ Rules for AI agents working in this repository.
   `docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md`; Slices 9A through 9H
   are all delivered. The current delivery record is
   `docs/superpowers/plans/2026-07-12-full-9h-automation-notifications.md`.
-  D-31 wave status (2026-07-14 evidence): Hermes gateway capability contract is
-  delivered with chat still fail-closed; candidate integrity and scoped Gate 3
-  are code-delivered on the platform; HQA Scene-B persists an exact-source
-  Gate 1 confirmation and binds it to the candidate manifest before its Gate 2
-  CAS caller can approve; the professional frontend/read-only shell is delivered.
-  Real Hermes chat/provider evidence, Hermes approval mutations, unified results,
-  and legacy-page retirement remain intentionally blocked. Do not infer work from
+  D-31 status (2026-07-15 evidence): the old TUI gateway contract has drifted and
+  is fail-closed; the official API Server session-read contract and platform
+  server-side GET-only BFF are delivered for real session list/detail/messages only.
+  Candidate integrity is delivered, one authorized migration apply completed,
+  and Scene-B completed Gate 1, Gate 2, Futu final receipt, human Gate 3 commit
+  `524e791`, registry promotion, and cleanup. The professional frontend/read-only
+  shell is delivered. Browser Gate 2 mutation was rolled back because refetching
+  digest/status violated Gate 1 binding/no-refetch. Real Hermes chat/provider Run
+  evidence, Hermes approval mutations, durable ledger/outbox/worker, unified
+  results, and legacy-page retirement remain intentionally blocked or planned.
+  The current plan is
+  `docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`. Do not infer work from
   an older plan or backlog. The platform frontend plan is the Slice 0-8
   delivery record, not the active backlog. The 2026-07-07 Phase 1a-4
   implementation plan is superseded material and must not be followed task-by-task.
@@ -65,11 +70,14 @@ Rules for AI agents working in this repository.
   `data/agent_run/agent/candidates` (override only via `QS_AGENT_OUTPUT_DIR`).
   CWD/`QS_DATA_DIR` do not relocate them. Read states are
   `verified` / `migration_required` / `corrupt`; `legacy_unbound` never
-  authorizes. Real migration remains dry-run until separately authorized.
+  authorizes. Wave 2 completed one explicitly authorized real apply; every
+  later migration/apply still requires separate authorization.
 - HQA may run one-shot research backtests through digest-reverified approved
   candidates, but resident paper/live paths must only use promoted, registered,
-  tested factors. The delivered Hermes workbench remains read-only; its approval
-  mutation stays disabled until a separately approved bridge/approval slice lands.
+  tested factors. The delivered Hermes workbench remains read-only. Official API
+  health/capability/session GETs do not call a provider. Chat/run and approval
+  mutation stay disabled until durable recovery/evidence contracts and a
+  separately approved slice land.
 - Opportunity decisions never create or upgrade action eligibility. Link an
   action only by exact platform signal/execution IDs validated through the
   bounded observations seam; ticker/symbol similarity is never causal proof.

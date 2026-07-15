@@ -1,211 +1,167 @@
 # 文档导航与当前执行状态
 
-这份文件回答三个问题：**现在按哪份计划做、做到哪里、其他文档该怎么读**。
-设计理念和历史过程不在这里重复；它们分别留在 roadmap、spec、implementation
-plan、audit 和 git history 中。
+这份文件只回答三个问题：**现在按哪份计划做、实际做到哪里、其他文档该怎么读**。
+长期方向、历史实现细节和特定日期审计分别留在 roadmap、plan 和 audit 中。
 
-> 事实快照：2026-07-14。状态变化后优先更新本文件和对应交付记录，不要在
-> `AGENTS.md` 追加开发流水账。
+> 事实快照：2026-07-15。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
+> 必须重新检查 git、进程、HTTP smoke 和测试。
 
-## 当前唯一执行入口
+## 当前执行入口
 
 | 层级 | 权威文档 | 当前含义 |
 |---|---|---|
-| 产品方向 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；平台是领域后端。该 roadmap 管长期阶段、决策与安全门。 |
-| 已批准下一产品设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | D-31：`/hermes` 成为默认首页，真实连接本地 Hermes，并逐步吞并 factor-lab、backtest、experiments、agent-studio 的页面体验。 |
-| 第一批正式计划：Hermes 合同（已冻结，chat fail-closed） | [`superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md`](superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md) | 将本机 Hermes 0.18.2 的 WebSocket JSON-RPC 能力、Git 绑定独立审查和安装指纹冻结为 fail-closed 合同；证据见 [`contracts/hermes-gateway-0.18.2.md`](contracts/hermes-gateway-0.18.2.md)。当前缺少 request recovery、Run identity、event replay、immutable provider/fallback policy 和 actual-provider evidence，所以真实 chat/resume 写端继续关闭。 |
-| 第一批正式计划：候选安全（代码已交付并审查加固） | [`superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md`](superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md) | 统一 repo-anchored candidate root、immutable manifest、HQA Scene-B Gate 1 精确源确认/绑定、Gate 2 digest/CAS、legacy_unbound、最后读取再校验与隔离 Gate 3 worktree 已交付；Wave 2 已 apply 一例 verified 候选；Hermes Approvals CAS 已开；chat write 仍关闭；Gate3 人类 commit 未完成。 |
-| 第一批正式计划：专业前端（代码已交付） | [`superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md`](superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md) | F0 direction-a + F1 书面批准后，F2 只读壳与可回滚默认首页已代码交付；chat/execution/unifiedResults/legacyRedirects 字面 false；能力提示静态 `blocked_in_this_slice`；不开放 chat mutation 与旧页 redirect。 |
-| 已完成实现记录 | [`superpowers/plans/2026-07-10-phase-1a-4-v2.md`](superpowers/plans/2026-07-10-phase-1a-4-v2.md) | Phase 1a-4 v2 的 Slice 9A-9H 已全部完成；其中“没有下一 slice”仅是该交付完成时的历史状态，不代表当前 D-31 计划状态。 |
-| 当前交付记录 | [`superpowers/plans/2026-07-12-full-9h-automation-notifications.md`](superpowers/plans/2026-07-12-full-9h-automation-notifications.md) | 完整 9H 的只读自动化、周复盘、freshness、feed 1.1、页面可见性、local 通知与四个 Hermes cron 的代码交付和运行验收。 |
-| 前序交付记录 | [`superpowers/plans/2026-07-12-slice-9g-opportunity-ledger.md`](superpowers/plans/2026-07-12-slice-9g-opportunity-ledger.md) | 9G 稳定 signal identity、decision/action ledger、精确平台行动关联与 missed 安全判定。 |
-| 更早交付记录 | [`superpowers/plans/2026-07-12-slice-9f-mini-9h.md`](superpowers/plans/2026-07-12-slice-9f-mini-9h.md) | 9F proposal-only 市场推演和 mini 9H `/hermes` 三源只读产物架。 |
-| 前序实现 | `/Users/sunyibo/programs/ai-quant-platform/docs/superpowers/plans/2026-07-08-frontend-redesign-hermes-integration.md` | Slice 0-8 的权威实现与验收记录；只作为 D-31 的现状/parity inventory，不再提供可直接执行的后续 backlog。 |
-| 被替代计划 | [`superpowers/plans/2026-07-07-phase-1a-4-research-employees.md`](superpowers/plans/2026-07-07-phase-1a-4-research-employees.md) | 产品目标保留，implementation plan 已由 v2 重排计划替代，不得原样执行。 |
-| 历史素材 | `ai-quant-platform/docs/phases/phase_15_iteration_roadmap.md`、两仓旧 phase/plan/audit | 只提供设计与验收证据，不得自行成为下一步。 |
+| 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 是当前产品主线。 |
+| 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`](superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md) | 3A official API session-read 已交付；下一开发切片是 3B durable ledger/outbox。chat、统一 Results 与旧页退场仍受 Gate。 |
+| 当前 Hermes 合同 | [`contracts/hermes-api-server-0.18.2.md`](contracts/hermes-api-server-0.18.2.md) | official API Server 的 health/capabilities/sessions/detail/messages 只读合同；chat/run/stream/approval/stop 全部 fail-closed。 |
+| 旧 TUI 合同 | [`contracts/hermes-gateway-0.18.2.md`](contracts/hermes-gateway-0.18.2.md) | 历史 WebSocket JSON-RPC 快照；当前 checkout/source 已漂移，不再匹配安装，不能用于准入。 |
+| Wave 2 验收事实 | [`audits/2026-07-15-d31-wave2-evidence.md`](audits/2026-07-15-d31-wave2-evidence.md) | Scene-B 三道人类门与 Gate 3 commit 已真实闭合；同时记录仍未完成的 D-31 范围。 |
+| Wave 2 原计划 | [`superpowers/plans/2026-07-14-d31-wave2-bridge-approvals-parity.md`](superpowers/plans/2026-07-14-d31-wave2-bridge-approvals-parity.md) | 历史执行清单；顶部 delivery addendum 优先于原 success criteria。 |
+| Candidate / Gate 3 计划 | [`superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md`](superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md) | repo-anchored immutable candidate、Gate 1 binding、Gate 2 CAS、final receipt 与隔离 Gate 3 的实现记录；顶部 acceptance addendum 是最新事实。 |
+| Phase 1a-4 v2 完成记录 | [`superpowers/plans/2026-07-10-phase-1a-4-v2.md`](superpowers/plans/2026-07-10-phase-1a-4-v2.md) | 9A–9H 已完成；不是当前 backlog。 |
+| 完整 9H 完成记录 | [`superpowers/plans/2026-07-12-full-9h-automation-notifications.md`](superpowers/plans/2026-07-12-full-9h-automation-notifications.md) | 只读 automation、weekly、freshness、feed 1.1 与 local notification 的交付/运行验收。 |
+| 平台 Slice 0–8 | `/Users/sunyibo/programs/ai-quant-platform/docs/superpowers/plans/2026-07-08-frontend-redesign-hermes-integration.md` | 已完成的前端/数据库历史交付与 parity 输入，不是独立路线图。 |
 
-Phase 1a-4 v2 已完整交付到 9H；该交付当时的 HQA 门禁为
-`530 passed, 2 skipped`。2026-07-14 对抗性加固后的当前全量门禁为
-`659 passed, 2 skipped`；
-`hqa-full-9h-daily-close`、`hqa-full-9h-freshness`、`hqa-full-9h-weekly` 和
-`hqa-full-9h-notification-drain` 四个 Hermes `no-agent`、local-delivery cron 均已真实触发并
-报告 `ok`。feed schema 1.1 精确包含六源，`/hermes` 已可见 weekly、opportunity 和
-automation，并保留风险、预测与市场推演三类卡片。
+## 一句话项目阶段
 
-真实 options artifact 的 59 个阈值信号仍全部诚实保持 `not_actionable`，最终为
-`59 not_actionable / 0 missed`。通知默认 target 是 local，运行验收没有实际外发 Discord。
-本交付未触发策略、回测、paper mutation、broker 或交易，也没有为完整 9H 新增平台数据库
-migration/table。
+**Phase 1a-4 / 9H 已收口；当前处于 D-31 Wave 3，真实 Hermes 已接通到“已有会话只读”层，
+但网页还不能向 Hermes 提交对话。** 下一步不是直接打开 composer，而是先实现 durable
+command/outbox/event ledger，再接确定性 connector worker，最后才评估 chat 写端。
 
-Git、远端和运行进程是易变状态，不在本入口维护“ahead/dirty/尚未推送”快照。每次交接
-都应以 `git status --short --branch`、`git log`、`curl /api/health` 和对应测试重新核验。
-下一产品设计已经通过 D-31 单独确认。**Wave 1** 三份计划（gateway 合同、candidate
-integrity/Gate 3、professional frontend/read-only shell）已代码交付并经用户确认收口：
-完整 D-31 仍是**按设计部分完成**，不得表述成 Hermes 已全部接通。
-**Wave 2 执行入口：**
-[`superpowers/plans/2026-07-14-d31-wave2-bridge-approvals-parity.md`](superpowers/plans/2026-07-14-d31-wave2-bridge-approvals-parity.md)。
-2026-07-14 证据下 Wave 2 **部分完成**（见下表）；不得表述成 Hermes 已全部接通或旧四页已退役。
-不得从旧 1a-4 模板或历史 audit 自行加步骤。`verify-chat` 未 ready（exit 3）前禁止打开真实网页 chat 写端。
+## D-31 当前事实
 
-### D-31 Wave 2 状态（2026-07-14 证据）
-
-| Task | 状态 | 证据要点 |
+| 能力 | 状态 | 真实含义 |
 |---|---|---|
-| A — Candidate migration `--apply` | **DONE** | 真实候选 `factor-momentum_20d_reversal-323b045e4b`：`integrity=verified`，`approval_enabled=True`，digest `294bbe7b846ae86384e56deae8ba8df2576ac6ffa8a5937e4f82a2352fdd8558` |
-| B — Hermes Approvals Gate 2 CAS UI | **DONE（平台代码）** | platform `8052fe6`：仅 `approval_enabled` + `verified` + `pending` 显示批准/拒绝；确认时 re-fetch detail digest + 必填 note；CAS 提交 `expected_manifest_digest` + `expected_status=pending` |
-| C — Tasks 证据读模型 | **DONE（平台代码）** | 同 `8052fe6`：自动化/周报/机会摘要只读；**无** research task 写账本 / create-submit |
-| D — Scene-B 实跑 | **DONE（含人类 Gate3 commit）** | 权威 smoke：`factor-wave2_scene_b_smoke_v3_loadable_factor-da01df1188`；Futu final `backtest-f4da78d66b4ee6eaab6e7226740ac6ac`；Gate3 `promo-b7bbab8cf571a5f4ff43aa652aebf3bc` → reviewed `524e791` → cleaned；因子 `agent_candidate_wave2_sceneb_mom20_v3` 已进平台 `promoted` 库。证据 `.superpowers/sdd/wave2-sceneb-smoke-evidence.md` |
-| E — Capability re-audit + read bridge | **DONE（只读接线）** | re-audit `753f153` + wire `6bb366c`：loopback JSON-RPC WS transport + CLI `list-sessions/status/history`；`chat_write=false`；`verify-chat` exit 3；9119 无 listener 时 live smoke 跳过 |
-| F — 旧页 parity | **PARTIAL** | platform `3400659`：Factor Lab / Backtester / Experiments / Agent Studio **soft banners only**；**未**删除、**未** redirect；inventory 见工作区 `.superpowers/sdd/wave2-parity-inventory.md`（本地 SDD，可能未入库） |
-| G — Docs / 双仓核验 | **DONE（本轮）** | 本文件与平台 INDEX 已按证据回写；平台已 push 至含 `4263b7f`（candidate `property` safe-builtin 修复） |
+| `/hermes` 专业只读首页 | **DONE** | 默认首页、SafetyStrip、Today/Tasks/Approvals/Results 只读框架已存在。 |
+| Tasks 证据面 | **DONE** | 展示 automation、weekly、opportunity 等平台事实；没有 research task create/submit。 |
+| Candidate integrity | **DONE** | canonical root、immutable manifest、verified/migration_required/corrupt、digest/status CAS、legacy_unbound 非授权。 |
+| Scene-B Gate 1/2/final/Gate 3 | **DONE** | 人类 Gate 3 commit `524e791e5e3e22cec12a4166ad8fc3617c735566` 已进入 promoted registry 并 cleanup。 |
+| Hermes official API session read | **DONE（代码 + 本机只读验收）** | 平台 BFF 能读真实 session list/detail/messages；浏览器不持有 Hermes key。 |
+| Browser Gate 2 mutation | **ROLLED BACK / OFF** | 初版会 refetch digest/status，违反 HQA Gate 1 exact binding 与 Gate 2 no-refetch；Approvals 当前只读。 |
+| Hermes chat/stream/resume/stop | **BLOCKED** | 缺 durable request recovery、Run identity、event replay、provider evidence、approval/stop 对账语义。 |
+| Unified Results | **NOT DONE** | 仍缺统一动态详情、exact Run/result linking 与旧页面 parity。 |
+| Legacy page redirects/deletion | **NOT DONE** | 旧四页仍完整保留；soft banner 不等于 redirect 或 retirement。 |
+| 交易执行 | **OFF** | `paper_trading` / `live_trading_enabled=false` / kill switch / 人工门不变。 |
 
-**Wave 2 明确未完成 / 仍关闭：**
+完整 D-31 仍是**部分完成**。不要把“session 列表能读”表述为“网页已能和 Hermes 对话”，
+也不要把 upstream `/v1/runs` 存在表述为写端已达到可靠性与审计要求。
 
-- 真实网页 **chat write / stream / resume**（`verify-chat` exit 3；合同 review 仍 `blocked`；composer 硬禁用）。
-- Scene-B 人类 Gate 3 commit：**已完成**（user-authorized；`524e791`）。
-- 旧四页 **deletion / hard redirect**（仍完整保留能力；仅 soft banner）。
-- Hermes **unified results** 动态详情（`unifiedResults` hard-off；Results 只链到既有平台面）。
-- 平台 BFF 代理 Hermes 会话读（可选后续；当前为 HQA CLI/library）。
-- 将 `POST /api/agent/tasks` 当作 Hermes fallback（禁止）。
+## Gate 3 已完成的权威事实
 
-Candidate integrity / Gate 3 交付要点（以平台代码与两仓测试为准，非历史计划 checkbox）：
+| 字段 | 值 |
+|---|---|
+| candidate | `factor-wave2_scene_b_smoke_v3_loadable_factor-da01df1188` |
+| manifest digest | `5ca064d597778b45f1a718047becf5b67b30cf9b24d441632b3a408cfd1c227d` |
+| final receipt | `backtest-f4da78d66b4ee6eaab6e7226740ac6ac` |
+| promotion | `promo-b7bbab8cf571a5f4ff43aa652aebf3bc` |
+| reviewed commit | `524e791e5e3e22cec12a4166ad8fc3617c735566` |
+| factor | `agent_candidate_wave2_sceneb_mom20_v3` |
+| lifecycle | `reviewed` → `cleaned`；已 registered/promoted |
 
-- 唯一 canonical root：`resolve_agent_output_dir()` → 默认
-  `/Users/sunyibo/programs/ai-quant-platform/data/agent_run`，候选目录
-  `.../data/agent_run/agent/candidates`；仅 `QS_AGENT_OUTPUT_DIR` 可覆盖；CWD /
-  `QS_DATA_DIR` 不迁移候选池。
-- 读状态：`verified` / `migration_required` / `corrupt` 互斥；`legacy_unbound`
-  无批准/执行/晋级权威。
-- Gate 1（Scene-B HQA wrapper）：人类提供精确 reviewed source SHA-256 与非空确认说明；
-  HQA 持久化 source confirmation，并将它绑定到平台返回的 exact candidate ID + manifest
-  digest。平台以 binary read 原样摄入外部源码，并在 machine receipt 返回 verified
-  `source_sha256`；HQA 只有在它等于 Gate 1 digest 时才写 binding。`list` 只展示去除命令
-  的非权威清单；只有 exact JSON `detail` 在绑定存在时展示 approve command，approve 也
-  fail closed。Hermes readonly gate 不再暴露 raw `agent list-candidates`，平台该命令本身也
-  不再输出 copyable review command。平台原始
-  review endpoint 只是 Gate 2 primitive，不单独构成 Scene-B Gate 1 证据。
-- Gate 2：HQA 要求人类提供 `candidate-id + expected-digest + expected-status=pending + note`，
-  approve 路径禁止 refetch。
-- final one-shot：只有成功的 `backtest --final` 才写 canonical、content-addressed receipt，
-  绑定 candidate/digest/factor/experiment/run/provider/symbols/full window，以及安全读取并
-  SHA-256 复核的 config/agent-summary/report。HQA 还要求真实 provider、每次调用唯一且
-  不覆盖的实验命名空间，并把三份产物的完整路径固定到显式
-  `HQA_FACTOR_EXPERIMENT_OUTPUT_DIR` authority root 下；同时要求 exact `run-001`、完整
-  safety/provenance schema 和与平台生成器逐字一致的报告；non-final trial 不生成 Gate 3 权威。
-- Gate 3：Scene-B 使用 HQA `factor_repro_cli promote`，必须显式携带
-  candidate/digest/final-backtest-receipt/base，先重验 Gate 1 exact binding 与同一
-  candidate/digest 的成功 final receipt，再调用平台 prepare；stdout 四字段
-  `{promotion_id, worktree, patch, manifest}`；status/cleanup 只认 promotion-id；
-  HQA 还会安全读取 manifest/patch 和 actual worktree，复核 candidate/digest/base、确定性
-  promotion ID、exact 三路径、文件 bytes/mode、完整 dirty set 与实际 Git patch；平台
-  `promotion-status` 同步返回 manifest/patch/candidate/base/path provenance，并在状态读取时
-  重新证明未提交工作区未漂移。超时只代表 outcome unknown，必须按 recovery handle/根目录
-  只读核查，不能盲目 retry/abandon。输出前再次验证 Gate 1 与 final receipt。abandon 仅显式；隔离 review worktree；永不自动 commit。平台原始 promotion CLI 是通用
-  primitive，不单独证明 HQA Gate 1 provenance。
-- 迁移命令默认仍 dry-run；**Wave 2 已对真实数据授权并执行一次 `--apply`**，使
-  `factor-momentum_20d_reversal-323b045e4b` 达到 `integrity=verified` /
-  `approval_enabled=True`（digest
-  `294bbe7b846ae86384e56deae8ba8df2576ac6ffa8a5937e4f82a2352fdd8558`）。后续新
-  legacy/canonical 冲突仍需单独授权，不得静默再 apply。
-- Hermes Approvals **Gate 2 CAS mutation UI 已在平台交付**（Wave 2）：仅
-  verified+pending+approval_enabled 可批；migration/corrupt 仍证据只读。这不是
-  chat bridge，也不等于 Scene-B Gate 1/3 完成。
+旧 promotion 因 base commit 漂移被显式 abandon，随后在当前 HEAD 重新 prepare；没有盲目重试。
+人工授权只覆盖隔离 worktree 的 exact 三文件 diff，之后 fast-forward 合入平台开发分支。
 
-The real Hermes **chat write** slice is still not selected. Wave 2 re-audit
-(HQA `753f153`) treats banner `upstream` as diagnostic only: installation match
-is version + pinned checkout + `server.py` digest + tracked clean, so
-`installation.matches_snapshot=true` even when the banner shows `226e8de8` vs
-contract freeze `b03c94db`. `verify-chat` still exits **3** with
-`chat_write_enabled=false` / stream/resume disabled; `chat_read_enabled` may be
-true for the read-only scaffold. The inspected Hermes 0.18.2 surface still lacks
-D-31 request-recovery, event-replay, Run identity, immutable session
-provider/fallback policy, and actual-provider evidence. Contract review remains
-`blocked`. Read-only bridge scaffold: `hqa/hermes_read_bridge.py`
-(`session.list` / `status` / `history` only).
+Candidate/Gate 规则仍然是：
 
-只有 capability plan 的 `verify-chat` 针对已提交、独立审查为 `ready` 的默认合同和当时
-干净安装态证据返回 ready（`review.verdict=ready` 且
-`installation.matches_snapshot=true`），才能另写 **chat write** implementation plan。
-旧 `/api/agent/tasks` / AgentRunner **不是** fallback。
+- 唯一默认候选目录是平台 repo-anchored
+  `/Users/sunyibo/programs/ai-quant-platform/data/agent_run/agent/candidates`；只有
+  `QS_AGENT_OUTPUT_DIR` 可显式覆盖，CWD / `QS_DATA_DIR` 不迁移候选池。
+- Gate 1 由 HQA Scene-B wrapper 保存 reviewed source SHA-256 + 非空说明，并绑定 exact
+  candidate ID / manifest digest；平台原始 review API 只是 Gate 2 primitive。
+- Gate 2 必须由人类提供
+  `candidate-id + expected-digest + expected-status=pending + note`；HQA 不 list/refetch/替换。
+- Gate 3 只通过 HQA wrapper 进入，重验 Gate 1 与同 candidate/digest 的 content-addressed
+  successful `--final` receipt；prepare 只产隔离 worktree/patch/manifest，永不自动 commit。
+- 常驻 paper/live 路径只可使用 promoted、registered、tested factor；approved candidate 只限
+  digest-reverified one-shot research。
 
-## 状态用词
+## Hermes 接入现状
 
-- **已实现**：代码存在，但可能仍在工作树中。
-- **已提交**：本地 commit 存在。
-- **已推送**：远端分支已包含该 commit。
-- **代码交付**：实现和约定测试已完成；不自动等于真实运营验收。
-- **运行验收**：当前进程已重启到目标代码，并用真实本地依赖完成 smoke/E2E。
-- **排队**：设计可以保留，但不得被 agent 当作当前实现指令。
-- **历史快照**：只描述某一日期的事实，不承担当前状态维护职责。
+### 当前只读链路
 
-文档里出现“已交付”时，应尽量注明是代码交付还是运行验收。计划中的 checkbox
-只能证明该计划记录了完成状态，仍应以代码、git 和测试证据复核。
+```text
+Browser -> ai-quant-platform Next page
+        -> platform API/BFF http://127.0.0.1:8765
+        -> Hermes official API Server http://127.0.0.1:8642
+        -> persisted sessions
+```
+
+平台 BFF 当前只允许：
+
+- `GET /api/hermes/gateway`
+- `GET /api/hermes/sessions`
+- `GET /api/hermes/sessions/{session_id}`
+- `GET /api/hermes/sessions/{session_id}/messages`
+
+Hermes Bearer key 只在服务端 owner-only 文件中；HTTP client 禁用环境代理继承与 redirect，
+session ID / payload / 响应大小和时限都 fail-closed。平台和 Hermes 都必须只绑定 loopback；
+远程访问前另做 TLS、登录、授权、CSRF 与审计。
+
+这些 GET 只读已有本地状态，不启动 Hermes 推理，所以不消耗 Codex/Grok provider 额度。
+本次 session-read slice 没有新增 PostgreSQL migration/table；数据库只复用既有迁移。
+
+### 下一条成熟链路
+
+```text
+Browser -> same-origin BFF
+        -> PostgreSQL command + outbox + event ledger
+        -> HQA deterministic connector worker
+        -> Hermes official API HTTP/SSE
+```
+
+轮询只用于数据库 queue claim/lease/heartbeat/reconcile，并以 `LISTEN/NOTIFY` 唤醒、周期 scan
+兜底；**禁止让 Hermes/LLM cron 空转询问“有没有任务”**。空队列不创建 Run、不调用 provider。
+
+写端只有在 request idempotency/recovery、Run identity、event cursor/replay、provider policy lock、
+actual provider/fallback/usage evidence、approval TTL/digest/single-use 和幂等 stop/reconcile 均有
+审查证据后才能打开。当前 `chat_write=false`、`approval_mutations=false`。
+
+## 接下来按什么顺序做
+
+1. **Wave 3 / Slice 3B：durable ledger/outbox。** 先做 migration、幂等 command、append-only
+   events、exact run/result links；不提交 Hermes prompt。
+2. **Slice 3C：deterministic worker。** DB claim/lease/backoff/reconcile；写 Hermes 仍受合同 Gate。
+3. **Slice 3D：chat/stream/resume。** 只有能力审计、认证/CSRF、安全 review 和用户批准通过才做。
+4. **Slice 3E：unified Results。** 建统一索引/详情与 exact provenance，不复制领域真相。
+5. **Slice 3F：legacy retirement。** parity matrix + 真实 E2E + 用户确认后，先导航切流/可回滚
+   redirect，最后才删除旧 UI；领域 API/CLI/engine 保留。
+
+不得从旧 1a-4 计划、历史 audit 或 unchecked checkbox 自行增加当前步骤。
 
 ## 阅读顺序
 
-1. 本文件：确定当前主线和状态。
-2. [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md)：核对 D-31 已批准设计；书面规格和后续 implementation plan 获批前不要施工。
-3. 已完成实现记录与当前交付记录：核对 9A-9H 的范围、验收事实和历史边界。
-4. [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md)：核对产品方向和安全门。
-5. [`design/vision-daily-life.md`](design/vision-daily-life.md)：理解目标用户体验。
-6. 只有改到具体模块时，再读对应 `plans/`、spec 或平台 guide/architecture。
+1. 本文件：确定当前主线、已完成与明确关闭项。
+2. D-31 design spec：核对产品目标与安全模型。
+3. Wave 3 plan：只执行当前 slice；不要越过写端 Gate。
+4. official API contract：核对当前安装身份、GET allowlist 与 provider 语义。
+5. Wave 2 audit / candidate plan：需要追溯 Gate 1/2/3 时再读。
+6. roadmap：核对长期阶段；历史计划只作证据，不作待办。
 
-## 文档分类
+## 文档状态用词
 
-### 现役
+- **已实现**：代码存在，可能仍在工作树。
+- **已提交**：本地 commit 存在。
+- **已推送**：远端分支包含 commit。
+- **代码交付**：实现与约定测试完成；不自动等于运行验收。
+- **运行验收**：目标进程已加载目标代码，并对真实本地依赖完成 smoke/E2E。
+- **BLOCKED / OFF**：边界故意关闭；不是靠展示一个入口就能变为完成。
+- **历史记录**：只说明当时发生过什么，不维护当前 backlog。
 
-- 本文件：当前工作入口。
-- `design/2026-07-01-roadmap-phases-0b-4.md`：产品路线与决策台账。
-- `superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`：已批准的
-  D-31 产品/架构设计；等待书面复核和 implementation plan。
-- `superpowers/plans/2026-07-10-phase-1a-4-v2.md`：已完成的 Phase 1a-4 v2 实现记录。
-- `superpowers/plans/2026-07-12-full-9h-automation-notifications.md`：当前交付与运行验收记录。
-- 平台 `2026-07-08-frontend-redesign-hermes-integration.md`：Slice 0-8 已完成实现记录与
-  D-31 parity inventory，不是当前 backlog。
-- 两仓 `README.md`：稳定能力、启动和安全说明。
-- 两仓 `AGENTS.md` / `.claude/CLAUDE.md`：agent 必须遵守的规则与权威指针。
-
-### 已完成阶段的实现记录
-
-`plans/2026-07-01-phase-0a-*`、`phase-0b-*`、`phase-1a-0-*`、
-`phase-1a-1-*`、`phase-1a-2-*`、`phase-1a-3-*` 和 D-25 文档用于追溯设计、
-测试与边界；它们不是当前待办清单。某些 checkbox 没有回填，不应据此反推代码不存在。
-
-### 已批准设计、第一批正式计划（部分交付）
-
-Hermes 统一研究工作台设计已经确认并记录在
-`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`。第一批工作被拆成
-Hermes capability、candidate integrity/Gate 3、professional frontend/read-only shell
-三份可独立验证的正式计划（Wave 1，已收口）。**Wave 2**
-（`2026-07-14-d31-wave2-bridge-approvals-parity.md`）在 2026-07-14 证据下**大部完成但仍非完整 D-31**：
-真实 migration apply、Hermes Gate 2 CAS Approvals、Tasks 证据读模型、只读 bridge 接线、
-Scene-B Gate1→Futu final→Gate3 prepare+人类 commit（`524e791`）已交付；
-**chat write、旧页 retirement、unified results** 仍关闭。`verify-chat` exit 3。
-`legacyRedirects` / `unifiedResults` / `execution` 仍 hard-off。
-旧 `/api/agent/tasks` 不是 fallback。原 Phase 1a-4 spec/plan 仅保留为历史输入；
-`2026-07-10-phase-1a-4-v2.md` 和完整 9H 计划均是已完成记录，不得把其中的旧 deferred
-条目自动升级为下一步。
-
-### 历史审计
-
-`audits/` 记录特定日期的发现和后续处置。审计中的未完成项、优先级和“下一步”只对
-该快照有效；当前状态回到本文件、当前交付记录、源码和测试核验。
+计划 checkbox、旧测试计数和旧 PID 都不是当前事实源。每次交接至少重跑：
+`git status --short --branch`、目标测试、前后端 health、Hermes health/session GET 和真实浏览器路径。
 
 ## 双仓职责与安全边界
 
-- `Hermes-quant-agent`：编排、记忆、cron、通知、人机审批和 artifact-first 体验。
-- `ai-quant-platform`：行情、因子、回测、期权、paper account、数据库和前端领域实现。
-- 候选因子只可用于显式的一次性研究（digest 再校验后）；常驻 paper/live 路径只允许
-  promoted、registered、tested factor。
-- Gate 2 必须携带人类提供的 digest/pending/note CAS 值；Gate 3 只在隔离 worktree
-  生成 scoped patch，永不自动 commit。
-- 不绕过 `paper_trading`、`live_trading_enabled=false`、`kill_switch` 或人工门。
-- `/hermes` 已从 mini 9H 三源产物架升级为 feed schema 1.1 六源专业壳（F2 + Wave 2）：
-  默认首页可回滚到 Dashboard；单一全局 SafetyStrip；Today 以行动/异常/结论为先；
-  Tasks 为平台证据读模型（自动化/周报/机会）；Approvals 在 verified CAS 条件下可
-  提交平台 Gate 2 review（非 chat）；Results 为 9H artifact 索引 + 链到既有平台面；
-  composer **仍硬禁用**；chat/stream/resume 与 `legacyRedirects` 仍 hard-off。
-  它通过 `GET /api/hermes/artifacts` 展示 `portfolio_risk`、`prediction`、
-  `market_foresight`、`weekly_review`、`opportunity_summary`、`automation_status`。
-  不调用 `POST /api/agent/tasks`、不开放 chat mutation、不删除旧四页是 D-31 真实
-  chat bridge 与 page-parity Gate 完成前的安全基线。
+- `Hermes-quant-agent`：编排、记忆、cron、通知、三门 provenance 与未来 connector worker。
+- `ai-quant-platform`：行情、因子、回测、期权、paper account、PostgreSQL、BFF 与前端领域实现。
+- Gate 1/2/3 与 Hermes command approval 互不替代；机会决策也不产生执行资格。
+- action 只按 exact platform signal/execution IDs 关联；ticker/symbol 相似不是因果证明。
+- 不绕过 `paper_trading`、`live_trading_enabled=false`、kill switch 或人工审批门。
+- `/api/agent/tasks` 不是 Hermes fallback；upstream unavailable 时必须诚实 unavailable。
+
+## 历史材料
+
+- `plans/2026-07-01-phase-0a-*`、`phase-0b-*`、`phase-1a-*` 与 D-25 记录用于追溯。
+- `2026-07-07-phase-1a-4-research-employees.md` 已被 v2 替代，不能逐项继续执行。
+- 平台 `docs/phases/phase_15_iteration_roadmap.md` 只有参考价值，不是第二路线图。
+- 历史审计中的优先级和“下一步”只对当日快照有效；当前状态回到本文件、代码、git 和测试。

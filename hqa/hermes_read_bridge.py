@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import os
 import socket
 import struct
@@ -60,14 +61,16 @@ _FORBIDDEN_METHODS = frozenset(
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 _DEFAULT_TIMEOUT_S = 10.0
 _MAX_FRAME_BYTES = 16 * 1024 * 1024
+_MAX_SESSION_LIST_LIMIT = 200
 
 
 def assert_loopback_ws_endpoint(endpoint: str) -> Any:
     """Parse and validate a loopback Hermes WebSocket endpoint.
 
-    Only ``ws://`` / ``wss://`` against ``127.0.0.1`` or ``::1`` with path
-    ``/api/ws`` and an explicit port are accepted. Hostnames such as
-    ``localhost`` and non-loopback addresses fail closed.
+    Only plaintext ``ws://`` against ``127.0.0.1`` or ``::1`` with path
+    ``/api/ws`` and an explicit port is accepted. TLS is intentionally refused:
+    this dependency-free transport does not implement certificate validation.
+    Hostnames such as ``localhost`` and non-loopback addresses fail closed.
     """
     if not isinstance(endpoint, str) or not endpoint.strip():
         raise BridgeTransportError(
@@ -83,7 +86,7 @@ def assert_loopback_ws_endpoint(endpoint: str) -> Any:
             "Hermes endpoint must be a loopback WebSocket URL",
         ) from exc
     if (
-        parsed.scheme not in {"ws", "wss"}
+        parsed.scheme != "ws"
         or parsed.hostname not in {"127.0.0.1", "::1"}
         or port is None
         or not 1 <= port <= 65535
@@ -178,7 +181,16 @@ class HermesReadBridge:
             )
 
     def list_sessions(self, *, limit: int = 200) -> Mapping[str, Any]:
-        return self._call("session.list", {"limit": int(limit)})
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= _MAX_SESSION_LIST_LIMIT
+        ):
+            raise BridgeGateError(
+                "invalid_limit",
+                f"limit must be an integer between 1 and {_MAX_SESSION_LIST_LIMIT}",
+            )
+        return self._call("session.list", {"limit": limit})
 
     def session_status(self, session_id: str) -> Mapping[str, Any]:
         sid = str(session_id or "").strip()
@@ -237,7 +249,7 @@ class LoopbackJsonRpcWsTransport:
         self._parsed = assert_loopback_ws_endpoint(endpoint)
         self.endpoint = endpoint.strip()
         self.timeout_s = float(timeout_s)
-        if self.timeout_s <= 0:
+        if not math.isfinite(self.timeout_s) or self.timeout_s <= 0:
             raise BridgeTransportError(
                 "invalid_timeout",
                 "timeout_s must be positive",

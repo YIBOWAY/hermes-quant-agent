@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -33,6 +34,7 @@ from hqa.hermes_read_bridge import (
 
 _SESSION_TOKEN_ENV = "HERMES_DASHBOARD_SESSION_TOKEN"
 _SESSION_TOKEN_FILE_ENV = "HQA_HERMES_SESSION_TOKEN_FILE"
+_MAX_SESSION_TOKEN_BYTES = 4096
 
 
 class _ArgumentError(ValueError):
@@ -71,15 +73,6 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "Optional loopback WebSocket endpoint override. "
             "Defaults to the contract endpoint. Non-loopback values fail closed."
-        ),
-    )
-    parser.add_argument(
-        "--session-token",
-        default=None,
-        help=(
-            "Hermes loopback WS ?token= credential. Defaults to "
-            f"${_SESSION_TOKEN_ENV} or the file named by "
-            f"${_SESSION_TOKEN_FILE_ENV}. Never logged."
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -128,30 +121,82 @@ def load_live_capability_document(
     return document
 
 
-def resolve_session_token(explicit: Optional[str] = None) -> Optional[str]:
-    """Resolve the Hermes loopback WS token without printing it.
+def _validated_session_token(raw: bytes) -> Optional[str]:
+    if len(raw) > _MAX_SESSION_TOKEN_BYTES:
+        raise BridgeTransportError(
+            "session_token_invalid",
+            "Hermes session token must be non-empty and bounded",
+        )
+    try:
+        token = raw.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise BridgeTransportError(
+            "session_token_invalid",
+            "Hermes session token must be valid UTF-8",
+        ) from exc
+    if any(char in token for char in ("\r", "\n", "\x00")):
+        raise BridgeTransportError(
+            "session_token_invalid",
+            "Hermes session token contains invalid characters",
+        )
+    return token or None
 
-    Order: explicit CLI flag → ``HERMES_DASHBOARD_SESSION_TOKEN`` → contents of
-    ``HQA_HERMES_SESSION_TOKEN_FILE`` (single line). Empty means "no token";
-    live Hermes will then return websocket_upgrade_failed (403).
-    """
-    if explicit is not None:
-        token = explicit.strip()
-        return token or None
-    env_token = (os.environ.get(_SESSION_TOKEN_ENV) or "").strip()
-    if env_token:
-        return env_token
-    file_path = (os.environ.get(_SESSION_TOKEN_FILE_ENV) or "").strip()
-    if not file_path:
-        return None
-    path = Path(file_path)
-    if not path.is_file() or path.is_symlink():
+
+def _read_owner_only_session_token_file(file_path: str) -> Optional[str]:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(file_path, flags)
+    except OSError as exc:
         raise BridgeTransportError(
             "session_token_file_invalid",
             f"{_SESSION_TOKEN_FILE_ENV} must point to a regular non-symlink file",
-        )
-    raw = path.read_text(encoding="utf-8").strip()
-    return raw or None
+        ) from exc
+    try:
+        file_stat = os.fstat(fd)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise BridgeTransportError(
+                "session_token_file_invalid",
+                f"{_SESSION_TOKEN_FILE_ENV} must point to a regular non-symlink file",
+            )
+        if stat.S_IMODE(file_stat.st_mode) & 0o077:
+            raise BridgeTransportError(
+                "session_token_file_permissions",
+                f"{_SESSION_TOKEN_FILE_ENV} must be owner-only (mode 0600 or stricter)",
+            )
+        if hasattr(os, "geteuid") and file_stat.st_uid != os.geteuid():
+            raise BridgeTransportError(
+                "session_token_file_owner",
+                f"{_SESSION_TOKEN_FILE_ENV} must be owned by the current user",
+            )
+        raw = os.read(fd, _MAX_SESSION_TOKEN_BYTES + 1)
+    except BridgeTransportError:
+        raise
+    except OSError as exc:
+        raise BridgeTransportError(
+            "session_token_file_invalid",
+            f"{_SESSION_TOKEN_FILE_ENV} is unavailable",
+        ) from exc
+    finally:
+        os.close(fd)
+    return _validated_session_token(raw)
+
+
+def resolve_session_token() -> Optional[str]:
+    """Resolve the Hermes loopback WS token without printing it.
+
+    Order: ``HERMES_DASHBOARD_SESSION_TOKEN`` → contents of
+    ``HQA_HERMES_SESSION_TOKEN_FILE`` (single line, owner-only permissions).
+    Tokens are never accepted on the command line because process arguments are
+    visible to other local processes. Empty means "no token"; live Hermes will
+    then return websocket_upgrade_failed (403).
+    """
+    env_token = os.environ.get(_SESSION_TOKEN_ENV)
+    if env_token:
+        return _validated_session_token(env_token.encode("utf-8"))
+    file_path = (os.environ.get(_SESSION_TOKEN_FILE_ENV) or "").strip()
+    if not file_path:
+        return None
+    return _read_owner_only_session_token_file(file_path)
 
 
 def build_bridge_from_document(
@@ -219,8 +264,20 @@ def main(
     document: Optional[Mapping[str, Any]] = None,
 ) -> int:
     """Entry point. ``transport`` / ``document`` are hermetic test seams only."""
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if any(
+        item == "--session-token" or item.startswith("--session-token=")
+        for item in raw_argv
+    ):
+        _emit(
+            _error_document(
+                "session_token_argv_forbidden",
+                "session tokens must be supplied through the environment or an owner-only token file",
+            )
+        )
+        return 2
     try:
-        args = _parser().parse_args(argv)
+        args = _parser().parse_args(raw_argv)
     except _ArgumentError as exc:
         _emit(_error_document("invalid_arguments", str(exc)))
         return 2
@@ -249,7 +306,7 @@ def main(
             live_document = document
         else:
             live_document = load_live_capability_document()
-        resolved_token = resolve_session_token(args.session_token)
+        resolved_token = resolve_session_token()
         bridge, meta = build_bridge_from_document(
             live_document,
             endpoint=args.endpoint,

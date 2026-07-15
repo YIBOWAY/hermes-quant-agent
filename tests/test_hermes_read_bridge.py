@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
+import os
 import socket
 import struct
 import threading
@@ -82,6 +84,16 @@ def test_read_methods_delegate_to_transport() -> None:
     ]
 
 
+@pytest.mark.parametrize("limit", [0, -1, 201, 10**12])
+def test_session_list_limit_is_bounded_without_transport_call(limit: int) -> None:
+    transport = _FakeTransport()
+    bridge = HermesReadBridge(gate=_gate(), transport=transport)
+    with pytest.raises(BridgeGateError) as exc:
+        bridge.list_sessions(limit=limit)
+    assert exc.value.code == "invalid_limit"
+    assert transport.calls == []
+
+
 def test_empty_session_id_rejected_without_transport_call() -> None:
     transport = _FakeTransport()
     bridge = HermesReadBridge(gate=_gate(), transport=transport)
@@ -109,6 +121,7 @@ def test_forbidden_methods_are_not_exposed() -> None:
         "ws://localhost:9119/api/ws",
         "ws://8.8.8.8:9119/api/ws",
         "http://127.0.0.1:9119/api/ws",
+        "wss://127.0.0.1:9119/api/ws",
         "ws://127.0.0.1:9119/other",
         "ws://127.0.0.1:9119/api/ws?token=x",
         "ws://user:pass@127.0.0.1:9119/api/ws",
@@ -129,6 +142,18 @@ def test_loopback_endpoint_accepts_contract_shape() -> None:
     assert parsed.hostname == "127.0.0.1"
     assert parsed.port == 9119
     assert parsed.path == "/api/ws"
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0, math.nan, math.inf, -math.inf])
+def test_loopback_transport_rejects_non_finite_or_non_positive_timeout(
+    timeout: float,
+) -> None:
+    with pytest.raises(BridgeTransportError) as exc:
+        LoopbackJsonRpcWsTransport(
+            endpoint="ws://127.0.0.1:9119/api/ws",
+            timeout_s=timeout,
+        )
+    assert exc.value.code == "invalid_timeout"
 
 
 def test_loopback_transport_refuses_mutations_without_connect() -> None:
@@ -421,3 +446,86 @@ def test_cli_invalid_args(capsys) -> None:
     assert code == 2
     out = json.loads(capsys.readouterr().out)
     assert out["error"]["code"] == "invalid_arguments"
+
+
+def test_cli_rejects_session_token_process_argument_without_echo(capsys) -> None:
+    code = hermes_read_bridge_cli.main(
+        ["--session-token", "must-not-appear-in-output", "list-sessions"],
+        document=_cli_document(),
+    )
+    assert code == 2
+    raw = capsys.readouterr().out
+    out = json.loads(raw)
+    assert out["error"]["code"] == "session_token_argv_forbidden"
+    assert "must-not-appear-in-output" not in raw
+
+
+def test_session_token_file_requires_owner_only_permissions(
+    tmp_path, monkeypatch
+) -> None:
+    token_file = tmp_path / "hermes-session.token"
+    token_file.write_text("file-token\n", encoding="utf-8")
+    os.chmod(token_file, 0o600)
+    monkeypatch.delenv("HERMES_DASHBOARD_SESSION_TOKEN", raising=False)
+    monkeypatch.setenv("HQA_HERMES_SESSION_TOKEN_FILE", str(token_file))
+
+    assert hermes_read_bridge_cli.resolve_session_token() == "file-token"
+
+    os.chmod(token_file, 0o644)
+    with pytest.raises(BridgeTransportError) as exc:
+        hermes_read_bridge_cli.resolve_session_token()
+    assert exc.value.code == "session_token_file_permissions"
+
+
+def test_session_token_file_rejects_symlink(tmp_path, monkeypatch) -> None:
+    target = tmp_path / "target.token"
+    target.write_text("file-token\n", encoding="utf-8")
+    os.chmod(target, 0o600)
+    link = tmp_path / "session.token"
+    link.symlink_to(target)
+    monkeypatch.delenv("HERMES_DASHBOARD_SESSION_TOKEN", raising=False)
+    monkeypatch.setenv("HQA_HERMES_SESSION_TOKEN_FILE", str(link))
+
+    with pytest.raises(BridgeTransportError) as exc:
+        hermes_read_bridge_cli.resolve_session_token()
+    assert exc.value.code == "session_token_file_invalid"
+
+
+def test_session_token_file_reads_same_object_it_validates(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    token_file = tmp_path / "session.token"
+    token_file.write_text("original-token\n", encoding="utf-8")
+    os.chmod(token_file, 0o600)
+    replacement = tmp_path / "replacement.token"
+    replacement.write_text("replacement-token\n", encoding="utf-8")
+    os.chmod(replacement, 0o600)
+    real_open = os.open
+
+    def swapping_open(path, flags, *args):
+        fd = real_open(path, flags, *args)
+        if os.fspath(path) == os.fspath(token_file):
+            token_file.unlink()
+            token_file.symlink_to(replacement)
+        return fd
+
+    monkeypatch.setattr("hqa.hermes_read_bridge_cli.os.open", swapping_open)
+    monkeypatch.delenv("HERMES_DASHBOARD_SESSION_TOKEN", raising=False)
+    monkeypatch.setenv("HQA_HERMES_SESSION_TOKEN_FILE", str(token_file))
+
+    assert hermes_read_bridge_cli.resolve_session_token() == "original-token"
+
+
+@pytest.mark.parametrize(
+    "token",
+    ["line-one\nline-two", "x" * 4097],
+)
+def test_session_token_environment_rejects_unsafe_values(
+    token: str,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HERMES_DASHBOARD_SESSION_TOKEN", token)
+    with pytest.raises(BridgeTransportError) as exc:
+        hermes_read_bridge_cli.resolve_session_token()
+    assert exc.value.code == "session_token_invalid"

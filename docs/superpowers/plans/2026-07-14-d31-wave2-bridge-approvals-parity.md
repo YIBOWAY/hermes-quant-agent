@@ -1,5 +1,20 @@
 # D-31 Wave 2 — Bridge/Chat Foundations, Approvals Mutation, Candidate Apply, Scene-B Reality, Page Parity
 
+> **Delivery addendum (2026-07-15): CLOSED AS PARTIAL D-31.** Candidate apply、Tasks
+> 只读模型和 Scene-B Gate 1→Gate 2→Futu final→Gate 3 人工 commit 已完成；有效
+> promotion 是 `promo-b7bbab8cf571a5f4ff43aa652aebf3bc`，reviewed commit 是
+> `524e791e5e3e22cec12a4166ad8fc3617c735566`，已 cleanup 并进入 promoted registry。
+> Task B 最初的浏览器 mutation 方案会在批准时 refetch digest/status，违反 HQA Gate 1
+> exact binding 与 Gate 2 no-refetch，因此已回退为只读证据面，不能再按下文 success
+> criteria 宣称 UI mutation 已交付。旧 TUI WebSocket 合同因 checkout/source 漂移而
+> fail-closed；当前已改用 Hermes official API Server，经平台 server-side GET-only BFF 完成真实 session
+> list/detail/messages **只读**接线。chat write、Hermes approval mutation、unified Results 和
+> legacy redirects 仍关闭；本轮 session read 无 LLM/provider 调用、无新数据库 migration。
+> 权威事实见
+> [`../../audits/2026-07-15-d31-wave2-evidence.md`](../../audits/2026-07-15-d31-wave2-evidence.md)，
+> 后续见
+> [`2026-07-15-d31-wave3-official-api-bff.md`](2026-07-15-d31-wave3-official-api-bff.md)。
+
 > **For agentic workers:** Use superpowers:subagent-driven-development. Wave 1 three-plan delivery remains complete and partial relative to full D-31.
 
 **Goal:** Close the remaining D-31 gaps listed after Wave 1 acceptance without lying about Hermes readiness: migrate real candidates, open honest Gate 2 approvals in Hermes UI when integrity is verified, replace Tasks placeholder with a real read model, run Scene-B evidence path with human CAS inputs, re-audit Hermes installation and build a fail-closed bridge, and stage old-page parity cutover.

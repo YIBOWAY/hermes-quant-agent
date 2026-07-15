@@ -25,10 +25,23 @@
 > audit ancestors or macOS `/var` aliases from weakening no-follow traversal.
 > Fresh HQA evidence is `659 passed, 2 skipped`; platform canonical verification
 > is green with `1,377 passed, 15 skipped` plus frontend `35 files / 133 tests`.
-> Real migration
-> `--apply`, a real promotion, and Hermes approval mutations were not executed.
+> Wave 2 later authorized one real migration `--apply` and completed one real
+> promotion through the human Gate 3 commit. Browser approval mutations are not
+> admitted: the first UI implementation refetched digest/status and therefore
+> violated the HQA Gate 1 binding/no-refetch rule; it has been rolled back to a
+> read-only evidence surface.
 > The unchecked boxes below are the original execution checklist, not current
 > progress; use this block, `docs/README.md`, tests, and runtime evidence.
+
+> **Gate 3 acceptance addendum (2026-07-15): COMPLETE.** Candidate
+> `factor-wave2_scene_b_smoke_v3_loadable_factor-da01df1188`, manifest digest
+> `5ca064d597778b45f1a718047becf5b67b30cf9b24d441632b3a408cfd1c227d` and final
+> receipt `backtest-f4da78d66b4ee6eaab6e7226740ac6ac` produced promotion
+> `promo-b7bbab8cf571a5f4ff43aa652aebf3bc`. The exact three-file diff was reviewed
+> and committed as `524e791e5e3e22cec12a4166ad8fc3617c735566`; status reached `reviewed`,
+> cleanup reached `cleaned`, and factor `agent_candidate_wave2_sceneb_mom20_v3`
+> is in the platform promoted registry. See
+> [`../../audits/2026-07-15-d31-wave2-evidence.md`](../../audits/2026-07-15-d31-wave2-evidence.md).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

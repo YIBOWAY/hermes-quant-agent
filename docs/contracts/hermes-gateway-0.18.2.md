@@ -1,5 +1,14 @@
 # Hermes gateway 0.18.2 capability evidence
 
+> **历史合同 / 当前失配（2026-07-15）。** 本文冻结的是旧 TUI WebSocket checkout
+> `4281151ae859241351ba14d8c7682dc67ff4c126` 与 `server.py` SHA-256
+> `2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17`。当前本机 Hermes
+> checkout 已是 `9baa7d4673ce89f09378daa3660530f8bf142708`，TUI source SHA-256 已变为
+> `539d36e7fe90e2fc5df1d454febffab5b78736ddc9c0083fda0ee8f07d588d11`，所以 installation
+> fingerprint **不再匹配**，旧 bridge 必须 fail-closed。后文均是历史冻结证据，不能据此
+> 打开 chat/session mutation。D-31 当前采用 official API Server 的只读合同：
+> [`hermes-api-server-0.18.2.md`](hermes-api-server-0.18.2.md)。
+
 Observed 2026-07-13. This document is a local compatibility snapshot, not a
 promise about newer Hermes versions.
 
