@@ -22,6 +22,17 @@
 
 checkout 或 source digest 任一变化，都只能触发重新审计；不得自动继承本合同的写权限。
 
+## Wave 3 transport 边界
+
+Wave 3 connector 将来即使通过写端 Gate，也只允许连接本文冻结的 official API Server
+loopback HTTP origin（当前为 `127.0.0.1:8642`）。旧 `127.0.0.1:9119` TUI WebSocket 和运行时
+动态 Dashboard WebSocket 仅是历史/诊断界面：它们不是稳定 connector 协议、不能作为服务发现
+地址，也不能证明 chat/run/provider 已准入。
+
+PostgreSQL command/event/outbox/lease/run-link ledger 是平台 transport command 的唯一权威；
+HQA deterministic connector 只消费该 ledger。当前 reconcile-only worker 不调用本文的
+chat/run/approval/stop endpoint，不读取 prompt，也不会触发 provider。
+
 ## 当前准入矩阵
 
 | 能力 | upstream 路径 | D-31 准入 | 说明 |

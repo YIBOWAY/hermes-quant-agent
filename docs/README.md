@@ -12,7 +12,7 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 是当前产品主线。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`](superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md) | 3A official API session-read 已交付；下一开发切片是 3B durable ledger/outbox。chat、统一 Results 与旧页退场仍受 Gate。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`](superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md) | 3A、3B 已交付，3C reconcile-only 框架已交付；3D chat 仍 BLOCKED。下一安全切片是只读 3E unified Results，3F 按页面独立 parity。 |
 | 当前 Hermes 合同 | [`contracts/hermes-api-server-0.18.2.md`](contracts/hermes-api-server-0.18.2.md) | official API Server 的 health/capabilities/sessions/detail/messages 只读合同；chat/run/stream/approval/stop 全部 fail-closed。 |
 | 旧 TUI 合同 | [`contracts/hermes-gateway-0.18.2.md`](contracts/hermes-gateway-0.18.2.md) | 历史 WebSocket JSON-RPC 快照；当前 checkout/source 已漂移，不再匹配安装，不能用于准入。 |
 | Wave 2 验收事实 | [`audits/2026-07-15-d31-wave2-evidence.md`](audits/2026-07-15-d31-wave2-evidence.md) | Scene-B 三道人类门与 Gate 3 commit 已真实闭合；同时记录仍未完成的 D-31 范围。 |
@@ -25,8 +25,9 @@
 ## 一句话项目阶段
 
 **Phase 1a-4 / 9H 已收口；当前处于 D-31 Wave 3，真实 Hermes 已接通到“已有会话只读”层，
-但网页还不能向 Hermes 提交对话。** 下一步不是直接打开 composer，而是先实现 durable
-command/outbox/event ledger，再接确定性 connector worker，最后才评估 chat 写端。
+平台 durable ledger/outbox 与 reconcile-only worker 底座也已落地，但网页仍不能向 Hermes
+提交对话。** 3D 受九项 live gateway blocker 阻断；下一步可独立推进只读 3E，而不是直接
+打开 composer。
 
 ## D-31 当前事实
 
@@ -37,10 +38,12 @@ command/outbox/event ledger，再接确定性 connector worker，最后才评估
 | Candidate integrity | **DONE** | canonical root、immutable manifest、verified/migration_required/corrupt、digest/status CAS、legacy_unbound 非授权。 |
 | Scene-B Gate 1/2/final/Gate 3 | **DONE** | 人类 Gate 3 commit `524e791e5e3e22cec12a4166ad8fc3617c735566` 已进入 promoted registry 并 cleanup。 |
 | Hermes official API session read | **DONE（代码 + 本机只读验收）** | 平台 BFF 能读真实 session list/detail/messages；浏览器不持有 Hermes key。 |
+| 3B durable ledger/outbox | **DONE（live DB 验收）** | migration 005 已 apply 并重复验证幂等；schema v1、五表、四个 append-only trigger，health `schema_ready=true`。 |
+| 3C deterministic worker | **FRAMEWORK DONE / reconcile-only** | 安装 wrapper `--once` 与 live `LISTEN/NOTIFY` 两周期通过；零 Hermes mutation/provider。 |
 | Browser Gate 2 mutation | **ROLLED BACK / OFF** | 初版会 refetch digest/status，违反 HQA Gate 1 exact binding 与 Gate 2 no-refetch；Approvals 当前只读。 |
-| Hermes chat/stream/resume/stop | **BLOCKED** | 缺 durable request recovery、Run identity、event replay、provider evidence、approval/stop 对账语义。 |
-| Unified Results | **NOT DONE** | 仍缺统一动态详情、exact Run/result linking 与旧页面 parity。 |
-| Legacy page redirects/deletion | **NOT DONE** | 旧四页仍完整保留；soft banner 不等于 redirect 或 retirement。 |
+| Hermes chat/stream/resume/stop | **BLOCKED（九项 live blocker）** | 平台 ledger 不等于 upstream request recovery、Run/event/provider/approval/stop 语义已具备。 |
+| Unified Results | **NOT DONE / 3E READY TO START** | parity 审计已完成；可纯只读聚合各权威源，仍缺统一动态详情与 exact Run/result linking。 |
+| Legacy page redirects/deletion | **PAGE-GATED** | Agent Studio 补 candidate detail 后可独立退休；Factor Lab / Backtester / Experiments 仍承载写任务，不可退。 |
 | 交易执行 | **OFF** | `paper_trading` / `live_trading_enabled=false` / kill switch / 人工门不变。 |
 
 完整 D-31 仍是**部分完成**。不要把“session 列表能读”表述为“网页已能和 Hermes 对话”，
@@ -98,9 +101,10 @@ session ID / payload / 响应大小和时限都 fail-closed。平台和 Hermes �
 远程访问前另做 TLS、登录、授权、CSRF 与审计。
 
 这些 GET 只读已有本地状态，不启动 Hermes 推理，所以不消耗 Codex/Grok provider 额度。
-本次 session-read slice 没有新增 PostgreSQL migration/table；数据库只复用既有迁移。
+3A session-read slice 本身没有新增 PostgreSQL migration/table；后续 3B 已通过 migration 005
+单独落地 durable ledger，不能把两项交付混为一个写端授权。
 
-### 下一条成熟链路
+### 已落地的 durable 底座（写端仍关闭）
 
 ```text
 Browser -> same-origin BFF
@@ -112,19 +116,50 @@ Browser -> same-origin BFF
 轮询只用于数据库 queue claim/lease/heartbeat/reconcile，并以 `LISTEN/NOTIFY` 唤醒、周期 scan
 兜底；**禁止让 Hermes/LLM cron 空转询问“有没有任务”**。空队列不创建 Run、不调用 provider。
 
+这条链路只有三个明确的权威边界：PostgreSQL 唯一拥有 transport command/event/outbox/lease
+和 exact Run link；Hermes 唯一拥有 Session/Run/messages/actual provider evidence；HQA task
+ledger 唯一拥有 research plan/Attempt/Gate/result refs。HQA connector 是 PostgreSQL command
+的消费者，不保存第二份 BridgeRequest command journal。
+
+connector 的物理入口是
+`~/.hermes/scripts/hqa-hermes-command-worker.sh`，固定调用平台
+`quant-system hermes connector-worker`；只允许 worker lifecycle 参数，不接受 prompt/provider/
+secret。正式 Hermes 网络协议只使用 loopback official API `127.0.0.1:8642`；旧 `9119` TUI
+gateway 与动态 Dashboard WebSocket 只作历史诊断，不是固定 transport 或准入证据。
+
 写端只有在 request idempotency/recovery、Run identity、event cursor/replay、provider policy lock、
 actual provider/fallback/usage evidence、approval TTL/digest/single-use 和幂等 stop/reconcile 均有
 审查证据后才能打开。当前 `chat_write=false`、`approval_mutations=false`。
 
+### 3B/3C 权威验收事实
+
+- 平台提交 `efb10d5`、`9bc940f` 已推送。
+- live `quantplatform` 应用前备份位于
+  `data/_runtime/db_backups/quantplatform-pre-wave3-20260715T182203+0800.dump`，SHA-256
+  `3bbf5f3be83e6aeb348c83986e42cfed49e844e467b51305abf87a39d3733a3b`。
+- migration 005 live apply 与重复幂等 apply 均成功；schema v1、五张表、四个 append-only
+  trigger 已核验，`/api/health` 报告 `schema_ready=true`。
+- 44 个平台目标测试和 HQA full suite 通过；安装 wrapper `--once` 与 live
+  `LISTEN/NOTIFY` 两周期通过。
+- 验收后 command/event/outbox/run-link 仍各为零行，Hermes mutation/provider 调用均为零。
+  这证明 reconcile-only 基础设施可用，不证明 chat/run 写端已准入。
+
+live gateway 仍报告九项 3D blocker：提交非幂等、请求不可恢复、无 event ID、无 event replay、
+Run 状态不持久、provider policy 不可变、无 actual provider 证据、approval 无 exact binding、
+stop 不可对账。因此 3D 保持 **BLOCKED**。
+
 ## 接下来按什么顺序做
 
-1. **Wave 3 / Slice 3B：durable ledger/outbox。** 先做 migration、幂等 command、append-only
-   events、exact run/result links；不提交 Hermes prompt。
-2. **Slice 3C：deterministic worker。** DB claim/lease/backoff/reconcile；写 Hermes 仍受合同 Gate。
-3. **Slice 3D：chat/stream/resume。** 只有能力审计、认证/CSRF、安全 review 和用户批准通过才做。
-4. **Slice 3E：unified Results。** 建统一索引/详情与 exact provenance，不复制领域真相。
-5. **Slice 3F：legacy retirement。** parity matrix + 真实 E2E + 用户确认后，先导航切流/可回滚
-   redirect，最后才删除旧 UI；领域 API/CLI/engine 保留。
+1. **Slice 3A：DONE。** official API session-read BFF 已交付并本机只读验收。
+2. **Slice 3B：DONE。** durable ledger/outbox 已完成 migration 005 与 live DB 验收。
+3. **Slice 3C：FRAMEWORK DONE / reconcile-only。** claim/lease/LISTEN/NOTIFY/reconcile 已验收，
+   Hermes mutation 仍关闭。
+4. **Slice 3D：BLOCKED。** 九项 live gateway blocker、认证/CSRF、安全 review 和用户批准均不能
+   用平台本地 ledger 代替。
+5. **Slice 3E：下一安全切片。** 建只读统一索引/详情与 exact provenance，不复制领域真相。
+6. **Slice 3F：按页面 Gate。** Agent Studio 补 candidate detail 后可独立切流；Factor Lab、
+   Backtester、Experiments 在写任务有替代入口前保留。所有 redirect 都需真实 E2E、用户确认
+   和独立回滚开关；领域 API/CLI/engine 保留。
 
 不得从旧 1a-4 计划、历史 audit 或 unchecked checkbox 自行增加当前步骤。
 
@@ -152,7 +187,8 @@ actual provider/fallback/usage evidence、approval TTL/digest/single-use 和幂�
 
 ## 双仓职责与安全边界
 
-- `Hermes-quant-agent`：编排、记忆、cron、通知、三门 provenance 与未来 connector worker。
+- `Hermes-quant-agent`：编排、记忆、cron、通知、三门 provenance 与 connector worker 物理入口；
+  不复制平台 PostgreSQL command authority。
 - `ai-quant-platform`：行情、因子、回测、期权、paper account、PostgreSQL、BFF 与前端领域实现。
 - Gate 1/2/3 与 Hermes command approval 互不替代；机会决策也不产生执行资格。
 - action 只按 exact platform signal/execution IDs 关联；ticker/symbol 相似不是因果证明。

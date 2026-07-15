@@ -182,21 +182,27 @@ market-foresight proposal 属于“市场预测提案”，只读且 proposal-on
 ```text
 Browser
   -> ai-quant-platform same-origin BFF
-      -> HQA bridge/task CLI + atomic read projection
-      |    -> append-only bridge journal + research task ledger
-      -> loopback-only dedicated Hermes API Server
-          -> dedicated HQA Hermes profile/session
-              -> HQA skill (all task mutations use the same HQA CLI boundary)
-                  -> platform deterministic CLI/API/engines
+      -> PostgreSQL command/event/outbox authority
+      |    -> deterministic HQA connector worker
+      |         -> loopback-only dedicated Hermes API Server
+      |              -> dedicated HQA Hermes profile/session
+      |                   -> HQA skill
+      |                        -> HQA task CLI
+      |                             -> platform deterministic CLI/API/engines
+      -> HQA task CLI / atomic read projection
+           -> append-only research task ledger
 ```
 
 关键边界：
 
 - 浏览器永远看不到 Hermes bearer key，不直接跨域访问 Hermes；
 - Hermes API 只监听 loopback，使用专用 HQA profile、端口和凭证；
-- BFF 做鉴权边界、capability 归一化、幂等、事件白名单和错误映射，不实现第二个 Agent；
-- HQA 提供窄的 versioned bridge/task CLI：BFF 和 Hermes 都只能通过该入口写 journal；
-  CLI 内部负责跨进程文件锁、expected-version CAS、稳定 event ID 和原子 projection；
+- BFF 做鉴权边界、capability 归一化、事件白名单和错误映射，不实现第二个 Agent；
+- PostgreSQL command ledger 负责浏览器传输命令的客户端幂等、版本 CAS、lease、outbox 和
+  exact Run link；HQA connector 只消费这份队列，不再维护第二份 BridgeRequest 幂等账本；
+- HQA 提供窄的 versioned task CLI：BFF、connector 和 Hermes skill 都只能通过该入口写
+  research task ledger；CLI 内部负责跨进程文件锁、expected-version CAS、稳定 event ID 和
+  原子 projection；
 - BFF 可在 Hermes 离线时通过 HQA 的只读 `list/show/events --json` 或严格校验的原子
   projection 读取 Task；平台不得直接修改 HQA ledger 文件；
 - 平台旧 `POST /api/agent/tasks` 不作为 fallback；Hermes 离线时显式禁用提交；
@@ -312,28 +318,39 @@ attempt，或进入正式 Gate；旧手工表单不作为旁路保留。
 
 ## 7. 数据归属与持久化
 
+> **2026-07-15 authority amendment（替代本节旧的 BridgeRequest 所有权）：** 后续 Wave 3
+> 采用 PostgreSQL durable queue。PostgreSQL 是 transport command、`client_request_id` 幂等、
+> command event/outbox、delivery lease 和 exact run link 的唯一权威；HQA 不再另写一份
+> BridgeRequest command journal。Hermes 仍是 Session/Run/messages/provider evidence 的唯一
+> 权威，HQA task ledger 仍是 research plan/Attempt/Gate/result refs 的唯一权威。旧文中把
+> request digest/idempotency/run correlation 交给 HQA bridge journal 的描述由本 amendment
+> 明确 supersede，避免双写、双主和崩溃后不确定重发。
+
 ### 7.1 各层唯一拥有的事实
 
 | 层 | 真相源 | 唯一拥有的事实 |
 |---|---|---|
 | Hermes | Session/Run store | 消息上下文、Hermes Run 原始状态/事件、实际 provider/model、command approval。 |
-| HQA bridge journal | append-only integration ledger | platform↔Hermes session correlation、已确认 provider policy、request digest/idempotency、Hermes run correlation 和观察游标。 |
+| 平台 PostgreSQL command ledger | transactional command/event/outbox | platform session、transport request digest/client idempotency、command version/lease/outbox、Hermes run exact correlation。 |
 | HQA task ledger | append-only research ledger | 研究计划版本、步骤、attempt、Gate refs、result refs、派生任务阶段。 |
 | 平台 | 现有 repositories/artifacts/locks/git diff | 因子、回测、实验、日报、candidate 源码、领域 review、promotion diff。 |
 
-bridge journal 只拥有集成关联事实，不拥有对话、研究结果或领域审批。PostgreSQL 和 UI 是
-它们的 adapter/projection，不得成为另一套领域真相。
+command ledger 只拥有传输意图、投递状态和精确关联，不拥有对话正文、研究结果或领域审批。
+HQA worker 和 UI 是它的 consumer/projection，不得再建立另一套 command 真相。
 
-provider 归属必须明确：不可变的**会话请求策略**由 HQA bridge journal 在 Hermes 确认
-session 创建后记录；每个 Run 的**实际 provider/model**只以 Hermes Run/event 为准。
-HQA Attempt 和 PostgreSQL 只能保存带 `source_run_id/source_event_id/observed_at` 的只读证据
-快照，不能反向覆盖 Hermes。
+provider 归属必须明确：请求策略 digest 可随 command 持久化，但只有 Hermes 确认后的
+session policy 和每个 Run 的**实际 provider/model**才是运行事实。HQA Attempt 与 PostgreSQL
+只能保存带 `source_run_id/source_event_id/observed_at` 的只读证据快照，不能反向覆盖 Hermes。
 
-### 7.2 HQA bridge/task 单一写入边界
+### 7.2 PostgreSQL command 与 HQA task 的独立单写边界
 
-HQA 提供一个窄的 versioned CLI/模块作为 bridge journal 与 research task ledger 的唯一
-mutation implementation。BFF、Hermes skill 和人工 CLI 都必须调用该入口，不得自行 append
-文件。入口负责：
+平台 command repository 是 transport command/event/outbox/run-link 的唯一 mutation
+implementation，负责同事务 create、expected-version CAS、lease fencing 和 append-only event。
+BFF 不直接拼 SQL，HQA connector 不在本地文件复制 command authority。
+
+HQA 仍提供窄的 versioned CLI/模块作为 research task ledger 的唯一 mutation
+implementation。BFF、Hermes skill、connector 和人工 CLI 都必须调用该入口，不得自行 append
+task 文件。入口负责：
 
 - 使用 OS 级跨进程锁串行化 journal 写入；
 - 对每个 aggregate 做 `expected_version` CAS；
@@ -348,14 +365,6 @@ BFF 读取任务时调用固定参数的 HQA `list/show/events --json`，或读�
 最小对象：
 
 ```text
-BridgeSession
-  schema_version, platform_session_id, hermes_session_id,
-  parent_session_id, provider_policy, created_at
-
-BridgeRequest
-  session_id, client_request_id, canonical_request_digest,
-  request_intent_event_id, hermes_run_id, observed_state, observed_at
-
 Task
   schema_version, task_id, session_id, parent_task_id, goal,
   plan_version, plan_hash, derived_state,
@@ -375,18 +384,21 @@ stable ID。projection 损坏时从 journal replay。领域审批先在平台 ca
 再由同一 HQA mutation boundary 记录“observed”事件；若第二步失败，下次 reconcile 从 Gate ref
 重新读取平台事实并补写观察，不回滚或伪造领域审批。
 
-### 7.3 平台 PostgreSQL 投影与离线缓存
+### 7.3 平台 PostgreSQL command authority、投影与离线缓存
 
-平台通过 additive、幂等 migration 镜像 HQA bridge/task journal 和 Hermes 可查询历史：
+平台通过 additive、幂等 migration 保存 command authority，并镜像 HQA task ledger 与 Hermes
+可查询历史：
 
-- session correlation、provider policy、request digest/idempotency 和 Hermes run correlation；
+- platform session、request digest/client idempotency、command event/outbox/lease 和 Hermes run
+  exact correlation；
 - 每个 Run 作用域内的白名单 event cursor/快照；
 - task/run 到既有 artifact stable ID 的索引；
 - 用于 Hermes 暂时离线时展示的 transcript 缓存。
 
-前 3 类都必须能从 HQA journal/Hermes/平台 artifact 重建；PostgreSQL 丢失不能解除幂等、
-重新提交 Run 或改变 Gate。HQA journal 不可写时禁用新提交，而不是让 PostgreSQL 临时成为
-权威。
+command/event/outbox 不能从另一份隐含 command journal 猜回；必须正式备份并 fail closed。
+Hermes/HQA/平台领域投影可从各自 canonical source 重建。PostgreSQL 不可用或 schema 未就绪
+时禁止接收新 command；HQA task ledger 不可写时禁止创建研究 task/attempt。任何一层失效都
+不得转用内存、文件 fallback 或旧 `/api/agent/tasks` 绕过。
 
 离线 transcript 只缓存 user/assistant 的用户可见文本和白名单状态摘要，排除 raw tool
 payload、文件正文、secret、bearer、账户凭证和 broker 数据；默认保留 30 天。完整文本使用
@@ -440,9 +452,9 @@ Run 进入终态，Task 保持 `awaiting_domain_approval`；批准后创建新 a
 - 同一 session 首版最多一个 active Hermes Run；同一 Task 最多一个 active attempt。
 - 平台步骤使用稳定
   `operation_id = hash(task_id, plan_hash, step_id, normalized_inputs)`。
-- 调用 Hermes 前，先把 `request_intent + digest` 写入 HQA bridge journal；创建 artifact 的平台
-  操作前，先把 `operation_intent + operation_id` 写入 HQA task ledger；外部调用完成后再写
-  observed run/result ref。
+- 调用 Hermes 前，BFF 先把 `request_intent + digest` 同事务写入 PostgreSQL command、创建
+  event 与 outbox；创建 artifact 的平台操作前，先把 `operation_intent + operation_id` 写入
+  HQA task ledger；外部调用完成后再写 observed run/result ref。
 - 如果外部调用成功但观察事件写失败，状态进入 `reconciling/outcome_unknown`；恢复时先按
   client request correlation、run/operation ID 查询 Hermes 或平台 canonical artifact，再
   补写观察，禁止盲目重发；没有确定性 correlation 能力的创建写端不开放。
@@ -533,7 +545,7 @@ chat/bridge mutation。在 professional frontend/bridge gates 完成前，不得
 | 部分 artifact | 有合法 artifact + limitations 才能 `completed_degraded`；没有可验证 artifact 就是 failed，聊天总结不能补成成功。 |
 | 审批过期/目标变化 | 重新读取 canonical target 并比较 digest；返回 stale，禁止沿用旧批准。 |
 | HQA journal/ledger 不可写或损坏 | 新 session/Run、artifact 和审批全部 fail closed；只读 projection/artifact 浏览继续；损坏 journal 不自动截断或猜测修复。 |
-| PostgreSQL 投影不可用 | 既有领域 artifact 与 HQA projection 继续读取；若 HQA journal 和 Hermes 正常，普通提交仍可安全进行，但离线 transcript/搜索标记为不可用且不静默丢缓存。 |
+| PostgreSQL command authority 不可用 | 禁止创建任何新的 transport command，也不得绕过到 HQA journal 或直接调用 Hermes；既有领域 artifact、HQA task projection 与 Hermes 只读历史可在各自权威仍健康时继续读取，并明确标记 command ledger unavailable。 |
 | Origin/CSRF/session 校验失败 | 所有 mutation 返回拒绝且不触碰 Hermes/HQA/平台；只记录不含 secret/request body 的安全审计摘要。 |
 
 任何失败都不能被折叠成 `approved` 或 `completed`。

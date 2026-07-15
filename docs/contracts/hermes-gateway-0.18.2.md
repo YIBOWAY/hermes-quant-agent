@@ -8,6 +8,9 @@
 > fingerprint **不再匹配**，旧 bridge 必须 fail-closed。后文均是历史冻结证据，不能据此
 > 打开 chat/session mutation。D-31 当前采用 official API Server 的只读合同：
 > [`hermes-api-server-0.18.2.md`](hermes-api-server-0.18.2.md)。
+> 下文的 `127.0.0.1:9119` 只是旧 checkout 的冻结默认值；当前运行时动态 Dashboard WS 同样
+> 只作诊断。两者都不是 Wave 3 connector 的固定 transport。正式接入只以 official API
+> Server `127.0.0.1:8642` 合同为准。
 
 Observed 2026-07-13. This document is a local compatibility snapshot, not a
 promise about newer Hermes versions.
