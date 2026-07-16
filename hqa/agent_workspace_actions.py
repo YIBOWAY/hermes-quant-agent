@@ -233,8 +233,11 @@ class ForkIntoManagedSession:
         if type(self.source_channel) is not str or self.source_channel not in (
             "discord",
             "historical",
+            "web_managed",
         ):
-            raise ValueError("source_channel must be discord or historical")
+            raise ValueError(
+                "source_channel must be discord, historical, or web_managed"
+            )
         _validate_source_cursor(self.fork_point)
         _validate_digest(
             self.new_provider_policy_digest, "new_provider_policy_digest"

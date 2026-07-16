@@ -221,6 +221,32 @@ def test_fork_into_managed_session_round_trips_lineage_and_quotes_route() -> Non
     )
 
 
+def test_fork_into_managed_session_accepts_exact_web_managed_channel() -> None:
+    from hqa.agent_workspace_actions import (
+        action_to_document,
+        canonical_action_digest,
+        parse_user_action_v1,
+        route_for_action,
+    )
+
+    document = dict(
+        _valid_action_documents()[1],
+        source_session_ref="session:managed.123",
+        source_channel="web_managed",
+    )
+
+    action = parse_user_action_v1(document)
+
+    assert action.source_channel == "web_managed"
+    assert action_to_document(action) == document
+    assert canonical_action_digest(action) == (
+        "0f69989f0aaf9cacda8f162e3302bea66e25d9d1be69432d49514380a8bae2d6"
+    )
+    assert route_for_action(action) == (
+        "/api/hermes/sessions/session%3Amanaged.123/forks-to-managed"
+    )
+
+
 def test_conversation_turn_round_trips_payload_reference_without_plaintext() -> None:
     from hqa.agent_workspace_actions import (
         ConversationTurn,
@@ -665,10 +691,11 @@ def test_fork_lineage_requires_session_channel_and_bounded_printable_cursor() ->
     from hqa.agent_workspace_actions import parse_user_action_v1
 
     valid = _valid_action_documents()[1]
-    for channel in ("discord", "historical"):
-        assert parse_user_action_v1(
-            dict(valid, source_channel=channel)
-        ).source_channel == channel
+    for channel in ("discord", "historical", "web_managed"):
+        assert (
+            parse_user_action_v1(dict(valid, source_channel=channel)).source_channel
+            == channel
+        )
 
     invalid_fields = {
         "source_session_ref": (
@@ -678,7 +705,7 @@ def test_fork_lineage_requires_session_channel_and_bounded_printable_cursor() ->
             "session:" + "x" * 193,
             True,
         ),
-        "source_channel": ("Discord", "managed", "", True),
+        "source_channel": ("Discord", "managed", "web", "", True),
         "fork_point": ("", "line\nbreak", "x" * 2001, True, None),
     }
     for field, invalid_values in invalid_fields.items():
