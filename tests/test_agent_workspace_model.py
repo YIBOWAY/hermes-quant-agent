@@ -623,6 +623,63 @@ def test_session_lineage_rejects_self_and_multi_node_cycles() -> None:
         assert caught.value.field == "parent_session_ref"
 
 
+def test_long_session_lineage_uses_linear_iterative_parent_walk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hqa.agent_workspace_model as model
+
+    chain_length = 6_000
+    sessions = []
+    for index in range(chain_length):
+        lineage = {}
+        if index:
+            lineage = {
+                "source_channel": "web_managed",
+                "parent_session_ref": "session:{}".format(index - 1),
+                "fork_point": "message:{}".format(index),
+            }
+        sessions.append(
+            model.SessionRecord(
+                session_ref="session:{}".format(index),
+                hermes_session_ref="session:hermes.{}".format(index),
+                workspace_ref="workspace:scale",
+                owner_user_id=OWNER,
+                kind="web_managed_session",
+                provider_policy_digest="a" * 64,
+                writer="web_control_plane",
+                **lineage,
+            )
+        )
+    graph = model.WorkspaceGraph(
+        workspace_ref="workspace:scale",
+        owner_user_id=OWNER,
+        sessions=sessions,
+    )
+
+    parent_lookups = 0
+    original_unique_index = model._unique_index
+
+    class CountingSessionIndex(dict[str, object]):
+        def __getitem__(self, key: str) -> object:
+            nonlocal parent_lookups
+            parent_lookups += 1
+            return super().__getitem__(key)
+
+    def counting_unique_index(
+        records: tuple[object, ...], attribute: str, field: str
+    ) -> dict[str, object]:
+        index = original_unique_index(records, attribute, field)
+        if records is graph.sessions and attribute == "session_ref":
+            return CountingSessionIndex(index)
+        return index
+
+    monkeypatch.setattr(model, "_unique_index", counting_unique_index)
+
+    model.validate_workspace_graph(graph)
+
+    assert chain_length - 1 <= parent_lookups <= 3 * chain_length
+
+
 @pytest.mark.parametrize(
     ("collection", "index", "field", "missing_ref"),
     (

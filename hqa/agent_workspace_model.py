@@ -436,16 +436,25 @@ def validate_workspace_graph(graph: WorkspaceGraph) -> None:
             )
             if session.source_channel != expected_channel:
                 _fail("binding_mismatch", "source_channel")
+    lineage_state: dict[str, int] = {}
     for session in graph.sessions:
-        lineage: set[str] = set()
+        if lineage_state.get(session.session_ref) == 2:
+            continue
+        path: list[str] = []
         cursor = session
         while True:
-            if cursor.session_ref in lineage:
+            state = lineage_state.get(cursor.session_ref, 0)
+            if state == 1:
                 _fail("lineage_cycle", "parent_session_ref")
-            lineage.add(cursor.session_ref)
+            if state == 2:
+                break
+            lineage_state[cursor.session_ref] = 1
+            path.append(cursor.session_ref)
             if cursor.parent_session_ref is None:
                 break
             cursor = sessions_by_ref[cursor.parent_session_ref]
+        for session_ref in path:
+            lineage_state[session_ref] = 2
 
     tasks_by_ref = _unique_index(graph.tasks, "task_ref", "task_ref")
     attempts_by_ref = _unique_index(graph.attempts, "attempt_ref", "attempt_ref")
