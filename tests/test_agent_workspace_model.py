@@ -84,7 +84,7 @@ def _valid_records():
             owner_user_id=OWNER,
             task_ref="task:research",
             attempt_number=1,
-            state="completed",
+            state="terminal",
             durably_accepted=True,
             submission_command_ref="command:research-1",
         ),
@@ -107,7 +107,7 @@ def _valid_records():
             session_ref="session:managed",
             action_ref="action:turn-1",
             kind="conversation_turn",
-            state="run_linked",
+            state="delivered",
             run_ref="run:conversation",
         ),
         SubmissionCommandRecord(
@@ -117,7 +117,7 @@ def _valid_records():
             session_ref="session:fork",
             action_ref="action:research-1",
             kind="research_attempt",
-            state="run_linked",
+            state="delivered",
             task_ref="task:research",
             attempt_ref="attempt:research-1",
             attempt_number=1,
@@ -130,7 +130,7 @@ def _valid_records():
             session_ref="session:fork",
             action_ref="action:research-2",
             kind="research_attempt",
-            state="run_linked",
+            state="delivered",
             task_ref="task:research",
             attempt_ref="attempt:research-2",
             attempt_number=2,
@@ -144,6 +144,7 @@ def _valid_records():
             owner_user_id=OWNER,
             session_ref="session:managed",
             submission_command_ref="command:conversation",
+            state="completed",
         ),
         RunRecord(
             run_ref="run:research-1",
@@ -151,6 +152,7 @@ def _valid_records():
             owner_user_id=OWNER,
             session_ref="session:fork",
             submission_command_ref="command:research-1",
+            state="completed",
             attempt_ref="attempt:research-1",
         ),
         RunRecord(
@@ -159,6 +161,7 @@ def _valid_records():
             owner_user_id=OWNER,
             session_ref="session:fork",
             submission_command_ref="command:research-2",
+            state="running",
             attempt_ref="attempt:research-2",
         ),
     )
@@ -339,7 +342,7 @@ def test_record_boundaries_reject_bool_subclasses_and_equality_spoofs() -> None:
             session_ref="session:managed",
             action_ref="action:bad",
             kind=_StringSubclass("conversation_turn"),
-            state="prepared",
+            state="queued",
         )
     with pytest.raises(WorkspaceModelError):
         WorkspaceGraph(
@@ -1077,7 +1080,7 @@ def test_attempt_acceptance_and_submission_command_shapes_are_closed() -> None:
         "owner_user_id": OWNER,
         "session_ref": "session:managed",
         "action_ref": "action:shape",
-        "state": "prepared",
+        "state": "queued",
     }
     conversation_extras = (
         {"task_ref": "task:research"},
@@ -1097,3 +1100,52 @@ def test_attempt_acceptance_and_submission_command_shapes_are_closed() -> None:
         values[missing_field] = None
         with pytest.raises(WorkspaceModelError):
             SubmissionCommandRecord(**common, kind="research_attempt", **values)
+
+
+def test_workspace_records_reject_states_outside_the_closed_contract() -> None:
+    from hqa.agent_workspace_model import WorkspaceModelError
+
+    graph = _valid_graph()
+    records = (
+        graph.tasks[0],
+        graph.attempts[0],
+        graph.submission_commands[0],
+        graph.runs[0],
+    )
+
+    for record in records:
+        with pytest.raises(WorkspaceModelError) as caught:
+            replace(record, state="arbitrary-state")
+        assert caught.value.code == "unknown_state"
+        assert caught.value.field == "state"
+
+
+def test_run_state_is_required_and_uses_the_hermes_run_state_set() -> None:
+    from hqa.agent_workspace_model import RunRecord, WorkspaceModelError
+
+    values = {
+        "run_ref": "run:required-state",
+        "workspace_ref": WORKSPACE,
+        "owner_user_id": OWNER,
+        "session_ref": "session:managed",
+        "submission_command_ref": "command:required-state",
+    }
+
+    with pytest.raises(TypeError):
+        RunRecord(**values)
+    with pytest.raises(WorkspaceModelError) as caught:
+        RunRecord(**values, state="terminal")
+    assert caught.value.code == "unknown_state"
+    assert caught.value.field == "state"
+    assert RunRecord(**values, state="queued").state == "queued"
+
+
+def test_ordinary_conversation_remains_structurally_task_and_attempt_free() -> None:
+    graph = _valid_graph()
+    ordinary = graph.submission_commands[0]
+    ordinary_run = graph.runs[0]
+
+    assert ordinary.kind == "conversation_turn"
+    assert ordinary.task_ref is None
+    assert ordinary.attempt_ref is None
+    assert ordinary_run.attempt_ref is None

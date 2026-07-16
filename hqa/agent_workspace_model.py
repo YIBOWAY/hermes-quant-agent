@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import re
 from typing import Any, Optional, Type
 
+from hqa.agent_workspace_states import WorkspaceStateError, validate_entity_state
+
 
 _IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}\Z")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -51,8 +53,11 @@ def _validate_optional_digest(value: Any, field: str) -> None:
         _validate_digest(value, field)
 
 
-def _validate_state(value: Any, field: str = "state") -> None:
-    _validate_identifier(value, field)
+def _validate_state(kind: str, value: Any) -> None:
+    try:
+        validate_entity_state(kind, value)
+    except WorkspaceStateError as error:
+        _fail(error.code, error.field)
 
 
 def _validate_positive_int(value: Any, field: str) -> None:
@@ -161,7 +166,7 @@ def _validate_task(record: ResearchTaskRecord) -> None:
     _validate_identifier(record.workspace_ref, "workspace_ref", "workspace:")
     _validate_identifier(record.owner_user_id, "owner_user_id")
     _validate_identifier(record.session_ref, "session_ref", "session:")
-    _validate_state(record.state)
+    _validate_state("task", record.state)
 
 
 @dataclass(frozen=True)
@@ -185,7 +190,7 @@ def _validate_attempt(record: ResearchAttemptRecord) -> None:
     _validate_identifier(record.owner_user_id, "owner_user_id")
     _validate_identifier(record.task_ref, "task_ref", "task:")
     _validate_positive_int(record.attempt_number, "attempt_number")
-    _validate_state(record.state)
+    _validate_state("attempt", record.state)
     if type(record.durably_accepted) is not bool:
         _fail("invalid_type", "durably_accepted")
     _validate_optional_ref(
@@ -226,7 +231,7 @@ def _validate_submission_command(record: SubmissionCommandRecord) -> None:
         "kind",
         ("conversation_turn", "research_attempt"),
     )
-    _validate_state(record.state)
+    _validate_state("submission_command", record.state)
     _validate_optional_ref(record.task_ref, "task_ref", "task:")
     _validate_optional_ref(record.attempt_ref, "attempt_ref", "attempt:")
     _validate_optional_positive_int(record.attempt_number, "attempt_number")
@@ -256,6 +261,7 @@ class RunRecord:
     owner_user_id: str
     session_ref: str
     submission_command_ref: str
+    state: str
     attempt_ref: Optional[str] = None
 
     def __post_init__(self) -> None:
@@ -272,6 +278,7 @@ def _validate_run(record: RunRecord) -> None:
         "submission_command_ref",
         "command:",
     )
+    _validate_state("hermes_run", record.state)
     _validate_optional_ref(record.attempt_ref, "attempt_ref", "attempt:")
 
 
