@@ -72,6 +72,7 @@ def _policy(**changes):
         "accepted_host": HOST,
         "accepted_origin": ORIGIN,
         "request_body_byte_ceiling": 4_096,
+        "authority_graph_record_ceiling": 100,
     }
     values.update(changes)
     return WorkspaceSecurityPolicy(**values)
@@ -115,6 +116,12 @@ def _actor(owner_user_id: str):
     return ActorRef(owner_user_id)
 
 
+def _workspace(workspace_id: str):
+    from hqa.agent_workspace_contract import WorkspaceRef
+
+    return WorkspaceRef(workspace_id)
+
+
 def _authorize(evidence, *, policy=None, graph=None):
     _, _, _, authorize_workspace_request = _security_types()
     return authorize_workspace_request(
@@ -135,6 +142,7 @@ def _assert_error(code: str, operation) -> None:
         "auth": "workspace_auth_failed",
         "conflict": "workspace_conflict",
         "forbidden": "workspace_forbidden",
+        "integrity": "workspace_integrity_failed",
         "quota": "workspace_quota_exceeded",
         "validation": "workspace_validation_failed",
     }[code]
@@ -155,6 +163,7 @@ def test_security_contract_values_are_exact_frozen_dataclasses() -> None:
         "accepted_host",
         "accepted_origin",
         "request_body_byte_ceiling",
+        "authority_graph_record_ceiling",
     ]
     assert [field.name for field in fields(RequestSecurityEvidence)] == [
         "actor",
@@ -192,6 +201,68 @@ def test_security_contract_values_are_exact_frozen_dataclasses() -> None:
     ):
         with pytest.raises(FrozenInstanceError):
             setattr(value, field_name, "changed")
+
+
+def test_authorization_grant_rejects_direct_public_construction() -> None:
+    from hqa.agent_workspace_contract import WorkspaceRef
+
+    AuthorizationGrant, _, _, _ = _security_types()
+
+    with pytest.raises(TypeError):
+        AuthorizationGrant(
+            actor=_actor(OWNER),
+            workspace=WorkspaceRef(WORKSPACE),
+            request_kind="api_read",
+        )
+
+
+def test_issued_authorization_grant_passes_consumer_validation() -> None:
+    from hqa.agent_workspace_security import validate_authorization_grant
+
+    grant = _authorize(_evidence("mutation"))
+
+    assert validate_authorization_grant(grant) is grant
+
+
+def test_consumer_rejects_mutated_grant_public_binding() -> None:
+    from hqa.agent_workspace_security import validate_authorization_grant
+
+    grant = _authorize(_evidence("mutation"))
+    object.__setattr__(grant, "actor", _actor("owner-2"))
+
+    _assert_error("integrity", lambda: validate_authorization_grant(grant))
+
+
+@pytest.mark.parametrize(
+    ("field_name", "replacement_factory"),
+    [
+        ("actor", lambda: _actor(OWNER)),
+        ("workspace", lambda: _workspace(WORKSPACE)),
+    ],
+)
+def test_consumer_rejects_identity_preserving_grant_replacement(
+    field_name,
+    replacement_factory,
+) -> None:
+    from hqa.agent_workspace_security import validate_authorization_grant
+
+    grant = _authorize(_evidence("mutation"))
+    object.__setattr__(grant, field_name, replacement_factory())
+
+    _assert_error("integrity", lambda: validate_authorization_grant(grant))
+
+
+@pytest.mark.parametrize(
+    "forged_owner",
+    [_StringSubclass(OWNER), _EqualitySpoof(), "owner with spaces"],
+)
+def test_consumer_rejects_mutated_grant_nested_actor(forged_owner) -> None:
+    from hqa.agent_workspace_security import validate_authorization_grant
+
+    grant = _authorize(_evidence("mutation"))
+    object.__setattr__(grant.actor, "owner_user_id", forged_owner)
+
+    _assert_error("integrity", lambda: validate_authorization_grant(grant))
 
 
 @pytest.mark.parametrize(
@@ -279,6 +350,11 @@ def test_policy_rejects_non_exact_or_non_loopback_hosts(bad_host: str) -> None:
         {"request_body_byte_ceiling": True},
         {"request_body_byte_ceiling": 0},
         {"request_body_byte_ceiling": -1},
+        {"authority_graph_record_ceiling": True},
+        {"authority_graph_record_ceiling": 1.0},
+        {"authority_graph_record_ceiling": 0},
+        {"authority_graph_record_ceiling": -1},
+        {"authority_graph_record_ceiling": 10_001},
     ],
 )
 def test_policy_rejects_bad_exact_types_and_inconsistent_origin(changes) -> None:
@@ -297,6 +373,35 @@ def test_policy_rejects_bad_exact_types_and_inconsistent_origin(changes) -> None
 )
 def test_request_host_is_not_normalized_or_suffix_matched(host: str) -> None:
     _assert_error("forbidden", lambda: _authorize(_evidence(host=host)))
+
+
+def test_authority_graph_record_ceiling_allows_exact_total() -> None:
+    grant = _authorize(
+        _evidence(),
+        policy=_policy(authority_graph_record_ceiling=2),
+    )
+
+    assert grant.request_kind == "api_read"
+
+
+def test_authority_graph_record_ceiling_rejects_over_limit_as_quota() -> None:
+    _assert_error(
+        "quota",
+        lambda: _authorize(
+            _evidence(),
+            policy=_policy(authority_graph_record_ceiling=1),
+        ),
+    )
+
+
+def test_authority_graph_record_ceiling_rejects_corrupt_collection() -> None:
+    graph = _graph()
+    object.__setattr__(graph, "tasks", [])
+
+    _assert_error(
+        "validation",
+        lambda: _authorize(_evidence(), graph=graph),
+    )
 
 
 @pytest.mark.parametrize(
@@ -424,6 +529,29 @@ def test_nested_actor_state_is_canonicalized_before_authorization(
         ),
         (
             lambda: _evidence("mutation", sec_fetch_site="cross-site"),
+            "forbidden",
+        ),
+        (
+            lambda: _evidence("mutation", csrf_verified=False),
+            "forbidden",
+        ),
+        (
+            lambda: _evidence("mutation", action_digest=None),
+            "validation",
+        ),
+        (
+            lambda: _evidence("mutation", body_size_bytes=4_097),
+            "validation",
+        ),
+        (
+            lambda: _evidence("mutation", rate_allowed=False),
+            "quota",
+        ),
+        (
+            lambda: _evidence(
+                "mutation",
+                target_session_ref="malformed target",
+            ),
             "forbidden",
         ),
     ],
@@ -595,7 +723,7 @@ def test_exact_public_class_boundaries_reject_subclasses_and_spoofs() -> None:
         "validation",
         lambda: _authorize(
             _evidence(),
-            policy=PolicySubclass(HOST, ORIGIN, 4_096),
+            policy=PolicySubclass(HOST, ORIGIN, 4_096, 100),
         ),
     )
     graph = _graph()
