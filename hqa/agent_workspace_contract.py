@@ -74,6 +74,66 @@ _DEFAULT_RECOVERY_ACTIONS = MappingProxyType(
         "forbidden": "stop_and_choose_allowed_action",
     }
 )
+_PUBLIC_ERROR_MESSAGES = MappingProxyType(
+    {
+        "validation": "workspace_validation_failed",
+        "auth": "workspace_auth_failed",
+        "conflict": "workspace_conflict",
+        "stale": "workspace_stale",
+        "capability": "workspace_capability_unavailable",
+        "unavailable": "workspace_authority_unavailable",
+        "outcome_unknown": "workspace_outcome_unknown",
+        "expired": "workspace_action_expired",
+        "integrity": "workspace_integrity_failed",
+        "quota": "workspace_quota_exceeded",
+        "forbidden": "workspace_forbidden",
+    }
+)
+_PUBLIC_METADATA_STATUSES = frozenset(
+    {
+        "accepted",
+        "reconciling",
+        "conflict",
+        "unavailable",
+        "outcome_unknown",
+        "pending",
+        "running",
+        "completed",
+        "completed_degraded",
+        "failed",
+        "requested",
+        "confirmed",
+        "stopped",
+        "already_terminal",
+        "unknown",
+    }
+)
+_PUBLIC_METADATA_REASON_CODES = frozenset(_DEFAULT_RECOVERY_ACTIONS) | frozenset(
+    {"resync_required", "provider_unavailable", "awaiting_binding", "partial_stop"}
+)
+_PUBLIC_METADATA_RECOVERY_ACTIONS = (
+    frozenset(_DEFAULT_RECOVERY_ACTIONS.values())
+    | frozenset(
+        action
+        for action in _ACTION_RECEIPT_RECOVERY_ACTIONS.values()
+        if action is not None
+    )
+    | frozenset({"resnapshot_workspace"})
+)
+_PUBLIC_REFERENCE_PREFIXES = MappingProxyType(
+    {
+        "session_id": "session:",
+        "task_id": "task:",
+        "attempt_id": "attempt:",
+        "command_id": "command:",
+        "run_id": "run:",
+        "result_ref": "result:",
+        "candidate_id": "candidate:",
+        "provider_evidence_ref": "provider-evidence:",
+        "approval_id": "approval:",
+        "stop_request_id": "stop:",
+    }
+)
 
 
 def _validate_identifier(value: Any, field: str) -> None:
@@ -150,6 +210,44 @@ def _measure_json_string(value: str) -> int:
     return serialized_bytes
 
 
+def _validate_metadata_value(key: str, value: Any) -> None:
+    if type(value) in (dict, list):
+        raise ValueError("V0 metadata must remain flat")
+    if key == "schema_version":
+        if type(value) is not int or value != 1:
+            raise ValueError("invalid metadata value for schema_version")
+        return
+    if type(value) is not str:
+        raise ValueError(f"invalid metadata value for {key}")
+    if key == "status":
+        if value not in _PUBLIC_METADATA_STATUSES:
+            raise ValueError("invalid metadata value for status")
+        return
+    if key == "reason_code":
+        if value not in _PUBLIC_METADATA_REASON_CODES:
+            raise ValueError("invalid metadata value for reason_code")
+        return
+    if key == "error_code":
+        if value not in _DEFAULT_RECOVERY_ACTIONS:
+            raise ValueError("invalid metadata value for error_code")
+        return
+    if key == "recovery_action":
+        if value not in _PUBLIC_METADATA_RECOVERY_ACTIONS:
+            raise ValueError("invalid metadata value for recovery_action")
+        return
+    if key == "manifest_digest":
+        if not isinstance(value, str) or _HEX64_RE.fullmatch(value) is None:
+            raise ValueError("invalid metadata value for manifest_digest")
+        return
+
+    prefix = _PUBLIC_REFERENCE_PREFIXES[key]
+    if not isinstance(value, str) or not value.startswith(prefix):
+        raise ValueError("metadata value must use the required semantic prefix")
+    suffix = value[len(prefix) :]
+    if _IDENTIFIER_RE.fullmatch(suffix) is None:
+        raise ValueError("metadata value must use the required semantic prefix")
+
+
 def _freeze_json(
     value: Any,
     depth: int,
@@ -204,6 +302,7 @@ def _freeze_json(
                 raise ValueError("metadata object keys must be strings")
             if key not in _SAFE_METADATA_KEYS:
                 raise ValueError("metadata key is not in the safe allowlist")
+            _validate_metadata_value(key, item)
             budget.consume_bytes(_measure_json_string(key))
             frozen[key] = _freeze_json(item, depth + 1, active_ids, budget)
         return MappingProxyType(frozen)
@@ -237,13 +336,16 @@ def _copy_authority_health(value: Any) -> Mapping[str, str]:
     return MappingProxyType(copied)
 
 
-def _validate_safe_message(value: Any) -> None:
-    _validate_identifier(value, "message")
-
-
 def default_recovery_action(code: str) -> str:
     try:
         return _DEFAULT_RECOVERY_ACTIONS[code]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("unknown workspace contract error code") from exc
+
+
+def public_error_message(code: str) -> str:
+    try:
+        return _PUBLIC_ERROR_MESSAGES[code]
     except (KeyError, TypeError) as exc:
         raise ValueError("unknown workspace contract error code") from exc
 
@@ -435,7 +537,8 @@ class WorkspaceErrorDetail:
 
     def __post_init__(self) -> None:
         expected_recovery = default_recovery_action(self.code)
-        _validate_safe_message(self.message)
+        if self.message != public_error_message(self.code):
+            raise ValueError("error detail requires the derived public message")
         if self.recovery_action != expected_recovery:
             raise ValueError("error detail requires the default recovery action")
 
@@ -446,19 +549,21 @@ class WorkspaceContractError(Exception):
     def __init__(
         self,
         code: str,
-        message: str,
+        message: Optional[str] = None,
         recovery_action: Optional[str] = None,
     ) -> None:
         default_recovery = default_recovery_action(code)
+        derived_message = public_error_message(code)
+        resolved_message = derived_message if message is None else message
         resolved_recovery = (
             default_recovery if recovery_action is None else recovery_action
         )
         self._detail = WorkspaceErrorDetail(
             code=code,
-            message=message,
+            message=resolved_message,
             recovery_action=resolved_recovery,
         )
-        super().__init__(message)
+        super().__init__(resolved_message)
 
     @property
     def detail(self) -> WorkspaceErrorDetail:

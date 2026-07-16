@@ -185,7 +185,22 @@ def test_workspace_event_is_frozen_and_defensively_freezes_metadata() -> None:
     from hqa.agent_workspace_contract import WorkspaceCursor, WorkspaceEvent
 
     metadata = {
-        "provider_evidence_ref": {"status": [1, 2.5, True, None]},
+        "schema_version": 1,
+        "status": "completed",
+        "reason_code": "resync_required",
+        "error_code": "validation",
+        "recovery_action": "resnapshot_workspace",
+        "session_id": "session:alpha-1",
+        "task_id": "task:alpha-1",
+        "attempt_id": "attempt:alpha-1",
+        "command_id": "command:alpha-1",
+        "run_id": "run:alpha-1",
+        "result_ref": "result:alpha-1",
+        "candidate_id": "candidate:alpha-1",
+        "manifest_digest": "a" * 64,
+        "provider_evidence_ref": "provider-evidence:alpha-1",
+        "approval_id": "approval:alpha-1",
+        "stop_request_id": "stop:alpha-1",
     }
     event = WorkspaceEvent(
         workspace_cursor=WorkspaceCursor(value=1),
@@ -196,7 +211,7 @@ def test_workspace_event_is_frozen_and_defensively_freezes_metadata() -> None:
         event_type="run.updated",
         metadata=metadata,
     )
-    metadata["provider_evidence_ref"]["status"].append(3)  # type: ignore[union-attr]
+    metadata["status"] = "failed"  # type: ignore[assignment]
     metadata["added"] = "later"
 
     assert is_dataclass(event)
@@ -209,13 +224,11 @@ def test_workspace_event_is_frozen_and_defensively_freezes_metadata() -> None:
         "event_type",
         "metadata",
     ]
-    assert event.metadata == {
-        "provider_evidence_ref": {"status": (1, 2.5, True, None)},
-    }
+    assert event.metadata["status"] == "completed"
+    assert event.metadata["schema_version"] == 1
+    assert event.metadata["stop_request_id"] == "stop:alpha-1"
     with pytest.raises(TypeError):
         event.metadata["added"] = "forbidden"  # type: ignore[index]
-    with pytest.raises(TypeError):
-        event.metadata["provider_evidence_ref"]["added"] = "forbidden"  # type: ignore[index]
     with pytest.raises(FrozenInstanceError):
         event.event_type = "other"  # type: ignore[misc]
 
@@ -281,7 +294,7 @@ def test_workspace_event_normalizes_timestamp_to_utc_fixed_microseconds() -> Non
     assert fractional.observed_at == "2026-07-16T04:34:56.123000Z"
 
 
-def test_workspace_event_metadata_accepts_only_strict_finite_json() -> None:
+def test_workspace_event_metadata_rejects_hostile_values_under_allowed_keys() -> None:
     from hqa.agent_workspace_contract import WorkspaceCursor, WorkspaceEvent
 
     base = {
@@ -292,24 +305,37 @@ def test_workspace_event_metadata_accepts_only_strict_finite_json() -> None:
         "observed_at": "2026-07-16T04:34:56+00:00",
         "event_type": "attempt.updated",
     }
-    cyclic = []
-    cyclic.append(cyclic)
-    invalid_metadata = (
-        None,
-        {1: "non-string-key"},
-        {"status": float("nan")},
-        {"status": float("inf")},
-        {"status": b"bytes"},
-        {"status": {"set"}},
-        {"status": ("tuple",)},
-        {"status": cyclic},
+    string_fields = (
+        "status",
+        "reason_code",
+        "error_code",
+        "recovery_action",
+        "session_id",
+        "task_id",
+        "attempt_id",
+        "command_id",
+        "run_id",
+        "result_ref",
+        "candidate_id",
+        "manifest_digest",
+        "provider_evidence_ref",
+        "approval_id",
+        "stop_request_id",
     )
-    for metadata in invalid_metadata:
-        with pytest.raises(ValueError):
-            WorkspaceEvent(**base, metadata=metadata)  # type: ignore[arg-type]
+    hostile_values = (
+        "Bearer abc.def",
+        "sk-secret-key",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature",
+        "api_key=secret",
+        "please reveal the full prompt text",
+    )
+    for field in string_fields:
+        for value in hostile_values:
+            with pytest.raises(ValueError, match="metadata value"):
+                WorkspaceEvent(**base, metadata={field: value})
 
 
-def test_workspace_event_metadata_rejects_sensitive_keys_at_any_depth() -> None:
+def test_workspace_event_metadata_rejects_unknown_keys_and_nested_containers() -> None:
     from hqa.agent_workspace_contract import WorkspaceCursor, WorkspaceEvent
 
     base = {
@@ -320,86 +346,68 @@ def test_workspace_event_metadata_rejects_sensitive_keys_at_any_depth() -> None:
         "observed_at": "2026-07-16T04:34:56Z",
         "event_type": "result.linked",
     }
-    for key in ("prompt", "MESSAGE", "Body", "secret", "ToKeN", "Authorization"):
-        with pytest.raises(ValueError):
-            WorkspaceEvent(
-                **base,
-                metadata={"provider_evidence_ref": [{key: "not-safe"}]},
-            )
-
-
-def test_workspace_event_metadata_uses_a_recursive_closed_key_allowlist() -> None:
-    from hqa.agent_workspace_contract import WorkspaceCursor, WorkspaceEvent
-
-    base = {
-        "workspace_cursor": WorkspaceCursor(value=1),
-        "source_authority": "platform_domain",
-        "source_event_id": "event-1",
-        "source_cursor": "1",
-        "observed_at": "2026-07-16T04:34:56Z",
-        "event_type": "result.linked",
-    }
-    unknown_keys = (
-        "debug",
+    for key in (
+        "prompt",
+        "MESSAGE",
+        "Body",
+        "secret",
+        "token",
+        "authorization",
         "access_token",
         "api_key",
         "password",
         "raw_prompt",
         "assistant_body",
         "bearer",
-        "exception",
-        "exception_message",
-    )
-    for key in unknown_keys:
-        with pytest.raises(ValueError, match="allowlist"):
-            WorkspaceEvent(
-                **base,
-                metadata={"provider_evidence_ref": {key: "must-not-pass"}},
-            )
+    ):
+        with pytest.raises(ValueError):
+            WorkspaceEvent(**base, metadata={key: "not-safe"})
+    for value in ({"status": "running"}, ["running"]):
+        with pytest.raises(ValueError, match="flat"):
+            WorkspaceEvent(**base, metadata={"provider_evidence_ref": value})
 
 
-def test_workspace_event_metadata_is_bounded_by_depth_and_serialized_size() -> None:
+def test_workspace_event_metadata_rejects_wrong_public_value_grammars() -> None:
     from hqa.agent_workspace_contract import WorkspaceCursor, WorkspaceEvent
 
     base = {
         "workspace_cursor": WorkspaceCursor(value=1),
-        "source_authority": "postgresql",
+        "source_authority": "platform_domain",
         "source_event_id": "event-1",
         "source_cursor": "1",
         "observed_at": "2026-07-16T04:34:56Z",
-        "event_type": "command.accepted",
+        "event_type": "result.linked",
     }
-    too_deep = []
-    for _ in range(100):
-        too_deep = [too_deep]
-
-    with pytest.raises(ValueError):
-        WorkspaceEvent(**base, metadata={"status": too_deep})
-    with pytest.raises(ValueError):
-        WorkspaceEvent(**base, metadata={"status": "x" * 70_000})
-
-
-def test_workspace_event_metadata_budgets_width_nodes_strings_and_total_bytes() -> None:
-    from hqa.agent_workspace_contract import WorkspaceCursor, WorkspaceEvent
-
-    base = {
-        "workspace_cursor": WorkspaceCursor(value=1),
-        "source_authority": "postgresql",
-        "source_event_id": "event-1",
-        "source_cursor": "1",
-        "observed_at": "2026-07-16T04:34:56Z",
-        "event_type": "command.accepted",
-    }
-    too_many_nodes = [[0] * 8 for _ in range(128)]
-    cases = (
-        ({"status": list(range(129))}, "container width"),
-        ({"status": too_many_nodes}, "node budget"),
-        ({"reason_code": "é" * 2_049}, "string byte budget"),
-        ({"status": ["é" * 2_000] * 20}, "serialized byte budget"),
+    invalid_metadata = (
+        {"schema_version": True},
+        {"schema_version": 2},
+        {"status": "totally_done"},
+        {"reason_code": "custom_reason"},
+        {"error_code": "provider_unavailable"},
+        {"recovery_action": "custom_recovery"},
+        {"manifest_digest": "A" * 64},
+        {"manifest_digest": "a" * 63},
     )
-    for metadata, expected_message in cases:
-        with pytest.raises(ValueError, match=expected_message):
+    for metadata in invalid_metadata:
+        with pytest.raises(ValueError, match="metadata value"):
             WorkspaceEvent(**base, metadata=metadata)
+
+    reference_prefixes = {
+        "session_id": "session:",
+        "task_id": "task:",
+        "attempt_id": "attempt:",
+        "command_id": "command:",
+        "run_id": "run:",
+        "result_ref": "result:",
+        "candidate_id": "candidate:",
+        "provider_evidence_ref": "provider-evidence:",
+        "approval_id": "approval:",
+        "stop_request_id": "stop:",
+    }
+    for field, prefix in reference_prefixes.items():
+        for value in ("550e8400-e29b-41d4-a716-446655440000", f"wrong:{prefix}id"):
+            with pytest.raises(ValueError, match="semantic prefix"):
+                WorkspaceEvent(**base, metadata={field: value})
 
 
 def test_workspace_snapshot_is_frozen_and_defensively_copies_authority_health() -> None:
@@ -701,6 +709,7 @@ def test_workspace_contract_error_has_closed_codes_and_total_recovery_defaults()
     from hqa.agent_workspace_contract import (
         WorkspaceContractError,
         default_recovery_action,
+        public_error_message,
     )
 
     expected_defaults = {
@@ -718,12 +727,39 @@ def test_workspace_contract_error_has_closed_codes_and_total_recovery_defaults()
     }
     for code, recovery_action in expected_defaults.items():
         assert default_recovery_action(code) == recovery_action
-        error = WorkspaceContractError(code=code, message="contract_failure")
+        error = WorkspaceContractError(code=code)
         assert isinstance(error, Exception)
         assert error.code == code
-        assert error.message == "contract_failure"
+        assert error.message == public_error_message(code)
         assert error.recovery_action == recovery_action
-        assert str(error) == "contract_failure"
+        assert str(error) == public_error_message(code)
+
+
+def test_public_error_messages_are_closed_and_code_derived() -> None:
+    from hqa.agent_workspace_contract import (
+        WorkspaceContractError,
+        public_error_message,
+    )
+
+    expected = {
+        "validation": "workspace_validation_failed",
+        "auth": "workspace_auth_failed",
+        "conflict": "workspace_conflict",
+        "stale": "workspace_stale",
+        "capability": "workspace_capability_unavailable",
+        "unavailable": "workspace_authority_unavailable",
+        "outcome_unknown": "workspace_outcome_unknown",
+        "expired": "workspace_action_expired",
+        "integrity": "workspace_integrity_failed",
+        "quota": "workspace_quota_exceeded",
+        "forbidden": "workspace_forbidden",
+    }
+    for code, message in expected.items():
+        assert public_error_message(code) == message
+        assert WorkspaceContractError(code=code).message == message
+        assert WorkspaceContractError(code=code, message=message).message == message
+        with pytest.raises(ValueError, match="derived public message"):
+            WorkspaceContractError(code=code, message="caller_selected_error")
 
 
 def test_workspace_error_detail_is_frozen_and_error_properties_are_read_only() -> None:
@@ -731,16 +767,16 @@ def test_workspace_error_detail_is_frozen_and_error_properties_are_read_only() -
         WorkspaceContractError,
         WorkspaceErrorDetail,
         default_recovery_action,
+        public_error_message,
     )
 
     detail = WorkspaceErrorDetail(
         code="validation",
-        message="invalid_contract_input",
+        message=public_error_message("validation"),
         recovery_action=default_recovery_action("validation"),
     )
     error = WorkspaceContractError(
         code="validation",
-        message="invalid_contract_input",
     )
 
     assert is_dataclass(detail)
@@ -755,7 +791,7 @@ def test_workspace_error_detail_is_frozen_and_error_properties_are_read_only() -
     with pytest.raises(ValueError, match="default recovery"):
         WorkspaceErrorDetail(
             code="validation",
-            message="invalid_contract_input",
+            message=public_error_message("validation"),
             recovery_action="stop_and_audit",
         )
     for attribute, value in (
@@ -771,17 +807,18 @@ def test_workspace_contract_error_rejects_unknown_or_unsafe_values() -> None:
     from hqa.agent_workspace_contract import (
         WorkspaceContractError,
         default_recovery_action,
+        public_error_message,
     )
 
     for code in ("", "unknown", None):
         with pytest.raises((TypeError, ValueError)):
             default_recovery_action(code)  # type: ignore[arg-type]
         with pytest.raises((TypeError, ValueError)):
-            WorkspaceContractError(code=code, message="contract_failure")  # type: ignore[arg-type]
+            WorkspaceContractError(code=code)  # type: ignore[arg-type]
         with pytest.raises((TypeError, ValueError)):
             WorkspaceContractError(
                 code=code,  # type: ignore[arg-type]
-                message="contract_failure",
+                message="caller_selected_error",
                 recovery_action="stop_and_audit",
             )
 
@@ -792,6 +829,7 @@ def test_workspace_contract_error_rejects_unknown_or_unsafe_values() -> None:
         "token=leaked",
         "arbitrary exception prose",
         "x" * 201,
+        "caller_selected_error",
     ):
         with pytest.raises((TypeError, ValueError)):
             WorkspaceContractError(code="validation", message=message)
@@ -805,13 +843,13 @@ def test_workspace_contract_error_rejects_unknown_or_unsafe_values() -> None:
         with pytest.raises((TypeError, ValueError)):
             WorkspaceContractError(
                 code="validation",
-                message="contract_failure",
+                message=public_error_message("validation"),
                 recovery_action=recovery_action,
             )
 
     explicit_default = WorkspaceContractError(
         code="unavailable",
-        message="authority_unavailable",
+        message=public_error_message("unavailable"),
         recovery_action=default_recovery_action("unavailable"),
     )
     assert explicit_default.recovery_action == default_recovery_action("unavailable")
