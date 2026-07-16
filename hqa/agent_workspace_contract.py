@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import json
 import math
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Protocol, Tuple
 
@@ -15,14 +14,14 @@ _RFC3339_RE = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
     r"(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})\Z"
 )
-_SENSITIVE_MESSAGE_ASSIGNMENT_RE = re.compile(
-    r"\b(?:prompt|message|body|secret|token|authorization)\s*[:=]",
-    re.IGNORECASE,
-)
 _MAX_CURSOR = 2**63 - 1
 _MAX_SOURCE_CURSOR_LENGTH = 2_000
 _MAX_METADATA_DEPTH = 16
 _MAX_METADATA_BYTES = 65_536
+_MAX_METADATA_NODES = 1_024
+_MAX_METADATA_STRING_BYTES = 4_096
+_MAX_METADATA_CONTAINER_WIDTH = 128
+_MAX_METADATA_INTEGER_BITS = 12_000
 _ACTION_RECEIPT_STATUSES = (
     "accepted",
     "reconciling",
@@ -30,9 +29,35 @@ _ACTION_RECEIPT_STATUSES = (
     "unavailable",
     "outcome_unknown",
 )
+_ACTION_RECEIPT_RECOVERY_ACTIONS = MappingProxyType(
+    {
+        "accepted": None,
+        "reconciling": "follow_workspace",
+        "conflict": "choose_legal_target_or_new_action",
+        "unavailable": "retry_read_or_reconcile_original_action",
+        "outcome_unknown": "follow_and_reconcile_original_action",
+    }
+)
 _SOURCE_AUTHORITIES = ("postgresql", "hqa", "hermes", "platform_domain")
-_SENSITIVE_METADATA_KEYS = frozenset(
-    {"prompt", "message", "body", "secret", "token", "authorization"}
+_SAFE_METADATA_KEYS = frozenset(
+    {
+        "schema_version",
+        "status",
+        "reason_code",
+        "error_code",
+        "recovery_action",
+        "session_id",
+        "task_id",
+        "attempt_id",
+        "command_id",
+        "run_id",
+        "result_ref",
+        "candidate_id",
+        "manifest_digest",
+        "provider_evidence_ref",
+        "approval_id",
+        "stop_request_id",
+    }
 )
 _DEFAULT_RECOVERY_ACTIONS = MappingProxyType(
     {
@@ -66,7 +91,7 @@ def _validate_source_cursor(value: Any) -> None:
         raise ValueError("source_cursor must be a non-empty bounded string")
 
 
-def _validate_observed_at(value: Any) -> None:
+def _normalize_observed_at(value: Any) -> str:
     if not isinstance(value, str) or _RFC3339_RE.fullmatch(value) is None:
         raise ValueError("observed_at must be a canonical timezone-aware timestamp")
     parsed_value = value[:-1] + "+00:00" if value.endswith("Z") else value
@@ -78,19 +103,85 @@ def _validate_observed_at(value: Any) -> None:
         ) from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("observed_at must be timezone-aware")
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def _freeze_json(value: Any, depth: int, active_ids: set) -> Any:
+@dataclass
+class _MetadataBudget:
+    nodes: int = 0
+    serialized_bytes: int = 0
+
+    def consume_node(self) -> None:
+        self.nodes += 1
+        if self.nodes > _MAX_METADATA_NODES:
+            raise ValueError("metadata exceeds the node budget")
+
+    def consume_bytes(self, count: int) -> None:
+        self.serialized_bytes += count
+        if self.serialized_bytes > _MAX_METADATA_BYTES:
+            raise ValueError("metadata exceeds the serialized byte budget")
+
+
+def _measure_json_string(value: str) -> int:
+    raw_bytes = 0
+    serialized_bytes = 2
+    for character in value:
+        codepoint = ord(character)
+        if 0xD800 <= codepoint <= 0xDFFF:
+            raise ValueError("metadata strings must contain valid Unicode")
+        if codepoint <= 0x7F:
+            character_bytes = 1
+        elif codepoint <= 0x7FF:
+            character_bytes = 2
+        elif codepoint <= 0xFFFF:
+            character_bytes = 3
+        else:
+            character_bytes = 4
+        raw_bytes += character_bytes
+        if raw_bytes > _MAX_METADATA_STRING_BYTES:
+            raise ValueError("metadata exceeds the string byte budget")
+
+        if character in ('"', "\\", "\b", "\f", "\n", "\r", "\t"):
+            serialized_bytes += 2
+        elif codepoint < 0x20:
+            serialized_bytes += 6
+        else:
+            serialized_bytes += character_bytes
+    return serialized_bytes
+
+
+def _freeze_json(
+    value: Any,
+    depth: int,
+    active_ids: set,
+    budget: _MetadataBudget,
+) -> Any:
     if depth > _MAX_METADATA_DEPTH:
         raise ValueError("metadata exceeds the maximum JSON depth")
-    if value is None or type(value) in (bool, int, str):
+    budget.consume_node()
+    if value is None:
+        budget.consume_bytes(4)
+        return value
+    if type(value) is bool:
+        budget.consume_bytes(4 if value else 5)
+        return value
+    if type(value) is int:
+        if value.bit_length() > _MAX_METADATA_INTEGER_BITS:
+            raise ValueError("metadata exceeds the serialized byte budget")
+        budget.consume_bytes(len(str(value)))
+        return value
+    if type(value) is str:
+        budget.consume_bytes(_measure_json_string(value))
         return value
     if type(value) is float:
         if not math.isfinite(value):
             raise ValueError("metadata numbers must be finite")
+        budget.consume_bytes(len(repr(value)))
         return value
     if type(value) not in (dict, list):
         raise ValueError("metadata must contain strict JSON values only")
+    if len(value) > _MAX_METADATA_CONTAINER_WIDTH:
+        raise ValueError("metadata exceeds the container width")
 
     identity = id(value)
     if identity in active_ids:
@@ -98,17 +189,23 @@ def _freeze_json(value: Any, depth: int, active_ids: set) -> Any:
     active_ids.add(identity)
     try:
         if type(value) is list:
-            return tuple(
-                _freeze_json(item, depth + 1, active_ids) for item in value
-            )
+            budget.consume_bytes(2 + max(0, len(value) - 1))
+            frozen_items = []
+            for item in value:
+                frozen_items.append(
+                    _freeze_json(item, depth + 1, active_ids, budget)
+                )
+            return tuple(frozen_items)
 
+        budget.consume_bytes(2 + max(0, len(value) - 1) + len(value))
         frozen = {}
         for key, item in value.items():
             if type(key) is not str:
                 raise ValueError("metadata object keys must be strings")
-            if key.casefold() in _SENSITIVE_METADATA_KEYS:
-                raise ValueError("metadata contains a sensitive key")
-            frozen[key] = _freeze_json(item, depth + 1, active_ids)
+            if key not in _SAFE_METADATA_KEYS:
+                raise ValueError("metadata key is not in the safe allowlist")
+            budget.consume_bytes(_measure_json_string(key))
+            frozen[key] = _freeze_json(item, depth + 1, active_ids, budget)
         return MappingProxyType(frozen)
     finally:
         active_ids.remove(identity)
@@ -117,20 +214,7 @@ def _freeze_json(value: Any, depth: int, active_ids: set) -> Any:
 def _freeze_metadata(metadata: Any) -> Mapping[str, Any]:
     if type(metadata) is not dict:
         raise ValueError("metadata must be a JSON object")
-    frozen = _freeze_json(metadata, 0, set())
-    try:
-        serialized = json.dumps(
-            metadata,
-            allow_nan=False,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
-    except (TypeError, ValueError) as exc:
-        raise ValueError("metadata must contain strict finite JSON") from exc
-    if len(serialized) > _MAX_METADATA_BYTES:
-        raise ValueError("metadata exceeds the maximum serialized size")
-    return frozen
+    return _freeze_json(metadata, 0, set(), _MetadataBudget())
 
 
 def _copy_reference_tuple(value: Any, field: str) -> Tuple[str, ...]:
@@ -154,15 +238,7 @@ def _copy_authority_health(value: Any) -> Mapping[str, str]:
 
 
 def _validate_safe_message(value: Any) -> None:
-    if (
-        not isinstance(value, str)
-        or not value
-        or value != value.strip()
-        or len(value) > 500
-        or not value.isprintable()
-        or _SENSITIVE_MESSAGE_ASSIGNMENT_RE.search(value) is not None
-    ):
-        raise ValueError("message must be safe, non-empty, and bounded")
+    _validate_identifier(value, "message")
 
 
 def default_recovery_action(code: str) -> str:
@@ -222,10 +298,9 @@ class ActionReceipt:
             _validate_identifier(self.command_id, "command_id")
         if self.run_id is not None:
             _validate_identifier(self.run_id, "run_id")
-        if self.recovery_action is not None:
-            _validate_identifier(self.recovery_action, "recovery_action")
-        if self.status != "accepted" and self.recovery_action is None:
-            raise ValueError(f"{self.status} receipts require a recovery_action")
+        expected_recovery = _ACTION_RECEIPT_RECOVERY_ACTIONS[self.status]
+        if self.recovery_action != expected_recovery:
+            raise ValueError("status requires its exact recovery action")
 
 
 @dataclass(frozen=True)
@@ -245,7 +320,7 @@ class WorkspaceEvent:
             raise ValueError("invalid source_authority")
         _validate_identifier(self.source_event_id, "source_event_id")
         _validate_source_cursor(self.source_cursor)
-        _validate_observed_at(self.observed_at)
+        object.__setattr__(self, "observed_at", _normalize_observed_at(self.observed_at))
         _validate_identifier(self.event_type, "event_type")
         object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
 
@@ -253,6 +328,7 @@ class WorkspaceEvent:
 @dataclass(frozen=True)
 class EventPage:
     events: Tuple[WorkspaceEvent, ...]
+    after_cursor: Optional[WorkspaceCursor] = None
     next_cursor: Optional[WorkspaceCursor] = None
     resync_required: bool = False
     recovery_action: Optional[str] = None
@@ -261,16 +337,23 @@ class EventPage:
         if type(self.events) is not tuple:
             raise TypeError("events must be a tuple")
         copied_events = []
-        previous_cursor = -1
+        previous_cursor = None
         for event in self.events:
             if not isinstance(event, WorkspaceEvent):
                 raise TypeError("events must contain WorkspaceEvent values")
-            if event.workspace_cursor.value <= previous_cursor:
-                raise ValueError("event cursors must be strictly increasing")
+            if (
+                previous_cursor is not None
+                and event.workspace_cursor.value != previous_cursor + 1
+            ):
+                raise ValueError("event cursors must be contiguous")
             previous_cursor = event.workspace_cursor.value
             copied_events.append(event)
         object.__setattr__(self, "events", tuple(copied_events))
 
+        if self.after_cursor is not None and not isinstance(
+            self.after_cursor, WorkspaceCursor
+        ):
+            raise TypeError("after_cursor must be a WorkspaceCursor or None")
         if self.next_cursor is not None and not isinstance(
             self.next_cursor, WorkspaceCursor
         ):
@@ -289,12 +372,25 @@ class EventPage:
                     "resync_required pages require resnapshot_workspace recovery"
                 )
         else:
-            if self.events and self.next_cursor != self.events[-1].workspace_cursor:
-                raise ValueError("next_cursor must match the final event cursor")
+            if self.events:
+                if (
+                    self.after_cursor is not None
+                    and self.events[0].workspace_cursor.value
+                    != self.after_cursor.value + 1
+                ):
+                    raise ValueError("first event cursor must follow after_cursor")
+                if self.next_cursor != self.events[-1].workspace_cursor:
+                    raise ValueError("next_cursor must match the final event cursor")
+            elif self.next_cursor != self.after_cursor:
+                raise ValueError(
+                    "empty pages require next_cursor to equal after_cursor"
+                )
             if self.recovery_action == "resnapshot_workspace":
                 raise ValueError(
                     "non-resync pages cannot claim resnapshot_workspace recovery"
                 )
+            if self.recovery_action is not None:
+                raise ValueError("ordinary event pages require recovery_action None")
 
 
 @dataclass(frozen=True)
@@ -331,7 +427,22 @@ class WorkspaceSnapshot:
         )
 
 
+@dataclass(frozen=True)
+class WorkspaceErrorDetail:
+    code: str
+    message: str
+    recovery_action: str
+
+    def __post_init__(self) -> None:
+        expected_recovery = default_recovery_action(self.code)
+        _validate_safe_message(self.message)
+        if self.recovery_action != expected_recovery:
+            raise ValueError("error detail requires the default recovery action")
+
+
 class WorkspaceContractError(Exception):
+    __slots__ = ("_detail",)
+
     def __init__(
         self,
         code: str,
@@ -342,12 +453,28 @@ class WorkspaceContractError(Exception):
         resolved_recovery = (
             default_recovery if recovery_action is None else recovery_action
         )
-        _validate_safe_message(message)
-        _validate_identifier(resolved_recovery, "recovery_action")
-        self.code = code
-        self.message = message
-        self.recovery_action = resolved_recovery
+        self._detail = WorkspaceErrorDetail(
+            code=code,
+            message=message,
+            recovery_action=resolved_recovery,
+        )
         super().__init__(message)
+
+    @property
+    def detail(self) -> WorkspaceErrorDetail:
+        return self._detail
+
+    @property
+    def code(self) -> str:
+        return self._detail.code
+
+    @property
+    def message(self) -> str:
+        return self._detail.message
+
+    @property
+    def recovery_action(self) -> str:
+        return self._detail.recovery_action
 
 
 class UserActionV1(Protocol):
