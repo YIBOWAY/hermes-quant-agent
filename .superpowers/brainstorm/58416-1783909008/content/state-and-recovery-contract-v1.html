@@ -1,0 +1,81 @@
+<h2>设计第 5 部分：谁保存什么，失败后怎么恢复</h2>
+<p class="subtitle">核心原则：Hermes 负责对话与推理，平台负责可审计的工作记录，研究产物继续由既有后端仓库负责。页面只做投影，不创造第二套业务事实。</p>
+
+<div class="mockup" style="margin-top:26px">
+  <div class="mockup-header">A. 三层真相源：明确归属，禁止互相覆盖</div>
+  <div class="mockup-body" style="padding:24px;background:#121116">
+    <div style="display:grid;grid-template-columns:1fr 56px 1fr 56px 1fr;gap:12px;align-items:stretch">
+      <div style="padding:18px;border:1px solid #67528d;border-radius:12px;background:rgba(139,92,246,.08)">
+        <div class="label">对话真相</div><h3 style="margin-top:8px;color:#efe8fb">Hermes Session</h3>
+        <p style="color:#b9b1c2">消息上下文、推理会话、工具请求、实际 provider / model。</p>
+        <div style="margin-top:13px;padding:10px;border-radius:8px;background:#19161f;color:#b9a5dc">平台不修改 Hermes 历史，也不伪造 provider。</div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;font-size:22px;color:#81798a">↔</div>
+      <div style="padding:18px;border:1px solid #405b81;border-radius:12px;background:rgba(59,130,246,.07)">
+        <div class="label">工作台真相</div><h3 style="margin-top:8px;color:#e7eefb">Platform Ledger</h3>
+        <p style="color:#b9b1c2">会话映射、每轮 Run 状态、幂等键、可恢复事件、结果链接。</p>
+        <div style="margin-top:13px;padding:10px;border-radius:8px;background:#151923;color:#9eb4eb">这是控制面账本，不复制因子、回测或审批正文。</div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;font-size:22px;color:#81798a">→</div>
+      <div style="padding:18px;border:1px solid #356044;border-radius:12px;background:rgba(34,197,94,.07)">
+        <div class="label">业务真相</div><h3 style="margin-top:8px;color:#e8f7ed">Existing Repositories</h3>
+        <p style="color:#b9b1c2">因子、回测、实验、日报、候选源码、Gate 与 promotion diff。</p>
+        <div style="margin-top:13px;padding:10px;border-radius:8px;background:#151c17;color:#7ed99c">结果页按稳定 ID 读取原产物，不把聊天总结当结果。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="split" style="margin-top:28px;align-items:stretch">
+  <div class="mockup">
+    <div class="mockup-header">B. 平台只新增一份“小账本”</div>
+    <div class="mockup-body" style="padding:22px;background:#121116">
+      <div style="display:grid;gap:11px">
+        <div style="padding:14px;border:1px solid #302d35;border-radius:10px"><b style="color:#d9c7f5">Session</b><p style="margin-top:6px;color:#a9a1ad">平台 session ID ↔ Hermes session ID；锁定 provider / model；标题与最后活动时间。</p></div>
+        <div style="padding:14px;border:1px solid #302d35;border-radius:10px"><b style="color:#a9c4ef">Run</b><p style="margin-top:6px;color:#a9a1ad">一条用户消息对应一个 Run；保存 client_request_id、Hermes run ID、状态、实际 provider、错误码。</p></div>
+        <div style="padding:14px;border:1px solid #302d35;border-radius:10px"><b style="color:#a9c4ef">Event</b><p style="margin-top:6px;color:#a9a1ad">仅持久化白名单事件和 sequence cursor，供刷新/断线续传；原始敏感日志不入库。</p></div>
+        <div style="padding:14px;border:1px solid #302d35;border-radius:10px"><b style="color:#7ed99c">Result link</b><p style="margin-top:6px;color:#a9a1ad">只记录 artifact kind + stable ID + repository；结果正文仍在原仓库。</p></div>
+      </div>
+      <div style="margin-top:15px;padding:13px;border-left:3px solid #f4bd63;background:#1d1914;color:#d8c6aa"><b>明确不做：</b>localStorage 当数据库；把聊天 Markdown 当回测结果；另建一套“候选审批状态”。</div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">C. 一个 Run 的可恢复状态机</div>
+    <div class="mockup-body" style="padding:22px;background:#121116">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:9px">
+        <span style="padding:10px 13px;border:1px solid #405b81;border-radius:9px;color:#a9c4ef">queued</span><b style="color:#81798a">→</b>
+        <span style="padding:10px 13px;border:1px solid #405b81;border-radius:9px;color:#a9c4ef">running</span><b style="color:#81798a">→</b>
+        <span style="padding:10px 13px;border:1px solid #6b4f24;border-radius:9px;color:#f2c874">awaiting approval</span><b style="color:#81798a">→</b>
+        <span style="padding:10px 13px;border:1px solid #405b81;border-radius:9px;color:#a9c4ef">running</span><b style="color:#81798a">→</b>
+        <span style="padding:10px 13px;border:1px solid #356044;border-radius:9px;color:#7ed99c">completed</span>
+      </div>
+      <div style="height:1px;background:#302d35;margin:19px 0"></div>
+      <p style="color:#aaa3ae">任何非终态都允许：</p>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px">
+        <div style="padding:13px;border:1px solid #6d3c43;border-radius:9px;color:#ef9aa5">failed<br><span style="color:#8d858f;font-size:13px">明确错误与可重试性</span></div>
+        <div style="padding:13px;border:1px solid #6d3c43;border-radius:9px;color:#ef9aa5">stopped<br><span style="color:#8d858f;font-size:13px">用户停止，保留已完成产物</span></div>
+        <div style="padding:13px;border:1px solid #6b4f24;border-radius:9px;color:#f2c874">interrupted<br><span style="color:#8d858f;font-size:13px">连接中断，先对账再重试</span></div>
+      </div>
+      <div style="margin-top:16px;padding:13px;border:1px solid #302d35;border-radius:9px;color:#a9a1ad"><b style="color:#e6ddef">关键约束：</b>同一 session 同时最多一个活跃 Run；同一 client_request_id 永远不会重复提交；恢复时先查询 Hermes 真实状态，不能凭前端猜。</div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:28px">
+  <div class="mockup-header">D. 用户看到的是可行动的降级，而不是假成功</div>
+  <div class="mockup-body" style="padding:24px;background:#121116">
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+      <div style="padding:15px;border:1px solid #6d3c43;border-radius:10px"><b style="color:#ef9aa5">Hermes 离线</b><p style="margin-top:7px;color:#aaa3ae">今日概览和既有研究结果仍可读；历史对话显示平台审计投影；新对话与新研究禁用，不回退旧 AgentRunner。</p></div>
+      <div style="padding:15px;border:1px solid #6b4f24;border-radius:10px"><b style="color:#f2c874">SSE 断线 / 页面刷新</b><p style="margin-top:7px;color:#aaa3ae">用 event cursor 重连并补齐缺口；若状态不确定标记“正在对账”，绝不自动重复执行。</p></div>
+      <div style="padding:15px;border:1px solid #6d3c43;border-radius:10px"><b style="color:#ef9aa5">Provider 配额或模型失败</b><p style="margin-top:7px;color:#aaa3ae">展示实际 provider / model、失败原因和是否发生显式 fallback；不得显示虚构的剩余额度。</p></div>
+      <div style="padding:15px;border:1px solid #6d3c43;border-radius:10px"><b style="color:#ef9aa5">审批已过期 / 候选已变化</b><p style="margin-top:7px;color:#aaa3ae">重新读取 canonical candidate、hash 与 Gate 状态；旧批准不能套到新内容，要求重新审阅。</p></div>
+      <div style="padding:15px;border:1px solid #6b4f24;border-radius:10px"><b style="color:#f2c874">部分结果已生成</b><p style="margin-top:7px;color:#aaa3ae">保留并标注已完成产物，但整体 Run 为 stopped / failed；不能把局部产物包装成完整成功。</p></div>
+      <div style="padding:15px;border:1px solid #6d3c43;border-radius:10px"><b style="color:#ef9aa5">数据库不可用</b><p style="margin-top:7px;color:#aaa3ae">禁止创建需要持久化的新 session / Run；既有业务产物继续按各自仓库的既定降级策略只读。</p></div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:26px;padding:17px;border:1px solid #356044;border-radius:12px;background:rgba(34,197,94,.06)">
+  <strong>最小但必要的新增：</strong>在平台 PostgreSQL 增加工作台 Session / Run / Event / Result-link 控制面表；聊天的业务上下文仍归 Hermes，因子、回测、实验与审批仍归现有仓库。
+</div>

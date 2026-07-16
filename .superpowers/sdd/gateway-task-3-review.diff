@@ -1,0 +1,381 @@
+# Review package: 34713d87d3d13f301fa96c950517cc2c529912c7..HEAD
+
+## Commits
+c767b75 docs(hermes): freeze gateway contract and chat admission gate
+
+## Files changed
+ docs/README.md                                     |  34 ++--
+ docs/contracts/hermes-gateway-0.18.2.md            | 220 +++++++++++++++++++++
+ ...-13-hermes-unified-research-workbench-design.md |  20 +-
+ 3 files changed, 259 insertions(+), 15 deletions(-)
+
+## Diff
+diff --git a/docs/README.md b/docs/README.md
+index c96c78e..e605fcb 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -6,23 +6,23 @@ plan、audit 和 git history 中。
+ 
+ > 事实快照：2026-07-13。状态变化后优先更新本文件和对应交付记录，不要在
+ > `AGENTS.md` 追加开发流水账。
+ 
+ ## 当前唯一执行入口
+ 
+ | 层级 | 权威文档 | 当前含义 |
+ |---|---|---|
+ | 产品方向 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；平台是领域后端。该 roadmap 管长期阶段、决策与安全门。 |
+ | 已批准下一产品设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | D-31：`/hermes` 成为默认首页，真实连接本地 Hermes，并逐步吞并 factor-lab、backtest、experiments、agent-studio 的页面体验。 |
+-| 第一批正式计划：Hermes 合同 | [`superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md`](superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md) | 将本机 Hermes 0.18.2 的 WebSocket JSON-RPC 能力、Git 绑定独立审查和安装指纹冻结为 fail-closed 合同；当前缺少 request recovery、Run identity、event replay、immutable provider/fallback policy 和 actual-provider evidence，所以真实 chat/resume 写端继续关闭。 |
+-| 第一批正式计划：候选安全 | [`superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md`](superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md) | 统一 candidate root，交付 immutable manifest、Gate 2 digest/CAS、legacy_unbound、最后读取再校验与隔离 Gate 3 worktree。 |
+-| 第一批正式计划：专业前端 | [`superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md`](superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md) | 先做专业 F0/F1 并分别取得用户书面确认，再实现 F2 只读新壳和可回滚默认首页；不开放 chat/execution/旧页 redirect。 |
++| 第一批正式计划：Hermes 合同（已选 wave） | [`superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md`](superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md) | 将本机 Hermes 0.18.2 的 WebSocket JSON-RPC 能力、Git 绑定独立审查和安装指纹冻结为 fail-closed 合同；证据见 [`contracts/hermes-gateway-0.18.2.md`](contracts/hermes-gateway-0.18.2.md)。当前缺少 request recovery、Run identity、event replay、immutable provider/fallback policy 和 actual-provider evidence，所以真实 chat/resume 写端继续关闭。 |
++| 第一批正式计划：候选安全（已选 wave） | [`superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md`](superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md) | 统一 candidate root，交付 immutable manifest、Gate 2 digest/CAS、legacy_unbound、最后读取再校验与隔离 Gate 3 worktree。 |
++| 第一批正式计划：专业前端（已选 wave） | [`superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md`](superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md) | 先做专业 F0/F1 并分别取得用户书面确认，再实现 F2 只读新壳和可回滚默认首页；不开放 chat/execution/旧页 redirect。 |
+ | 已完成实现记录 | [`superpowers/plans/2026-07-10-phase-1a-4-v2.md`](superpowers/plans/2026-07-10-phase-1a-4-v2.md) | Phase 1a-4 v2 的 Slice 9A-9H 已全部完成；其中“没有下一 slice”仅是该交付完成时的历史状态，不代表当前 D-31 计划状态。 |
+ | 当前交付记录 | [`superpowers/plans/2026-07-12-full-9h-automation-notifications.md`](superpowers/plans/2026-07-12-full-9h-automation-notifications.md) | 完整 9H 的只读自动化、周复盘、freshness、feed 1.1、页面可见性、local 通知与四个 Hermes cron 的代码交付和运行验收。 |
+ | 前序交付记录 | [`superpowers/plans/2026-07-12-slice-9g-opportunity-ledger.md`](superpowers/plans/2026-07-12-slice-9g-opportunity-ledger.md) | 9G 稳定 signal identity、decision/action ledger、精确平台行动关联与 missed 安全判定。 |
+ | 更早交付记录 | [`superpowers/plans/2026-07-12-slice-9f-mini-9h.md`](superpowers/plans/2026-07-12-slice-9f-mini-9h.md) | 9F proposal-only 市场推演和 mini 9H `/hermes` 三源只读产物架。 |
+ | 前序实现 | `/Users/sunyibo/programs/ai-quant-platform/docs/superpowers/plans/2026-07-08-frontend-redesign-hermes-integration.md` | Slice 0-8 的权威实现与验收记录；只作为 D-31 的现状/parity inventory，不再提供可直接执行的后续 backlog。 |
+ | 被替代计划 | [`superpowers/plans/2026-07-07-phase-1a-4-research-employees.md`](superpowers/plans/2026-07-07-phase-1a-4-research-employees.md) | 产品目标保留，implementation plan 已由 v2 重排计划替代，不得原样执行。 |
+ | 历史素材 | `ai-quant-platform/docs/phases/phase_15_iteration_roadmap.md`、两仓旧 phase/plan/audit | 只提供设计与验收证据，不得自行成为下一步。 |
+ 
+ Phase 1a-4 v2 已完整交付到 9H。最终 HQA 门禁为 `530 passed, 2 skipped`；
+ `hqa-full-9h-daily-close`、`hqa-full-9h-freshness`、`hqa-full-9h-weekly` 和
+@@ -30,25 +30,35 @@ Phase 1a-4 v2 已完整交付到 9H。最终 HQA 门禁为 `530 passed, 2 skippe
+ 报告 `ok`。feed schema 1.1 精确包含六源，`/hermes` 已可见 weekly、opportunity 和
+ automation，并保留风险、预测与市场推演三类卡片。
+ 
+ 真实 options artifact 的 59 个阈值信号仍全部诚实保持 `not_actionable`，最终为
+ `59 not_actionable / 0 missed`。通知默认 target 是 local，运行验收没有实际外发 Discord。
+ 本交付未触发策略、回测、paper mutation、broker 或交易，也没有为完整 9H 新增平台数据库
+ migration/table。
+ 
+ Git、远端和运行进程是易变状态，不在本入口维护“ahead/dirty/尚未推送”快照。每次交接
+ 都应以 `git status --short --branch`、`git log`、`curl /api/health` 和对应测试重新核验。
+-下一产品设计已经通过 D-31 单独确认，三份第一批正式 implementation plan 已按 2026-07-13
+-源码事实写成，但尚未开始执行。下一步由用户在 subagent-driven 与 inline execution 中选择；
+-不得从旧 1a-4 模板、旧前端 P2/P3 或历史 audit 自行增加施工步骤。真实 Hermes chat
+-mutation 不是已选 slice：只有 capability plan 的 `verify-chat` 针对已提交、独立审查为
+-`ready` 的默认合同和当时干净安装态证据返回 ready，才能另写 bridge/chat implementation plan。
++下一产品设计已经通过 D-31 单独确认。**第一批已选 wave** 是三份独立可测计划：Hermes
++gateway capability contract、candidate integrity/Gate 3、professional frontend/read-only
++shell。不得从旧 1a-4 模板、旧前端 P2/P3 或历史 audit 自行增加施工步骤。
++
++The real Hermes chat mutation slice is not selected. The fingerprinted Hermes
++0.18.2 installation exposes the
++needed JSON-RPC method names but does not yet satisfy D-31 request-recovery,
++event-replay, Run identity, immutable session provider/fallback policy, or
++actual-provider evidence. The checked-in capability evaluator and Git-bound
++independent review therefore keep chat/resume/approval/stop disabled.
++
++只有 capability plan 的 `verify-chat` 针对已提交、独立审查为 `ready` 的默认合同和当时
++干净安装态证据返回 ready（`review.verdict=ready` 且
++`installation.matches_snapshot=true`），才能另写 bridge/chat implementation plan。
++旧 `/api/agent/tasks` / AgentRunner **不是** fallback。
+ 
+ ## 状态用词
+ 
+ - **已实现**：代码存在，但可能仍在工作树中。
+ - **已提交**：本地 commit 存在。
+ - **已推送**：远端分支已包含该 commit。
+ - **代码交付**：实现和约定测试已完成；不自动等于真实运营验收。
+ - **运行验收**：当前进程已重启到目标代码，并用真实本地依赖完成 smoke/E2E。
+ - **排队**：设计可以保留，但不得被 agent 当作当前实现指令。
+ - **历史快照**：只描述某一日期的事实，不承担当前状态维护职责。
+@@ -84,23 +94,25 @@ mutation 不是已选 slice：只有 capability plan 的 `verify-chat` 针对已
+ 
+ `plans/2026-07-01-phase-0a-*`、`phase-0b-*`、`phase-1a-0-*`、
+ `phase-1a-1-*`、`phase-1a-2-*`、`phase-1a-3-*` 和 D-25 文档用于追溯设计、
+ 测试与边界；它们不是当前待办清单。某些 checkbox 没有回填，不应据此反推代码不存在。
+ 
+ ### 已批准设计、第一批正式计划待执行
+ 
+ Hermes 统一研究工作台设计已经确认并记录在
+ `superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`。第一批工作被拆成
+ Hermes capability、candidate integrity/Gate 3、professional frontend/read-only shell
+-三份可独立验证的正式计划；当前状态是“计划已写、等待执行方式选择”，不是“代码已开始”。
+-原 Phase 1a-4 spec/plan 仅保留为历史输入；`2026-07-10-phase-1a-4-v2.md` 和完整 9H 计划
+-均是已完成记录，不得把其中的旧 deferred 条目自动升级为下一步。
++三份可独立验证的正式计划（已选 wave）。capability 合同与 0.18.2 证据在推进，但
++真实 Hermes chat mutation 未选中；chat/resume/approval/stop 仍 fail-closed，
++旧 `/api/agent/tasks` 不是 fallback。原 Phase 1a-4 spec/plan 仅保留为历史输入；
++`2026-07-10-phase-1a-4-v2.md` 和完整 9H 计划均是已完成记录，不得把其中的旧 deferred
++条目自动升级为下一步。
+ 
+ ### 历史审计
+ 
+ `audits/` 记录特定日期的发现和后续处置。审计中的未完成项、优先级和“下一步”只对
+ 该快照有效；当前状态回到本文件、当前交付记录、源码和测试核验。
+ 
+ ## 双仓职责与安全边界
+ 
+ - `Hermes-quant-agent`：编排、记忆、cron、通知、人机审批和 artifact-first 体验。
+ - `ai-quant-platform`：行情、因子、回测、期权、paper account、数据库和前端领域实现。
+diff --git a/docs/contracts/hermes-gateway-0.18.2.md b/docs/contracts/hermes-gateway-0.18.2.md
+new file mode 100644
+index 0000000..447d14f
+--- /dev/null
++++ b/docs/contracts/hermes-gateway-0.18.2.md
+@@ -0,0 +1,220 @@
++# Hermes gateway 0.18.2 capability evidence
++
++Observed 2026-07-13. This document is a local compatibility snapshot, not a
++promise about newer Hermes versions.
++
++Machine-readable twin:
++[`config/hermes-gateway-capabilities.v1.json`](../../config/hermes-gateway-capabilities.v1.json).
++Chat write admission remains fail-closed until
++`python -m hqa.hermes_capability_cli verify-chat` exits 0 against a
++Git-bound independent review record and a matching installation fingerprint.
++
++## Snapshot identity (live reconfirm)
++
++| Field | Value |
++|---|---|
++| Hermes version banner | `Hermes Agent v0.18.2 (2026.7.7.2) · upstream b03c94db` |
++| Plan-era upstream note | Implementation plan text recorded plan-era `e4ea0a0e`; **live reconfirm is `b03c94db`**. Snapshot truth for the checked-in contract is `b03c94db`. |
++| Source checkout commit | `4281151ae859241351ba14d8c7682dc67ff4c126` (unchanged vs plan/contract) |
++| `tui_gateway/server.py` SHA-256 | `2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17` (unchanged) |
++| Working tree (tracked) | clean (`git status --porcelain --untracked-files=no` empty) |
++| Transport / default endpoint | WebSocket JSON-RPC · `ws://127.0.0.1:9119` (`hermes serve --help`: host `127.0.0.1`, port `9119`) |
++
++## Reproduce without a model call
++
++Exact commands (read-only; no network model call):
++
++```bash
++hermes --version
++hermes serve --help
++git -C /Users/sunyibo/.hermes/hermes-agent rev-parse HEAD
++git -C /Users/sunyibo/.hermes/hermes-agent status \
++  --porcelain --untracked-files=no
++shasum -a 256 \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++rg -n '^@method\("(session|prompt|approval|config)' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++rg -n \
++  -e 'client_request|idempoten|request_correlation|request_lookup' \
++  -e 'run_id|event_id|event_cursor' \
++  -e 'requested_provider|actual_provider|fallback' \
++  -e 'approval.*(digest|ttl|expir|single)' \
++  -e 'interrupt.*(idempoten|reconcil)' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '1138,1152p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '4515,4610p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '5161,5304p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '5528,5680p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '8420,8525p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '8114,8170p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '10199,10315p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++```
++
++Record both matching and zero-result searches. A false capability means the
++specific create/submit/event/interrupt/approval/Run contract lacks the required
++semantic guarantee; it does not claim that a similarly named token is absent
++from unrelated billing, process, or internal implementation code.
++
++### Observed command results (2026-07-13 reconfirm)
++
++**`hermes --version`**
++
++```text
++Hermes Agent v0.18.2 (2026.7.7.2) · upstream b03c94db
++Install directory: /Users/sunyibo/.hermes/hermes-agent
++Install method: git
++Python: 3.11.15
++OpenAI SDK: 2.24.0
++```
++
++**`hermes serve --help`** (summary): JSON-RPC/WebSocket gateway; default
++`--host 127.0.0.1`, `--port 9119`; headless (no browser UI). Public bind always
++requires auth; loopback remains the supported local surface.
++
++**`git … rev-parse HEAD`**
++
++```text
++4281151ae859241351ba14d8c7682dc67ff4c126
++```
++
++**`git … status --porcelain --untracked-files=no`**
++
++```text
++(empty — clean tracked tree)
++```
++
++**`shasum -a 256 …/tui_gateway/server.py`**
++
++```text
++2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17  .../tui_gateway/server.py
++```
++
++**`rg -n '^@method\("(session|prompt|approval|config)' …/server.py`**
++— matching method registrations include (allowlisted subset for the contract
++shown in **bold**):
++
++| Line | Method |
++|---:|---|
++| 5161 | **session.create** |
++| 5307 | **session.list** |
++| 5353 | session.most_recent |
++| 5543 | **session.resume** |
++| 5913 | session.cwd.set |
++| 6070 | session.active_list |
++| 6108 | session.activate |
++| 6132 | session.delete |
++| 6174 | session.title |
++| 6475 | session.usage |
++| 6501 | session.context_breakdown |
++| 7759 | **session.status** |
++| 7816 | **session.history** |
++| 7839 | session.undo |
++| 7867 | session.compress |
++| 7963 | session.save |
++| 8018 | session.close |
++| 8030 | session.branch |
++| 8114 | **session.interrupt** |
++| 8383 | session.steer |
++| 8420 | **prompt.submit** |
++| 10004 | prompt.background |
++| 10199 | **approval.respond** |
++| 10224 | **config.set** |
++| 11181 | config.get |
++| 13811 | config.show |
++
++**`rg -n` recovery / identity / evidence patterns** — 84 total matching lines.
++Interpretation is **semantic**, not token-presence:
++
++| Pattern family | Observed in server.py? | Semantic note for D-31 contract |
++|---|---|---|
++| `client_request` | **0 matches** | No client request ID field on create/submit |
++| `request_correlation` | **0 matches** | No durable request-correlation metadata |
++| `request_lookup` | **0 matches** | No lookup-by-client-request API |
++| `run_id` | **0 matches** | No caller-supplied / immutable Run ID on submit |
++| `event_id` | **0 matches** | Events carry `type` + `session_id` only (see `_emit`) |
++| `event_cursor` | **0 matches** | No replay cursor contract |
++| `actual_provider` | **0 matches** | No immutable actual-provider evidence on Run |
++| `requested_provider` | Internal resolver only (~7 lines near agent build) | Not a create/submit request-recovery field; not bound to a Run evidence object |
++| `fallback` | Many internal uses (transport, title, provider chain, session lookup helpers) | **Not** an immutable session primary/fallback policy on the create contract; `_resolve_runtime_with_fallback` can walk a configured chain at agent build |
++| `idempoten*` | Session teardown, process cancel, **billing** `idempotency_key` | **Not** on `session.create` / `prompt.submit` |
++| `approval.*(digest\|ttl\|expir\|single)` | **0 matches** | `approval.respond` takes `choice` / `all` only |
++| `interrupt.*(idempoten\|reconcil)` | **0 matches** | `session.interrupt` clears turn flags; no Run-scoped idempotent reconcile |
++
++### Inspected line ranges (summary)
++
++- **`_emit` (1138–1152):** gateway events are JSON-RPC notifications
++  `method=event` with `params={type, session_id, payload?}` — no durable
++  `event_id` or cursor.
++- **Agent build / provider (4515–4610):** per-session `model_override` /
++  `provider_override` feed `_resolve_runtime_with_fallback`; primary provider
++  is not immutably locked at session create, and fallback is internal
++  resolution rather than a frozen session policy + Run evidence tuple.
++- **`session.create` (5161–5304):** accepts optional `model`/`provider` as a
++  per-session override; returns `session_id` / `stored_session_id` / lazy
++  `info`; no client idempotency key, request correlation, or Run ID.
++- **`session.resume` (5543+):** rebinds transport, may restore/build agent
++  (or lazy-register without agent); mutation surface, not authorized by
++  read-only chat.
++- **`prompt.submit` (8420–8525):** params are essentially `session_id`,
++  `text`, optional `truncate_before_user_ordinal`; returns
++  `{"status": "streaming"}`; no client request ID / Run ID / provider
++  evidence binding.
++- **`session.interrupt` (8114–8155):** cooperative interrupt + flag clear;
++  returns `{"status": "interrupted"}`; no Run-scoped idempotent
++  reconciliation handle.
++- **`approval.respond` (10199–10218):** `choice` default deny + optional
++  `all`; no command-digest, TTL, or single-use binding.
++- **`config.set` (10224+):** can switch session `model` (and thus provider)
++  when the session is not busy — primary policy remains unlocked after create.
++
++## Confirmed read surface
++
++session.list, session.status and session.history exist.
++
++## Stateful resume surface
++
++session.resume exists, but rebinds a transport and may restore/build an agent.
++It is a separately gated mutation and is not authorized by chat_read_enabled.
++
++## Confirmed mutation surface
++
++session.create, prompt.submit, session.interrupt, approval.respond and config.set
++exist. session.create accepts a per-session model/provider override; config.set
++can later switch the session model/provider, so the primary policy is not locked.
++
++## Missing recovery contract
++
++session.create and prompt.submit expose no client idempotency key, durable
++request-correlation metadata, lookup by client request ID or caller-supplied
++Run ID. The inspected session contract does not prove an immutable primary or
++fallback provider policy. Events have no
++durable event_id/cursor replay contract. The inspected turn output does not
++provide immutable requested/actual provider+model, fallback from/to/reason, and
++usage evidence bound to the same Run. approval.respond has no command-digest,
++TTL, or single-use binding; session.interrupt has no Run-scoped idempotent
++reconciliation contract.
++
++These gaps map to the checked-in contract `evidence` flags (all false except
++`session_provider_override=true`) and to the capability evaluator blocker codes
++`missing_request_recovery`, `missing_run_identity`,
++`missing_provider_policy_lock`, `missing_actual_provider_evidence`,
++`missing_event_replay` (plus `contract_unreviewed` until Task 4 review lands).
++They keep `chat_write_enabled` / `stream_enabled` false; the real Hermes chat
++mutation slice stays disabled until a newer observed contract and independent
++review say otherwise.
++
++## Admission rule
++
++A bridge implementation plan may be written only after a newly observed
++contract makes hqa.hermes_capability_cli verify-chat exit 0 with
++review.verdict=ready and installation.matches_snapshot=true. Until then the
++platform may display read-only/offline capability state, but session creation,
++session resume, prompt submit, streaming, approval and stop remain disabled. The old
++/api/agent/tasks endpoint is not a fallback.
+diff --git a/docs/superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md b/docs/superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md
+index 17693b4..df35cf2 100644
+--- a/docs/superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md
++++ b/docs/superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md
+@@ -687,21 +687,33 @@ CI/常规测试不得调用真实 Grok/Codex、不得外网、不得触发回测
+ - 不把 SSE 断线判成 Run 失败；
+ - 不让一个 Hermes Run 跨数日等待领域 Gate；
+ - 不保留旧手工研究表单作为绕过三 Gate 的旁路；
+ - 不因 UI 合并删除平台领域引擎、CLI、API、artifact 或安全链；
+ - 不在本阶段接入 paper/live 自动执行，也不改变 Phase 2/3 的授权边界。
+ 
+ ---
+ 
+ ## 14. 下一步
+ 
++The first implementation wave is split into three independently testable plans:
++gateway capability contract, candidate integrity/Gate 3, and professional
++frontend/read-only shell. The bridge/chat plan is admitted only when
++verify-chat returns ready against a Git-reviewed default contract and current
++installed Hermes evidence.
++
+ 1. 第一批正式计划已经拆为 Hermes gateway capability contract、candidate
+-   integrity/Gate 3、professional frontend/read-only shell 三个独立子系统；
++   integrity/Gate 3、professional frontend/read-only shell 三个独立子系统（已选
++   wave；真实 Hermes chat mutation 不在本波次）；
+ 2. 用户选择执行方式后，优先并行执行 capability/candidate 基线与专业前端 F0；
+ 3. F0、F1 都必须单独取得用户书面确认，candidate 真实数据 migration 也必须另行授权；
+ 4. 只有 capability evaluator 针对 Git 绑定、独立审查为 `ready` 的默认合同和当时干净安装态
+-   Hermes 返回 chat ready，才能根据真实合同另写 bridge/chat plan；不得提前实现或 fallback
+-   到旧 AgentRunner；
++   Hermes 返回 chat ready（`hqa.hermes_capability_cli verify-chat` exit 0，
++   `review.verdict=ready` 且 `installation.matches_snapshot=true`），才能根据真实合同
++   另写 bridge/chat plan；不得提前实现，也不得把旧 `/api/agent/tasks` 或 AgentRunner
++   当作 fallback；
+ 5. 后续 HQA Task/统一结果、受控研究/三 Gate、逐页切流、硬化删除仍按各自前置证据
+    just-in-time 写独立 implementation plan。
+ 
+-当前状态是“D-31 已批准、第一批计划已写、等待执行选择”，不是任何新生产能力已交付。
++当前状态是“D-31 已批准、第一批三计划已选为 wave、capability 合同与证据在推进，但
++chat 写端仍 fail-closed”，不是任何新 chat/execution 生产能力已交付。
++指纹与缺失语义以 `docs/contracts/hermes-gateway-0.18.2.md` 与
++`config/hermes-gateway-capabilities.v1.json` 为准。

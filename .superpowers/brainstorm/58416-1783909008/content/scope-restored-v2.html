@@ -1,0 +1,53 @@
+<h2>Hermes 工作台重做 · 已选择方案 B</h2>
+<p class="subtitle">四套旧页面体验全部重做进 Hermes；保留底层研究引擎、历史结果和不可绕过的人工审批门。</p>
+
+<div class="mockup" style="margin-top:24px">
+  <div class="mockup-header">目标结构预览</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:0.85fr 70px 1.45fr 70px 1fr;gap:14px;align-items:stretch">
+      <div style="padding:18px;border:1px solid var(--border);border-radius:14px;background:var(--surface-2)">
+        <div class="label">旧体验退场</div>
+        <h3 style="margin-top:8px">四个独立页面</h3>
+        <div style="display:grid;gap:8px;margin-top:14px">
+          <div style="padding:9px;border-radius:8px;background:var(--surface)">因子实验室</div>
+          <div style="padding:9px;border-radius:8px;background:var(--surface)">回测器</div>
+          <div style="padding:9px;border-radius:8px;background:var(--surface)">实验管理</div>
+          <div style="padding:9px;border-radius:8px;background:var(--surface)">智能体工作室</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;font-size:34px;color:var(--accent)">→</div>
+      <div style="padding:20px;border:2px solid var(--accent);border-radius:16px;background:linear-gradient(145deg,var(--surface),var(--surface-2))">
+        <div class="label">唯一研究入口</div>
+        <h3 style="margin-top:8px;font-size:24px">Hermes 工作台</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px">
+          <div style="padding:12px;border-radius:10px;background:rgba(139,92,246,.12)"><strong>对话与计划</strong><br><span style="font-size:12px;color:var(--muted)">直接和真实 Hermes 沟通</span></div>
+          <div style="padding:12px;border-radius:10px;background:rgba(59,130,246,.11)"><strong>任务与进度</strong><br><span style="font-size:12px;color:var(--muted)">一眼看懂正在做什么</span></div>
+          <div style="padding:12px;border-radius:10px;background:rgba(245,158,11,.11)"><strong>待我确认</strong><br><span style="font-size:12px;color:var(--muted)">命令审批与 Gate 1/2/3</span></div>
+          <div style="padding:12px;border-radius:10px;background:rgba(34,197,94,.11)"><strong>研究结果</strong><br><span style="font-size:12px;color:var(--muted)">因子、回测、实验、复盘</span></div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;font-size:34px;color:var(--accent)">→</div>
+      <div style="padding:18px;border:1px solid var(--border);border-radius:14px;background:var(--surface-2)">
+        <div class="label">能力继续存在</div>
+        <h3 style="margin-top:8px">新组件与下钻层</h3>
+        <ul style="margin-top:14px;display:grid;gap:10px;padding-left:18px">
+          <li>IC / 分位收益图表</li>
+          <li>回测曲线 / 成交 / 归因</li>
+          <li>实验比较 / holdout</li>
+          <li>候选源码 / 审计 / 审批</li>
+          <li>promotion diff 审查</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="cards" style="margin-top:24px;grid-template-columns:repeat(3,minmax(0,1fr))">
+  <div class="card"><div class="card-body"><div class="label">警告</div><h3>只保留顶部安全条</h3><p>移除 Hermes 内重复的大号“仅模拟”卡片。</p></div></div>
+  <div class="card"><div class="card-body"><div class="label">审批</div><h3>候选改成“待我确认”</h3><p>不再常驻空侧栏；有待办时才突出源码与审核。</p></div></div>
+  <div class="card"><div class="card-body"><div class="label">对话</div><h3>接入真实 Hermes</h3><p>由平台 BFF 安全代理 sessions、runs、SSE 与审批。</p></div></div>
+</div>
+
+<div style="margin-top:24px;padding:16px 18px;border:1px solid var(--accent);border-radius:12px;background:rgba(139,92,246,.08)">
+  <strong>当前等待确认：</strong>Hermes 是否同时取代现有平台默认首页。
+</div>

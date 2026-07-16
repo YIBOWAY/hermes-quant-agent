@@ -1,0 +1,69 @@
+<h2>Hermes 首页方案 · 可读大图版</h2>
+<p class="subtitle">每一版都占满页面宽度。请向下滚动比较；点击整张方案即可选择。</p>
+
+<div class="cards" style="grid-template-columns:1fr;gap:32px;margin-top:24px">
+  <div class="card" data-choice="adaptive-readable" onclick="toggleSelect(this)">
+    <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:24px">
+      <div><div class="letter">方案 1 · 推荐</div><h3 style="font-size:24px;margin-top:8px">自适应双状态</h3><p style="font-size:15px">平时是“今日 COO 概览”；一旦开始研究，中间区域切换为对话与结果画布。</p></div>
+      <div style="white-space:nowrap;color:var(--muted)">日常最清爽 · 任务空间最大</div>
+    </div>
+    <div class="card-image" style="padding:0;background:#111014;overflow:hidden">
+      <div style="height:40px;display:flex;align-items:center;justify-content:center;background:#211708;color:#f5a623;font-size:13px;font-weight:700;letter-spacing:.08em">仅模拟　·　实盘交易已禁用　·　熔断开关 开　·　接口 OK</div>
+      <div style="display:grid;grid-template-columns:190px minmax(0,1fr);min-height:560px">
+        <aside style="padding:22px 16px;border-right:1px solid #302d35;background:#151419;color:#9a949f">
+          <div style="font-size:22px;font-weight:800;color:#f3efe8">HERMES</div>
+          <div style="margin-top:28px;display:grid;gap:16px;font-size:14px"><strong style="color:#c2a7ff">今日概览</strong><span>对话与计划</span><span>任务记录</span><span>待我确认　<b style="color:#f6bd60">1</b></span><span>研究结果</span><span>系统设置</span></div>
+        </aside>
+        <main style="padding:30px 34px;min-width:0">
+          <div style="display:flex;justify-content:space-between;gap:20px;align-items:flex-start">
+            <div><div style="font-size:13px;color:#938d99">2026 年 7 月 13 日 · 今日</div><h3 style="font-size:30px;color:#f5f1e9;margin:8px 0 0">一切正常，1 件事等你确认</h3></div>
+            <div style="padding:9px 14px;border-radius:999px;background:#183624;color:#79dda0;font-size:14px">● 自动化 4/4 正常</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:24px">
+            <div style="padding:18px;border:1px solid #5d4727;border-radius:12px;background:#1d1914"><div style="color:#a99d8a;font-size:13px">待我确认</div><div style="font-size:30px;color:#f5c56b;margin-top:8px">1</div><div style="font-size:13px;color:#b7ac9d">因子源码 · Gate 2</div></div>
+            <div style="padding:18px;border:1px solid #304838;border-radius:12px;background:#171b18"><div style="color:#91a096;font-size:13px">机会复盘</div><div style="font-size:30px;color:#77d89b;margin-top:8px">0</div><div style="font-size:13px;color:#a9b3ad">59 个机会，零错过</div></div>
+            <div style="padding:18px;border:1px solid #353b50;border-radius:12px;background:#17191f"><div style="color:#9197aa;font-size:13px">组合风险</div><div style="font-size:25px;color:#dce2f2;margin-top:8px">AAPL</div><div style="font-size:13px;color:#a9adba">最大持仓 · $315.32</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:minmax(0,1.3fr) minmax(280px,.7fr);gap:14px;margin-top:16px">
+            <section style="padding:20px;border:1px solid #302d35;border-radius:12px;background:#18161c">
+              <div style="display:flex;justify-content:space-between"><strong style="font-size:17px;color:#eee9f2">最近动态</strong><span style="font-size:13px;color:#9b93a4">查看全部</span></div>
+              <div style="margin-top:16px;display:grid;gap:14px;font-size:14px;color:#cdc7d1"><div><b style="color:#75db9c">●</b> 每周复盘已生成 <span style="float:right;color:#85808a">09:00</span></div><div><b style="color:#8ea8ff">●</b> AAPL 风险快照已刷新 <span style="float:right;color:#85808a">08:25</span></div><div><b style="color:#b498ff">●</b> 市场推演等待确认 <span style="float:right;color:#85808a">昨天</span></div></div>
+            </section>
+            <section style="padding:20px;border:1px solid #5d4727;border-radius:12px;background:#1d1914"><strong style="font-size:17px;color:#f2d49a">待我确认</strong><div style="font-size:15px;color:#d3c6b1;margin-top:16px">动量反转因子</div><div style="font-size:13px;color:#918a80;margin-top:6px">审查候选源码与 audit</div><button style="margin-top:16px;width:100%;padding:10px;border:1px solid #886b39;border-radius:8px;background:#2a2113;color:#f4ce86">打开审批</button></section>
+          </div>
+          <div style="margin-top:16px;padding:16px 18px;border:1px solid #67528d;border-radius:14px;background:#17131f;color:#cfc0e8;font-size:15px">问 Hermes：解释这条因子，或设计新的研究计划… <span style="float:right;color:#bca0ff;font-weight:700">发送 ↑</span></div>
+          <div style="margin-top:12px;text-align:center;color:#8a8490;font-size:13px">发送后，中间内容平滑变为“对话 + 结果画布”；任务结束后回到本页。</div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="coo-readable" onclick="toggleSelect(this)">
+    <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:24px"><div><div class="letter">方案 2</div><h3 style="font-size:24px;margin-top:8px">固定 COO 首页</h3><p style="font-size:15px">页面结构永远不变：状态、待办、结果和底部对话。复杂内容用抽屉覆盖。</p></div><div style="white-space:nowrap;color:var(--muted)">最容易理解 · 状态切换最少</div></div>
+    <div class="card-image" style="padding:0;background:#111014;overflow:hidden">
+      <div style="height:40px;display:flex;align-items:center;justify-content:center;background:#211708;color:#f5a623;font-size:13px;font-weight:700">仅模拟　·　实盘交易已禁用　·　熔断开关 开　·　接口 OK</div>
+      <div style="min-height:560px;padding:30px 8%;background:#121116">
+        <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #302d35;padding-bottom:18px"><strong style="font-size:22px;color:#f3efe8">HERMES</strong><span style="color:#98919f;font-size:14px">今日　历史记录　设置</span></div>
+        <div style="margin-top:26px"><div style="font-size:13px;color:#938d99">早上好</div><h3 style="font-size:30px;color:#f5f1e9;margin:8px 0 0">今天只需要处理 1 件事</h3></div>
+        <section style="margin-top:22px;padding:20px;border:1px solid #654d29;border-radius:12px;background:#1d1914;display:flex;align-items:center;justify-content:space-between;gap:24px"><div><strong style="font-size:18px;color:#f2d49a">待我确认 · 动量反转因子源码</strong><div style="font-size:14px;color:#bdb09c;margin-top:8px">factor-momentum_20d_reversal · Gate 2 · pending</div></div><button style="padding:11px 18px;border:1px solid #886b39;border-radius:8px;background:#2a2113;color:#f4ce86">查看源码与审计</button></section>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px"><section style="padding:20px;border:1px solid #304838;border-radius:12px;background:#171b18"><strong style="font-size:18px;color:#e8eee9">系统正常</strong><div style="font-size:14px;color:#79dda0;margin-top:12px">自动化 4/4 · 无异常</div><div style="font-size:13px;color:#929a95;margin-top:8px">只有失败或陈旧时才显示任务详情</div></section><section style="padding:20px;border:1px solid #353b50;border-radius:12px;background:#17191f"><strong style="font-size:18px;color:#e8ebf3">本周摘要</strong><div style="font-size:14px;color:#cdd3e1;margin-top:12px">59 个机会 · 0 错过 · 5 条复盘确认</div><div style="font-size:13px;color:#9296a2;margin-top:8px">打开周报查看完整指标</div></section></div>
+        <section style="margin-top:16px;padding:20px;border:1px solid #302d35;border-radius:12px;background:#18161c"><div style="display:flex;justify-content:space-between"><strong style="font-size:18px;color:#eee9f2">研究结果</strong><span style="font-size:13px;color:#9992a0">查看全部</span></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px;color:#c9c4cd;font-size:14px"><div>组合风险日报<br><span style="color:#75db9c">可用</span></div><div>AAPL 市场推演<br><span style="color:#b498ff">待确认</span></div><div>2026-W28 周报<br><span style="color:#8ea8ff">打开</span></div></div></section>
+        <div style="margin-top:16px;padding:16px 18px;border:1px solid #67528d;border-radius:14px;background:#17131f;color:#cfc0e8;font-size:15px">和 Hermes 讨论研究计划… <span style="float:right;color:#bca0ff;font-weight:700">发送 ↑</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="conversation-readable" onclick="toggleSelect(this)">
+    <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:24px"><div><div class="letter">方案 3</div><h3 style="font-size:24px;margin-top:8px">对话优先工作室</h3><p style="font-size:15px">对话是中心；执行进度、审批和结果直接进入消息流。</p></div><div style="white-space:nowrap;color:var(--muted)">最像 Agent · 每日概览最弱</div></div>
+    <div class="card-image" style="padding:0;background:#111014;overflow:hidden">
+      <div style="height:40px;display:flex;align-items:center;justify-content:center;background:#211708;color:#f5a623;font-size:13px;font-weight:700">仅模拟　·　实盘交易已禁用　·　熔断开关 开　·　接口 OK</div>
+      <div style="display:grid;grid-template-columns:210px minmax(0,1fr) 310px;min-height:560px">
+        <aside style="padding:22px 16px;border-right:1px solid #302d35;background:#151419;color:#98929e"><strong style="font-size:22px;color:#f3efe8">HERMES</strong><button style="margin-top:24px;width:100%;padding:10px;border:1px solid #635078;border-radius:8px;background:#21192d;color:#d8c5f6">＋ 新研究</button><div style="margin-top:24px;display:grid;gap:16px;font-size:14px"><span>最近会话</span><strong style="color:#c7aff4">AAPL 风险与因子</strong><span>AVGO Put 研究</span><span>论文复现计划</span><span>审批待办　<b style="color:#f6bd60">1</b></span></div></aside>
+        <main style="padding:26px 30px;display:flex;flex-direction:column;min-width:0"><div><div style="font-size:13px;color:#938d99">研究会话</div><h3 style="font-size:26px;color:#f5f1e9;margin:7px 0 0">AAPL 风险与新因子计划</h3></div><div style="flex:1;margin-top:24px;display:grid;align-content:start;gap:16px;font-size:15px"><div style="justify-self:end;max-width:75%;padding:14px 16px;border-radius:13px;background:#2d2440;color:#eadffd">帮我评估最近组合风险，并设计下一项因子研究。</div><div style="max-width:82%;padding:14px 16px;border-radius:13px;background:#1b1920;color:#d6d0da;line-height:1.6">组合风险正常，AAPL 是最大持仓。建议验证“动量反转 × 流动性”假设；我会先检查已有因子与历史数据。</div><div style="padding:15px;border:1px solid #3c4964;border-radius:11px;background:#151923"><strong style="color:#91a8e8">执行记录 · 3 / 4</strong><div style="margin-top:9px;color:#aeb5c5;font-size:14px">✓ 读取风险快照　　✓ 检查因子目录　　◌ 生成研究计划</div></div><div style="padding:15px;border:1px solid #654d29;border-radius:11px;background:#1d1914"><strong style="color:#f2d49a">需要你的确认</strong><div style="margin-top:8px;color:#c8bba5">是否允许本次运行只读 data prices？</div><button style="margin-top:12px;padding:9px 14px;border:1px solid #886b39;border-radius:8px;background:#2a2113;color:#f4ce86">允许本次</button> <button style="padding:9px 14px;border:1px solid #4a454d;border-radius:8px;background:#18161c;color:#bbb4bf">拒绝</button></div></div><div style="margin-top:18px;padding:15px 17px;border:1px solid #67528d;border-radius:13px;background:#17131f;color:#cfc0e8">回复 Hermes… <span style="float:right;color:#bca0ff;font-weight:700">发送 ↑</span></div></main>
+        <aside style="padding:24px 18px;border-left:1px solid #302d35;background:#151419"><strong style="font-size:18px;color:#eee9f2">当前上下文</strong><div style="margin-top:24px;font-size:14px;color:#96909b">安全状态</div><div style="margin-top:6px;color:#79dda0">正常 · 仅模拟</div><div style="margin-top:24px;font-size:14px;color:#96909b">当前任务</div><div style="margin-top:6px;color:#9bb0ed">研究计划设计</div><div style="margin-top:24px;font-size:14px;color:#96909b">已生成产物</div><div style="margin-top:8px;display:grid;gap:9px;color:#cbc5cf;font-size:14px"><span>风险快照</span><span>候选假设</span><span>数据检查记录</span></div><div style="margin-top:24px;font-size:14px;color:#96909b">自动化</div><div style="margin-top:6px;color:#79dda0">4 / 4 正常</div></aside>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:28px;padding:18px;border:1px solid var(--accent);border-radius:12px;background:rgba(139,92,246,.08);font-size:16px"><strong>现在请重新比较：</strong>向下滚动看完三张大图，再点击最接近你想法的一版。上一次点击记录将忽略。</div>

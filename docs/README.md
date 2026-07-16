@@ -10,9 +10,10 @@
 
 | 层级 | 权威文档 | 当前含义 |
 |---|---|---|
-| 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 是当前产品主线。 |
+| 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`](superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md) | 3A、3B DONE；3C runtime 仍仅 reconcile-only，3C.1 workflow identity/payload/exact binding 已完成代码与隔离 PostgreSQL 验收、live migration 006 待单独授权；3D chat BLOCKED；3E-A 只读 Unified Results 已完成，完整 3E/cutover 仍关闭；3F 只有默认 OFF 的 Agent Studio 页面级机制。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。计划已接受，V0 implementation 尚未开始，公共写端仍 OFF。 |
+| Wave 3 前序交付记录 | [`superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`](superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md) | 3A/3B、reconcile-only 3C、3C.1 code acceptance、3E-A 与 3F mechanism 的历史交付证据和 blocker 输入；不是当前执行队列。 |
 | 本机 Hermes 集成决策 | [`design/2026-07-15-local-hermes-integration-decision.md`](design/2026-07-15-local-hermes-integration-decision.md) | 正式方向是 platform BFF → PostgreSQL durable ledger → deterministic HQA worker → official Hermes API；禁止 Hermes/LLM cron 空轮询。 |
 | 当前 Hermes 合同 | [`contracts/hermes-api-server-0.18.2.md`](contracts/hermes-api-server-0.18.2.md) | official API Server 的 health/capabilities/sessions/detail/messages 只读合同；chat/run/stream/approval/stop 全部 fail-closed。 |
 | 旧 TUI 合同 | [`contracts/hermes-gateway-0.18.2.md`](contracts/hermes-gateway-0.18.2.md) | 历史 WebSocket JSON-RPC 快照；当前 checkout/source 已漂移，不再匹配安装，不能用于准入。 |
@@ -25,12 +26,13 @@
 
 ## 一句话项目阶段
 
-**Phase 1a-4 / 9H 已收口；当前处于 D-31 Wave 3，真实 Hermes 已接通到“已有会话只读”层，
-平台 durable ledger/outbox 与 reconcile-only worker 底座也已落地；3C.1 的 HQA
-Task/Attempt、不可变 payload 与 exact command binding 已通过代码和隔离数据库验收，但尚未在
-live 数据库激活；3E-A 只读 Unified Results 已完成实现和本机验收，但网页仍不能向 Hermes
-提交对话。** 3D 受九项 live gateway
-blocker 阻断；完整 3E/cutover 与 3F 旧页退场也没有获得放行。
+**Phase 1a-4 / 9H 已收口；D-31 已交付真实 Hermes 会话只读、durable ledger、reconcile-only
+worker、3C.1 代码地基和 3E-A 只读 Unified Results。当前执行主线已由 D-32 收敛为真正 Agent
+v0.2 + 完整 `/hermes` Web Chat；公共网页写端仍关闭。** V0 将冻结最终 Interface、权威与
+ordinary turn / Research Task / Attempt / submission Command / Run cardinality。已发现当前 migration 006 的 `UNIQUE(task_id)` 与一个
+Task 多 Attempt 的目标冲突，因此不得继续按旧顺序单独 live apply 006；必须先完成 schema
+修正、migration guard 和独立复核。Discord 保持当前可用入口，但不是临时网页方案或 fallback；
+Discord/历史 session 在 Web 只读，网页写入只能新建或显式 fork 到新的 managed Hermes Session。
 
 ## D-31 当前事实
 
@@ -43,7 +45,7 @@ blocker 阻断；完整 3E/cutover 与 3F 旧页退场也没有获得放行。
 | Hermes official API session read | **DONE（代码 + 本机只读验收）** | 平台 BFF 能读真实 session list/detail/messages；浏览器不持有 Hermes key。 |
 | 3B durable ledger/outbox | **DONE（live DB 验收）** | migration 005 已 apply 并重复验证幂等；schema v1、五表、四个 append-only trigger，health `schema_ready=true`。 |
 | 3C deterministic worker | **FRAMEWORK DONE / reconcile-only** | 安装 wrapper `--once` 与 live `LISTEN/NOTIFY` 两周期通过；零 Hermes mutation/provider。 |
-| 3C.1 Task/Attempt + payload + exact binding | **CODE ACCEPTED / LIVE NOT ACTIVATED** | HQA append-only journal、projection/replay/CAS、content-addressed owner-only payload、跨权威 saga/reverse audit，以及平台 migration 006/bound-command primitive 已通过全量/目标/隔离 PostgreSQL 验收；live `quantplatform` 尚未 apply 006，worker 仍不 claim。 |
+| 3C.1 Task/Attempt + payload + exact binding | **FOUNDATION ACCEPTED / SCHEMA REVISION REQUIRED** | HQA append-only journal、projection/replay/CAS、payload、跨权威 saga/reverse audit 已代码验收；但 migration 006 的 `UNIQUE(task_id)` 不能支持 multi-Attempt research。live 未 apply；当前 runner 会重放旧 SQL，因此须修订未上线的 006 并重做完整验收，不能默认追加 007；worker 仍不 claim。 |
 | Browser Gate 2 mutation | **ROLLED BACK / OFF** | 初版会 refetch digest/status，违反 HQA Gate 1 exact binding 与 Gate 2 no-refetch；Approvals 当前只读。 |
 | Hermes chat/stream/resume/stop | **BLOCKED（九项 live blocker）** | 平台 ledger 不等于 upstream request recovery、Run/event/provider/approval/stop 语义已具备。 |
 | Unified Results 3E-A | **DONE（只读实现 + 本机验收）** | 统一索引、动态详情、权威源回链和 exact Run-link 投影已交付；不复制领域真相。独立 Hermes research Run 结果与 full cutover 仍受 3D/用户验收门阻断，`unifiedResultsCutoverAccepted=false`。 |
@@ -165,39 +167,48 @@ stop 不可对账。因此 3D 保持 **BLOCKED**。
 - HQA 已实现 `hqa-research-task prepare|submit|show|events|reconcile-binding|reconcile-payloads|audit-authorities`；prompt 仅经 strict JSON stdin 进入 owner-only、content-addressed payload authority，不进入 argv、journal、projection、stdout 或平台 binding。
 - 平台 migration 006 新增独立 workflow-binding schema，并以单事务写入 bound command、exact binding、version-1 event、outbox 与 `NOTIFY`；claim 在最终更新时重验 binding 和 expiry。
 - reverse authority audit 使用平台 read-only、repeatable-read NDJSON inventory，能够区分 consistent、awaiting binding、platform-only、缺失与 exact conflict；不会凭一侧猜回另一侧事实。
-- HQA 全量验收为 `816 passed, 2 skipped`；平台目标 PostgreSQL、CLI/unit、Ruff 与独立对抗复核均通过。跨仓隔离数据库实跑覆盖 `uninitialized`、`platform_only` 与真实 saga `consistent`，且没有 prompt/provider/model 泄漏或 Hermes/provider mutation。
+- 3C.1 当时的 HQA 全量验收为 `816 passed, 2 skipped`；这是历史 foundation evidence，不是
+  修订后 schema 或当前工作树的 fresh suite。平台当时的目标 PostgreSQL、CLI/unit、Ruff 与独立
+  对抗复核均通过；跨仓隔离数据库实跑覆盖 `uninitialized`、`platform_only` 与真实 saga
+  `consistent`，且没有 prompt/provider/model 泄漏或 Hermes/provider mutation。
 - live `quantplatform` 预检确认 migration 006 尚未存在，现有 Hermes command/event/outbox/run-link 均为零行。apply 前备份 `data/_runtime/db_backups/quantplatform-pre-006-20260716T051758Z.dump`（平台仓库内，SHA-256 `fc70a22f2aae6070d7de4256372e5d4fce7078a4a006dfd64fd6960136785c79`）已完成并通过独立临时库 restore 验证；**这不等于已获授权或已应用 migration 006**。
-- live 激活仍需用户对 migration 006 的单独授权；随后才可做 apply/幂等重放/readiness、HQA authority backup/restore drill 和服务/浏览器验收。即使 006 激活，现有 worker 仍只 reconcile，不会 claim/dispatch。
+- 后续复核发现 migration 006 的 `UNIQUE(task_id)` 把一个 Research Task 限制为一个 Command，
+  与 v0.2 multi-Attempt 模型冲突。原“先授权并 apply 006”的下一步已撤销：D-32 选择修订从未
+  live apply 的 006，并同步 schema meta/readiness/repository/claim/reverse audit/rollback/tests；
+  当前 replay-all runner 下不能默认追加 007。先完成 migration auto-apply guard、隔离数据库与独立复核，
+  然后才可重新请求一次明确 live migration 授权。即使修正后 apply，worker 也仍保持
+  reconcile-only，不能自动 claim/dispatch。
 
 ## 接下来按什么顺序做
 
-1. **Slice 3A：DONE。** official API session-read BFF 已交付并本机只读验收。
-2. **Slice 3B：DONE。** durable ledger/outbox 已完成 migration 005 与 live DB 验收。
-3. **Slice 3C：FRAMEWORK DONE / reconcile-only。** ledger claim/lease/heartbeat primitives
-   已验收；worker runtime 仅 LISTEN/NOTIFY、periodic scan 与 expired-lease reconcile，
-   不 claim queued command，Hermes mutation 仍关闭。
-4. **Slice 3C.1：CODE ACCEPTED / LIVE NOT ACTIVATED。** 先取得 migration 006 单独授权，
-   完成 live apply/readiness 与 HQA authority backup/restore drill；未完成前不创建真实任务，
-   完成后也仍不自动开放 worker claim 或 Hermes 写端。
-5. **Slice 3D：BLOCKED。** 九项 live gateway blocker、认证/CSRF、安全 review 和用户批准均不能
-   用平台本地 ledger 代替。
-6. **Slice 3E-A：DONE。** 只读统一索引/详情、权威回链与 exact provenance 已完成实现和
-   本机验收；独立 Hermes research Run 结果及 full cutover 仍受 3D 和用户验收门阻断。
-7. **Slice 3F：MECHANISM ONLY / DEFAULT OFF。** Agent Studio 已有页面级独立回滚开关，
-   但 exact-bound audit parity 和用户 cutover 批准未完成；Factor Lab、Backtester、
-   Experiments 在写任务有替代入口前保留。领域 API/CLI/engine 不删除。
+1. **V0 Interface/cardinality/authority freeze：NOT STARTED（计划/文档治理前置已完成）。**
+   冻结 `act/snapshot/follow`、ordinary turn 与 research action、三种不同 Domain Gate、
+   external/managed session、权威矩阵、Research Task 1:N Attempt、修订未上线 006 的方案和三仓
+   source/runtime manifest；V0 仍须 executable contract tests 才完成，当前零 live mutation。
+2. **V1 Stop-the-line baseline。** 第一项修复默认 auto migration；随后清零 standard
+   verify/offline build、transcript/DLP、APR/sample provenance 等 launch 基线。
+3. **V2 Hermes DurableRunAuthority 与 V3 HQA WorkflowAuthority。** 接口冻结后可并行；一个
+   解决 canonical Run/idempotency/replay/provider/approval/stop，另一个补完整 Task/Attempt/
+   payload/Gate/result lifecycle。只在隔离状态和 fake adapter 上开发。
+4. **V4 PostgreSQL schema/BFF/security。** 先完成代码、cardinality 与隔离 PostgreSQL
+   验收，再请求修正后 migration 的单独 live 授权；apply 后仍不开放 dispatch。
+5. **V5 supervised worker、V6 最终 Workspace UI、V7 decisions/results/two vertical
+   slices。** 所有切片只落最终架构，公共 Web Chat 保持 OFF。
+6. **V8 adversarial acceptance/release。** 两轮冷启动、独立 security review、真实用户验收
+   全绿后一次开放 Agent v0.2；legacy redirect 仍另行审批。
 
-不得从旧 1a-4 计划、历史 audit 或 unchecked checkbox 自行增加当前步骤。
+不得从旧 Wave 3、旧 1a-4、历史 audit 或 unchecked checkbox 自行增加/重排当前步骤。
 
 ## 阅读顺序
 
 1. 本文件：确定当前主线、已完成与明确关闭项。
-2. D-31 design spec：核对产品目标与安全模型。
-3. Wave 3 plan：只执行当前 slice；不要越过写端 Gate。
-4. local Hermes integration decision：核对 durable queue/worker 方案与禁止空轮询的边界。
-5. official API contract：核对当前安装身份、GET allowlist 与 provider 语义。
-6. Wave 2 audit / candidate plan：需要追溯 Gate 1/2/3 时再读。
-7. roadmap：核对长期阶段；历史计划只作证据，不作待办。
+2. Agent v0.2 plan：唯一 implementation backlog、顺序、Gate 与 DoD。
+3. D-31 design spec：核对产品目标与安全模型，不抽取旧候选顺序。
+4. Wave 3 predecessor record：只追溯已交付事实和 blocker，不执行旧下一步。
+5. local Hermes integration decision：核对 durable queue/worker 方案与禁止空轮询的边界。
+6. official API contract：核对当前安装身份、GET allowlist 与 provider 语义。
+7. Wave 2 audit / candidate plan：需要追溯 Gate 1/2/3 时再读。
+8. roadmap：核对长期阶段；历史计划只作证据，不作待办。
 
 ## 文档状态用词
 
@@ -212,11 +223,14 @@ stop 不可对账。因此 3D 保持 **BLOCKED**。
 计划 checkbox、旧测试计数和旧 PID 都不是当前事实源。每次交接至少重跑：
 `git status --short --branch`、目标测试、前后端 health、Hermes health/session GET 和真实浏览器路径。
 
-## 双仓职责与安全边界
+## 三仓职责与安全边界
 
 - `Hermes-quant-agent`：编排、记忆、cron、通知、三门 provenance 与 connector worker 物理入口；
   不复制平台 PostgreSQL command authority。
 - `ai-quant-platform`：行情、因子、回测、期权、paper account、PostgreSQL、BFF 与前端领域实现。
+- 本机 Hermes source/installed runtime：Session、Run、messages、durable Run event 与 actual
+  provider/approval/stop canonical facts。v0.2 开发须固定 source/install/process identity，在受控
+  branch/worktree 中实现；不能直接随手修改未知 live checkout。
 - Gate 1/2/3 与 Hermes command approval 互不替代；机会决策也不产生执行资格。
 - action 只按 exact platform signal/execution IDs 关联；ticker/symbol 相似不是因果证明。
 - 不绕过 `paper_trading`、`live_trading_enabled=false`、kill switch 或人工审批门。

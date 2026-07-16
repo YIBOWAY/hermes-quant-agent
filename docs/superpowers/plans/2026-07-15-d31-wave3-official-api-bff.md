@@ -1,6 +1,14 @@
 # D-31 Wave 3 — Official API BFF、持久任务桥、统一 Results 与旧页退场
 
-> **状态（2026-07-16）：PARTIAL。** Slice 3A「official API session-read BFF」已交付；3B
+> **计划角色更新（2026-07-16）：PREDECESSOR DELIVERY RECORD。** 本文件保留 3A/3B、
+> reconcile-only 3C、3C.1 foundation、3E-A 和 3F mechanism 的交付事实及九项 blocker 输入，
+> 但不再维护 active backlog，也不得从下面的旧顺序/checkbox 推导下一步。唯一当前计划是
+> [`2026-07-16-agent-v0-2-full-hermes-web-chat.md`](2026-07-16-agent-v0-2-full-hermes-web-chat.md)。
+> 后续复核发现尚未 live apply 的 migration 006 之 `UNIQUE(task_id)` 与 multi-Attempt
+> research 冲突；本文件早先“先授权/apply 006”的表述已被新计划撤销。当前 runner 会重放
+> 旧 SQL，D-32 选择修订未上线的 006 并重做证据，不能默认追加 007。
+
+> **状态（2026-07-16）：HISTORICAL PARTIAL。** Slice 3A「official API session-read BFF」已交付；3B
 > durable ledger/outbox 已完成数据库实装，3C deterministic worker 框架也已完成本机
 > reconcile-only 验收。3C.1 workflow identity、payload authority、exact binding 与双向 authority
 > audit 已完成代码、全量测试、对抗复核和隔离 PostgreSQL 验收；live migration 006 尚待单独
@@ -347,7 +355,8 @@ dispatch。当前工作树已经覆盖：
 
 - **代码与 hermetic 验收：ACCEPT。** HQA append-only journal/projection/replay/CAS、owner-only
   content-addressed payload、strict JSON stdin、跨权威 forward saga/reverse audit 已实现；HQA
-  full suite 为 `816 passed, 2 skipped`，独立 reviewer 未发现 P0–P2。
+  当时的 full suite 为 `816 passed, 2 skipped`，独立 reviewer 未发现 P0–P2；该计数是历史
+  3C.1 foundation evidence，不代表修订后 schema 或当前工作树的 fresh suite。
 - **平台与隔离 PostgreSQL：ACCEPT。** additive migration 006、bound-command 原子 primitive、
   binding-aware claim、schema readiness、read-only repeatable-read inventory 与 CLI 已通过目标
   PostgreSQL/CLI/unit/Ruff/对抗验收；migration 005 bytes 保持不变。

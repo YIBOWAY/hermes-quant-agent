@@ -1,0 +1,1718 @@
+# Review package: 2939c0487268acc0546e999b26b55d49dbebdae8..HEAD
+
+## Commits
+c767b75 docs(hermes): freeze gateway contract and chat admission gate
+34713d8 feat(hqa): expose Hermes chat readiness as strict JSON
+1b461ef feat(hqa): add fail-closed Hermes gateway capability contract
+
+## Files changed
+ config/hermes-gateway-capabilities.v1.json         |  39 ++
+ docs/README.md                                     |  34 +-
+ docs/contracts/hermes-gateway-0.18.2.md            | 220 +++++++++++
+ ...-13-hermes-unified-research-workbench-design.md |  20 +-
+ hqa/config.py                                      |  18 +
+ hqa/hermes_capabilities.py                         | 230 +++++++++++
+ hqa/hermes_capability_cli.py                       | 317 +++++++++++++++
+ tests/test_hermes_capabilities.py                  | 234 +++++++++++
+ tests/test_hermes_capability_cli.py                | 436 +++++++++++++++++++++
+ 9 files changed, 1533 insertions(+), 15 deletions(-)
+
+## Diff
+diff --git a/config/hermes-gateway-capabilities.v1.json b/config/hermes-gateway-capabilities.v1.json
+new file mode 100644
+index 0000000..4571a23
+--- /dev/null
++++ b/config/hermes-gateway-capabilities.v1.json
+@@ -0,0 +1,39 @@
++{
++  "schema_version": "1.0",
++  "observed_at": "2026-07-13T09:13:45Z",
++  "hermes_version": "0.18.2",
++  "upstream_commit": "b03c94db",
++  "source_checkout_commit": "4281151ae859241351ba14d8c7682dc67ff4c126",
++  "server_source_sha256": "2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17",
++  "transport": "websocket_jsonrpc",
++  "endpoint": "ws://127.0.0.1:9119/api/ws",
++  "loopback_only": true,
++  "relevant_methods_observed": [
++    "approval.respond",
++    "config.set",
++    "prompt.submit",
++    "session.create",
++    "session.history",
++    "session.interrupt",
++    "session.list",
++    "session.resume",
++    "session.status"
++  ],
++  "evidence": {
++    "session_provider_override": true,
++    "session_primary_provider_policy_immutable": false,
++    "session_provider_fallback_policy_immutable": false,
++    "client_idempotency_key": false,
++    "request_correlation_metadata": false,
++    "request_lookup_by_client_id": false,
++    "run_id": false,
++    "event_id": false,
++    "event_cursor": false,
++    "run_provider_evidence": false,
++    "approval_command_digest_binding": false,
++    "approval_ttl": false,
++    "approval_single_use": false,
++    "stop_idempotent": false,
++    "stop_reconcilable": false
++  }
++}
+diff --git a/docs/README.md b/docs/README.md
+index c96c78e..e605fcb 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -6,23 +6,23 @@ plan、audit 和 git history 中。
+ 
+ > 事实快照：2026-07-13。状态变化后优先更新本文件和对应交付记录，不要在
+ > `AGENTS.md` 追加开发流水账。
+ 
+ ## 当前唯一执行入口
+ 
+ | 层级 | 权威文档 | 当前含义 |
+ |---|---|---|
+ | 产品方向 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；平台是领域后端。该 roadmap 管长期阶段、决策与安全门。 |
+ | 已批准下一产品设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | D-31：`/hermes` 成为默认首页，真实连接本地 Hermes，并逐步吞并 factor-lab、backtest、experiments、agent-studio 的页面体验。 |
+-| 第一批正式计划：Hermes 合同 | [`superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md`](superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md) | 将本机 Hermes 0.18.2 的 WebSocket JSON-RPC 能力、Git 绑定独立审查和安装指纹冻结为 fail-closed 合同；当前缺少 request recovery、Run identity、event replay、immutable provider/fallback policy 和 actual-provider evidence，所以真实 chat/resume 写端继续关闭。 |
+-| 第一批正式计划：候选安全 | [`superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md`](superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md) | 统一 candidate root，交付 immutable manifest、Gate 2 digest/CAS、legacy_unbound、最后读取再校验与隔离 Gate 3 worktree。 |
+-| 第一批正式计划：专业前端 | [`superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md`](superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md) | 先做专业 F0/F1 并分别取得用户书面确认，再实现 F2 只读新壳和可回滚默认首页；不开放 chat/execution/旧页 redirect。 |
++| 第一批正式计划：Hermes 合同（已选 wave） | [`superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md`](superpowers/plans/2026-07-13-hermes-gateway-capability-contract.md) | 将本机 Hermes 0.18.2 的 WebSocket JSON-RPC 能力、Git 绑定独立审查和安装指纹冻结为 fail-closed 合同；证据见 [`contracts/hermes-gateway-0.18.2.md`](contracts/hermes-gateway-0.18.2.md)。当前缺少 request recovery、Run identity、event replay、immutable provider/fallback policy 和 actual-provider evidence，所以真实 chat/resume 写端继续关闭。 |
++| 第一批正式计划：候选安全（已选 wave） | [`superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md`](superpowers/plans/2026-07-13-candidate-integrity-and-gate3.md) | 统一 candidate root，交付 immutable manifest、Gate 2 digest/CAS、legacy_unbound、最后读取再校验与隔离 Gate 3 worktree。 |
++| 第一批正式计划：专业前端（已选 wave） | [`superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md`](superpowers/plans/2026-07-13-hermes-professional-frontend-shell.md) | 先做专业 F0/F1 并分别取得用户书面确认，再实现 F2 只读新壳和可回滚默认首页；不开放 chat/execution/旧页 redirect。 |
+ | 已完成实现记录 | [`superpowers/plans/2026-07-10-phase-1a-4-v2.md`](superpowers/plans/2026-07-10-phase-1a-4-v2.md) | Phase 1a-4 v2 的 Slice 9A-9H 已全部完成；其中“没有下一 slice”仅是该交付完成时的历史状态，不代表当前 D-31 计划状态。 |
+ | 当前交付记录 | [`superpowers/plans/2026-07-12-full-9h-automation-notifications.md`](superpowers/plans/2026-07-12-full-9h-automation-notifications.md) | 完整 9H 的只读自动化、周复盘、freshness、feed 1.1、页面可见性、local 通知与四个 Hermes cron 的代码交付和运行验收。 |
+ | 前序交付记录 | [`superpowers/plans/2026-07-12-slice-9g-opportunity-ledger.md`](superpowers/plans/2026-07-12-slice-9g-opportunity-ledger.md) | 9G 稳定 signal identity、decision/action ledger、精确平台行动关联与 missed 安全判定。 |
+ | 更早交付记录 | [`superpowers/plans/2026-07-12-slice-9f-mini-9h.md`](superpowers/plans/2026-07-12-slice-9f-mini-9h.md) | 9F proposal-only 市场推演和 mini 9H `/hermes` 三源只读产物架。 |
+ | 前序实现 | `/Users/sunyibo/programs/ai-quant-platform/docs/superpowers/plans/2026-07-08-frontend-redesign-hermes-integration.md` | Slice 0-8 的权威实现与验收记录；只作为 D-31 的现状/parity inventory，不再提供可直接执行的后续 backlog。 |
+ | 被替代计划 | [`superpowers/plans/2026-07-07-phase-1a-4-research-employees.md`](superpowers/plans/2026-07-07-phase-1a-4-research-employees.md) | 产品目标保留，implementation plan 已由 v2 重排计划替代，不得原样执行。 |
+ | 历史素材 | `ai-quant-platform/docs/phases/phase_15_iteration_roadmap.md`、两仓旧 phase/plan/audit | 只提供设计与验收证据，不得自行成为下一步。 |
+ 
+ Phase 1a-4 v2 已完整交付到 9H。最终 HQA 门禁为 `530 passed, 2 skipped`；
+ `hqa-full-9h-daily-close`、`hqa-full-9h-freshness`、`hqa-full-9h-weekly` 和
+@@ -30,25 +30,35 @@ Phase 1a-4 v2 已完整交付到 9H。最终 HQA 门禁为 `530 passed, 2 skippe
+ 报告 `ok`。feed schema 1.1 精确包含六源，`/hermes` 已可见 weekly、opportunity 和
+ automation，并保留风险、预测与市场推演三类卡片。
+ 
+ 真实 options artifact 的 59 个阈值信号仍全部诚实保持 `not_actionable`，最终为
+ `59 not_actionable / 0 missed`。通知默认 target 是 local，运行验收没有实际外发 Discord。
+ 本交付未触发策略、回测、paper mutation、broker 或交易，也没有为完整 9H 新增平台数据库
+ migration/table。
+ 
+ Git、远端和运行进程是易变状态，不在本入口维护“ahead/dirty/尚未推送”快照。每次交接
+ 都应以 `git status --short --branch`、`git log`、`curl /api/health` 和对应测试重新核验。
+-下一产品设计已经通过 D-31 单独确认，三份第一批正式 implementation plan 已按 2026-07-13
+-源码事实写成，但尚未开始执行。下一步由用户在 subagent-driven 与 inline execution 中选择；
+-不得从旧 1a-4 模板、旧前端 P2/P3 或历史 audit 自行增加施工步骤。真实 Hermes chat
+-mutation 不是已选 slice：只有 capability plan 的 `verify-chat` 针对已提交、独立审查为
+-`ready` 的默认合同和当时干净安装态证据返回 ready，才能另写 bridge/chat implementation plan。
++下一产品设计已经通过 D-31 单独确认。**第一批已选 wave** 是三份独立可测计划：Hermes
++gateway capability contract、candidate integrity/Gate 3、professional frontend/read-only
++shell。不得从旧 1a-4 模板、旧前端 P2/P3 或历史 audit 自行增加施工步骤。
++
++The real Hermes chat mutation slice is not selected. The fingerprinted Hermes
++0.18.2 installation exposes the
++needed JSON-RPC method names but does not yet satisfy D-31 request-recovery,
++event-replay, Run identity, immutable session provider/fallback policy, or
++actual-provider evidence. The checked-in capability evaluator and Git-bound
++independent review therefore keep chat/resume/approval/stop disabled.
++
++只有 capability plan 的 `verify-chat` 针对已提交、独立审查为 `ready` 的默认合同和当时
++干净安装态证据返回 ready（`review.verdict=ready` 且
++`installation.matches_snapshot=true`），才能另写 bridge/chat implementation plan。
++旧 `/api/agent/tasks` / AgentRunner **不是** fallback。
+ 
+ ## 状态用词
+ 
+ - **已实现**：代码存在，但可能仍在工作树中。
+ - **已提交**：本地 commit 存在。
+ - **已推送**：远端分支已包含该 commit。
+ - **代码交付**：实现和约定测试已完成；不自动等于真实运营验收。
+ - **运行验收**：当前进程已重启到目标代码，并用真实本地依赖完成 smoke/E2E。
+ - **排队**：设计可以保留，但不得被 agent 当作当前实现指令。
+ - **历史快照**：只描述某一日期的事实，不承担当前状态维护职责。
+@@ -84,23 +94,25 @@ mutation 不是已选 slice：只有 capability plan 的 `verify-chat` 针对已
+ 
+ `plans/2026-07-01-phase-0a-*`、`phase-0b-*`、`phase-1a-0-*`、
+ `phase-1a-1-*`、`phase-1a-2-*`、`phase-1a-3-*` 和 D-25 文档用于追溯设计、
+ 测试与边界；它们不是当前待办清单。某些 checkbox 没有回填，不应据此反推代码不存在。
+ 
+ ### 已批准设计、第一批正式计划待执行
+ 
+ Hermes 统一研究工作台设计已经确认并记录在
+ `superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`。第一批工作被拆成
+ Hermes capability、candidate integrity/Gate 3、professional frontend/read-only shell
+-三份可独立验证的正式计划；当前状态是“计划已写、等待执行方式选择”，不是“代码已开始”。
+-原 Phase 1a-4 spec/plan 仅保留为历史输入；`2026-07-10-phase-1a-4-v2.md` 和完整 9H 计划
+-均是已完成记录，不得把其中的旧 deferred 条目自动升级为下一步。
++三份可独立验证的正式计划（已选 wave）。capability 合同与 0.18.2 证据在推进，但
++真实 Hermes chat mutation 未选中；chat/resume/approval/stop 仍 fail-closed，
++旧 `/api/agent/tasks` 不是 fallback。原 Phase 1a-4 spec/plan 仅保留为历史输入；
++`2026-07-10-phase-1a-4-v2.md` 和完整 9H 计划均是已完成记录，不得把其中的旧 deferred
++条目自动升级为下一步。
+ 
+ ### 历史审计
+ 
+ `audits/` 记录特定日期的发现和后续处置。审计中的未完成项、优先级和“下一步”只对
+ 该快照有效；当前状态回到本文件、当前交付记录、源码和测试核验。
+ 
+ ## 双仓职责与安全边界
+ 
+ - `Hermes-quant-agent`：编排、记忆、cron、通知、人机审批和 artifact-first 体验。
+ - `ai-quant-platform`：行情、因子、回测、期权、paper account、数据库和前端领域实现。
+diff --git a/docs/contracts/hermes-gateway-0.18.2.md b/docs/contracts/hermes-gateway-0.18.2.md
+new file mode 100644
+index 0000000..447d14f
+--- /dev/null
++++ b/docs/contracts/hermes-gateway-0.18.2.md
+@@ -0,0 +1,220 @@
++# Hermes gateway 0.18.2 capability evidence
++
++Observed 2026-07-13. This document is a local compatibility snapshot, not a
++promise about newer Hermes versions.
++
++Machine-readable twin:
++[`config/hermes-gateway-capabilities.v1.json`](../../config/hermes-gateway-capabilities.v1.json).
++Chat write admission remains fail-closed until
++`python -m hqa.hermes_capability_cli verify-chat` exits 0 against a
++Git-bound independent review record and a matching installation fingerprint.
++
++## Snapshot identity (live reconfirm)
++
++| Field | Value |
++|---|---|
++| Hermes version banner | `Hermes Agent v0.18.2 (2026.7.7.2) · upstream b03c94db` |
++| Plan-era upstream note | Implementation plan text recorded plan-era `e4ea0a0e`; **live reconfirm is `b03c94db`**. Snapshot truth for the checked-in contract is `b03c94db`. |
++| Source checkout commit | `4281151ae859241351ba14d8c7682dc67ff4c126` (unchanged vs plan/contract) |
++| `tui_gateway/server.py` SHA-256 | `2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17` (unchanged) |
++| Working tree (tracked) | clean (`git status --porcelain --untracked-files=no` empty) |
++| Transport / default endpoint | WebSocket JSON-RPC · `ws://127.0.0.1:9119` (`hermes serve --help`: host `127.0.0.1`, port `9119`) |
++
++## Reproduce without a model call
++
++Exact commands (read-only; no network model call):
++
++```bash
++hermes --version
++hermes serve --help
++git -C /Users/sunyibo/.hermes/hermes-agent rev-parse HEAD
++git -C /Users/sunyibo/.hermes/hermes-agent status \
++  --porcelain --untracked-files=no
++shasum -a 256 \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++rg -n '^@method\("(session|prompt|approval|config)' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++rg -n \
++  -e 'client_request|idempoten|request_correlation|request_lookup' \
++  -e 'run_id|event_id|event_cursor' \
++  -e 'requested_provider|actual_provider|fallback' \
++  -e 'approval.*(digest|ttl|expir|single)' \
++  -e 'interrupt.*(idempoten|reconcil)' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '1138,1152p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '4515,4610p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '5161,5304p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '5528,5680p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '8420,8525p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '8114,8170p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++sed -n '10199,10315p' \
++  /Users/sunyibo/.hermes/hermes-agent/tui_gateway/server.py
++```
++
++Record both matching and zero-result searches. A false capability means the
++specific create/submit/event/interrupt/approval/Run contract lacks the required
++semantic guarantee; it does not claim that a similarly named token is absent
++from unrelated billing, process, or internal implementation code.
++
++### Observed command results (2026-07-13 reconfirm)
++
++**`hermes --version`**
++
++```text
++Hermes Agent v0.18.2 (2026.7.7.2) · upstream b03c94db
++Install directory: /Users/sunyibo/.hermes/hermes-agent
++Install method: git
++Python: 3.11.15
++OpenAI SDK: 2.24.0
++```
++
++**`hermes serve --help`** (summary): JSON-RPC/WebSocket gateway; default
++`--host 127.0.0.1`, `--port 9119`; headless (no browser UI). Public bind always
++requires auth; loopback remains the supported local surface.
++
++**`git … rev-parse HEAD`**
++
++```text
++4281151ae859241351ba14d8c7682dc67ff4c126
++```
++
++**`git … status --porcelain --untracked-files=no`**
++
++```text
++(empty — clean tracked tree)
++```
++
++**`shasum -a 256 …/tui_gateway/server.py`**
++
++```text
++2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17  .../tui_gateway/server.py
++```
++
++**`rg -n '^@method\("(session|prompt|approval|config)' …/server.py`**
++— matching method registrations include (allowlisted subset for the contract
++shown in **bold**):
++
++| Line | Method |
++|---:|---|
++| 5161 | **session.create** |
++| 5307 | **session.list** |
++| 5353 | session.most_recent |
++| 5543 | **session.resume** |
++| 5913 | session.cwd.set |
++| 6070 | session.active_list |
++| 6108 | session.activate |
++| 6132 | session.delete |
++| 6174 | session.title |
++| 6475 | session.usage |
++| 6501 | session.context_breakdown |
++| 7759 | **session.status** |
++| 7816 | **session.history** |
++| 7839 | session.undo |
++| 7867 | session.compress |
++| 7963 | session.save |
++| 8018 | session.close |
++| 8030 | session.branch |
++| 8114 | **session.interrupt** |
++| 8383 | session.steer |
++| 8420 | **prompt.submit** |
++| 10004 | prompt.background |
++| 10199 | **approval.respond** |
++| 10224 | **config.set** |
++| 11181 | config.get |
++| 13811 | config.show |
++
++**`rg -n` recovery / identity / evidence patterns** — 84 total matching lines.
++Interpretation is **semantic**, not token-presence:
++
++| Pattern family | Observed in server.py? | Semantic note for D-31 contract |
++|---|---|---|
++| `client_request` | **0 matches** | No client request ID field on create/submit |
++| `request_correlation` | **0 matches** | No durable request-correlation metadata |
++| `request_lookup` | **0 matches** | No lookup-by-client-request API |
++| `run_id` | **0 matches** | No caller-supplied / immutable Run ID on submit |
++| `event_id` | **0 matches** | Events carry `type` + `session_id` only (see `_emit`) |
++| `event_cursor` | **0 matches** | No replay cursor contract |
++| `actual_provider` | **0 matches** | No immutable actual-provider evidence on Run |
++| `requested_provider` | Internal resolver only (~7 lines near agent build) | Not a create/submit request-recovery field; not bound to a Run evidence object |
++| `fallback` | Many internal uses (transport, title, provider chain, session lookup helpers) | **Not** an immutable session primary/fallback policy on the create contract; `_resolve_runtime_with_fallback` can walk a configured chain at agent build |
++| `idempoten*` | Session teardown, process cancel, **billing** `idempotency_key` | **Not** on `session.create` / `prompt.submit` |
++| `approval.*(digest\|ttl\|expir\|single)` | **0 matches** | `approval.respond` takes `choice` / `all` only |
++| `interrupt.*(idempoten\|reconcil)` | **0 matches** | `session.interrupt` clears turn flags; no Run-scoped idempotent reconcile |
++
++### Inspected line ranges (summary)
++
++- **`_emit` (1138–1152):** gateway events are JSON-RPC notifications
++  `method=event` with `params={type, session_id, payload?}` — no durable
++  `event_id` or cursor.
++- **Agent build / provider (4515–4610):** per-session `model_override` /
++  `provider_override` feed `_resolve_runtime_with_fallback`; primary provider
++  is not immutably locked at session create, and fallback is internal
++  resolution rather than a frozen session policy + Run evidence tuple.
++- **`session.create` (5161–5304):** accepts optional `model`/`provider` as a
++  per-session override; returns `session_id` / `stored_session_id` / lazy
++  `info`; no client idempotency key, request correlation, or Run ID.
++- **`session.resume` (5543+):** rebinds transport, may restore/build agent
++  (or lazy-register without agent); mutation surface, not authorized by
++  read-only chat.
++- **`prompt.submit` (8420–8525):** params are essentially `session_id`,
++  `text`, optional `truncate_before_user_ordinal`; returns
++  `{"status": "streaming"}`; no client request ID / Run ID / provider
++  evidence binding.
++- **`session.interrupt` (8114–8155):** cooperative interrupt + flag clear;
++  returns `{"status": "interrupted"}`; no Run-scoped idempotent
++  reconciliation handle.
++- **`approval.respond` (10199–10218):** `choice` default deny + optional
++  `all`; no command-digest, TTL, or single-use binding.
++- **`config.set` (10224+):** can switch session `model` (and thus provider)
++  when the session is not busy — primary policy remains unlocked after create.
++
++## Confirmed read surface
++
++session.list, session.status and session.history exist.
++
++## Stateful resume surface
++
++session.resume exists, but rebinds a transport and may restore/build an agent.
++It is a separately gated mutation and is not authorized by chat_read_enabled.
++
++## Confirmed mutation surface
++
++session.create, prompt.submit, session.interrupt, approval.respond and config.set
++exist. session.create accepts a per-session model/provider override; config.set
++can later switch the session model/provider, so the primary policy is not locked.
++
++## Missing recovery contract
++
++session.create and prompt.submit expose no client idempotency key, durable
++request-correlation metadata, lookup by client request ID or caller-supplied
++Run ID. The inspected session contract does not prove an immutable primary or
++fallback provider policy. Events have no
++durable event_id/cursor replay contract. The inspected turn output does not
++provide immutable requested/actual provider+model, fallback from/to/reason, and
++usage evidence bound to the same Run. approval.respond has no command-digest,
++TTL, or single-use binding; session.interrupt has no Run-scoped idempotent
++reconciliation contract.
++
++These gaps map to the checked-in contract `evidence` flags (all false except
++`session_provider_override=true`) and to the capability evaluator blocker codes
++`missing_request_recovery`, `missing_run_identity`,
++`missing_provider_policy_lock`, `missing_actual_provider_evidence`,
++`missing_event_replay` (plus `contract_unreviewed` until Task 4 review lands).
++They keep `chat_write_enabled` / `stream_enabled` false; the real Hermes chat
++mutation slice stays disabled until a newer observed contract and independent
++review say otherwise.
++
++## Admission rule
++
++A bridge implementation plan may be written only after a newly observed
++contract makes hqa.hermes_capability_cli verify-chat exit 0 with
++review.verdict=ready and installation.matches_snapshot=true. Until then the
++platform may display read-only/offline capability state, but session creation,
++session resume, prompt submit, streaming, approval and stop remain disabled. The old
++/api/agent/tasks endpoint is not a fallback.
+diff --git a/docs/superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md b/docs/superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md
+index 17693b4..df35cf2 100644
+--- a/docs/superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md
++++ b/docs/superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md
+@@ -687,21 +687,33 @@ CI/常规测试不得调用真实 Grok/Codex、不得外网、不得触发回测
+ - 不把 SSE 断线判成 Run 失败；
+ - 不让一个 Hermes Run 跨数日等待领域 Gate；
+ - 不保留旧手工研究表单作为绕过三 Gate 的旁路；
+ - 不因 UI 合并删除平台领域引擎、CLI、API、artifact 或安全链；
+ - 不在本阶段接入 paper/live 自动执行，也不改变 Phase 2/3 的授权边界。
+ 
+ ---
+ 
+ ## 14. 下一步
+ 
++The first implementation wave is split into three independently testable plans:
++gateway capability contract, candidate integrity/Gate 3, and professional
++frontend/read-only shell. The bridge/chat plan is admitted only when
++verify-chat returns ready against a Git-reviewed default contract and current
++installed Hermes evidence.
++
+ 1. 第一批正式计划已经拆为 Hermes gateway capability contract、candidate
+-   integrity/Gate 3、professional frontend/read-only shell 三个独立子系统；
++   integrity/Gate 3、professional frontend/read-only shell 三个独立子系统（已选
++   wave；真实 Hermes chat mutation 不在本波次）；
+ 2. 用户选择执行方式后，优先并行执行 capability/candidate 基线与专业前端 F0；
+ 3. F0、F1 都必须单独取得用户书面确认，candidate 真实数据 migration 也必须另行授权；
+ 4. 只有 capability evaluator 针对 Git 绑定、独立审查为 `ready` 的默认合同和当时干净安装态
+-   Hermes 返回 chat ready，才能根据真实合同另写 bridge/chat plan；不得提前实现或 fallback
+-   到旧 AgentRunner；
++   Hermes 返回 chat ready（`hqa.hermes_capability_cli verify-chat` exit 0，
++   `review.verdict=ready` 且 `installation.matches_snapshot=true`），才能根据真实合同
++   另写 bridge/chat plan；不得提前实现，也不得把旧 `/api/agent/tasks` 或 AgentRunner
++   当作 fallback；
+ 5. 后续 HQA Task/统一结果、受控研究/三 Gate、逐页切流、硬化删除仍按各自前置证据
+    just-in-time 写独立 implementation plan。
+ 
+-当前状态是“D-31 已批准、第一批计划已写、等待执行选择”，不是任何新生产能力已交付。
++当前状态是“D-31 已批准、第一批三计划已选为 wave、capability 合同与证据在推进，但
++chat 写端仍 fail-closed”，不是任何新 chat/execution 生产能力已交付。
++指纹与缺失语义以 `docs/contracts/hermes-gateway-0.18.2.md` 与
++`config/hermes-gateway-capabilities.v1.json` 为准。
+diff --git a/hqa/config.py b/hqa/config.py
+index e5390c8..d26a109 100644
+--- a/hqa/config.py
++++ b/hqa/config.py
+@@ -61,20 +61,38 @@ FULL9H_NOTIFY_TARGET = os.environ.get("HQA_FULL9H_NOTIFY_TARGET", "local")
+ OPTIONS_SCAN_DIR = Path(
+     os.environ.get("HQA_OPTIONS_SCAN_DIR", str(AIQP_DIR / "data" / "options_scans"))
+ )
+ RUNTIME_DIR = Path(
+     os.environ.get("HQA_RUNTIME_DIR", str(REPO_DIR / "data" / "_runtime"))
+ )
+ SIGNAL_THRESHOLDS_PATH = Path(
+     os.environ.get("HQA_SIGNAL_THRESHOLDS", str(RUNTIME_DIR / "signal_thresholds.json"))
+ )
+ 
++# These two admission anchors are intentionally not environment-overridable.
++# Tests monkeypatch the module constants directly.
++HERMES_GATEWAY_CAPABILITIES_PATH = (
++    REPO_DIR / "config" / "hermes-gateway-capabilities.v1.json"
++)
++HERMES_GATEWAY_REVIEW_PATH = (
++    REPO_DIR / "config" / "hermes-gateway-capabilities.v1.review.json"
++)
++HERMES_BIN_PATH = Path(
++    os.environ.get("HQA_HERMES_BIN_PATH", "/Users/sunyibo/.local/bin/hermes")
++)
++HERMES_SOURCE_DIR = Path(
++    os.environ.get(
++        "HQA_HERMES_SOURCE_DIR",
++        "/Users/sunyibo/.hermes/hermes-agent",
++    )
++)
++
+ # Nominal safety baseline. Any deviation from these values is an alert.
+ EXPECTED_SAFETY = {
+     "dry_run": "true",
+     "paper_trading": "true",
+     "live_trading_enabled": "false",
+     "kill_switch": "true",
+ }
+ 
+ # Default Scene-B / research data provider. Matches platform default_data_provider
+ # (futu). Tiingo requires an explicit opt-in when a token is configured.
+diff --git a/hqa/hermes_capabilities.py b/hqa/hermes_capabilities.py
+new file mode 100644
+index 0000000..4f030d6
+--- /dev/null
++++ b/hqa/hermes_capabilities.py
+@@ -0,0 +1,230 @@
++from __future__ import annotations
++
++import json
++from dataclasses import asdict, dataclass
++from pathlib import Path
++from urllib.parse import urlparse
++
++
++class CapabilityContractError(ValueError):
++    pass
++
++
++@dataclass(frozen=True)
++class HermesGatewayCapabilities:
++    schema_version: str
++    observed_at: str
++    hermes_version: str
++    upstream_commit: str
++    source_checkout_commit: str
++    server_source_sha256: str
++    transport: str
++    endpoint: str
++    loopback_only: bool
++    relevant_methods_observed: frozenset[str]
++    session_provider_override: bool
++    session_primary_provider_policy_immutable: bool
++    session_provider_fallback_policy_immutable: bool
++    client_idempotency_key: bool
++    request_correlation_metadata: bool
++    request_lookup_by_client_id: bool
++    run_id: bool
++    event_id: bool
++    event_cursor: bool
++    run_provider_evidence: bool
++    approval_command_digest_binding: bool
++    approval_ttl: bool
++    approval_single_use: bool
++    stop_idempotent: bool
++    stop_reconcilable: bool
++
++
++@dataclass(frozen=True)
++class HermesChatGate:
++    chat_read_enabled: bool
++    chat_write_enabled: bool
++    stream_enabled: bool
++    resume_enabled: bool
++    approval_enabled: bool
++    stop_enabled: bool
++    blockers: tuple[str, ...]
++    resume_blockers: tuple[str, ...]
++    approval_blockers: tuple[str, ...]
++    stop_blockers: tuple[str, ...]
++
++    def to_dict(self) -> dict:
++        return asdict(self)
++
++
++_READ_METHODS = frozenset({"session.list", "session.status", "session.history"})
++_CHAT_METHODS = frozenset({"session.create", "prompt.submit"})
++_EVIDENCE_KEYS = (
++    "session_provider_override",
++    "session_primary_provider_policy_immutable",
++    "session_provider_fallback_policy_immutable",
++    "client_idempotency_key",
++    "request_correlation_metadata",
++    "request_lookup_by_client_id",
++    "run_id",
++    "event_id",
++    "event_cursor",
++    "run_provider_evidence",
++    "approval_command_digest_binding",
++    "approval_ttl",
++    "approval_single_use",
++    "stop_idempotent",
++    "stop_reconcilable",
++)
++
++
++def load_capabilities(path: Path) -> HermesGatewayCapabilities:
++    try:
++        raw = json.loads(path.read_text(encoding="utf-8"))
++    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
++        raise CapabilityContractError("capability contract is unreadable") from exc
++    if not isinstance(raw, dict) or set(raw) != {
++        "schema_version",
++        "observed_at",
++        "hermes_version",
++        "upstream_commit",
++        "source_checkout_commit",
++        "server_source_sha256",
++        "transport",
++        "endpoint",
++        "loopback_only",
++        "relevant_methods_observed",
++        "evidence",
++    }:
++        raise CapabilityContractError("capability contract has unknown or missing fields")
++    evidence = raw["evidence"]
++    if not isinstance(evidence, dict) or set(evidence) != set(_EVIDENCE_KEYS):
++        raise CapabilityContractError("capability evidence has unknown or missing fields")
++    if raw["schema_version"] != "1.0" or raw["transport"] != "websocket_jsonrpc":
++        raise CapabilityContractError("unsupported capability schema or transport")
++    string_fields = (
++        "observed_at",
++        "hermes_version",
++        "upstream_commit",
++        "source_checkout_commit",
++        "server_source_sha256",
++    )
++    if any(not isinstance(raw[field], str) or not raw[field] for field in string_fields):
++        raise CapabilityContractError("capability identity fields must be non-empty strings")
++    if not isinstance(raw["relevant_methods_observed"], list) or any(
++        not isinstance(item, str) or not item
++        for item in raw["relevant_methods_observed"]
++    ):
++        raise CapabilityContractError(
++            "relevant capability methods must be non-empty strings"
++        )
++    if any(type(evidence[key]) is not bool for key in _EVIDENCE_KEYS):
++        raise CapabilityContractError("capability evidence values must be booleans")
++    if not isinstance(raw["endpoint"], str):
++        raise CapabilityContractError("Hermes endpoint must be loopback WebSocket")
++    try:
++        endpoint = urlparse(raw["endpoint"])
++        endpoint_port = endpoint.port
++    except ValueError as exc:
++        raise CapabilityContractError(
++            "Hermes endpoint must be loopback WebSocket"
++        ) from exc
++    if (
++        endpoint.scheme not in {"ws", "wss"}
++        or endpoint.hostname not in {"127.0.0.1", "::1"}
++        or endpoint_port is None
++        or not 1 <= endpoint_port <= 65535
++        or endpoint.path != "/api/ws"
++        or endpoint.username is not None
++        or endpoint.password is not None
++        or endpoint.params
++        or endpoint.query
++        or endpoint.fragment
++    ):
++        raise CapabilityContractError("Hermes endpoint must be loopback WebSocket")
++    if raw["loopback_only"] is not True:
++        raise CapabilityContractError("Hermes contract is not loopback-only")
++    relevant_methods = frozenset(
++        str(item) for item in raw["relevant_methods_observed"]
++    )
++    return HermesGatewayCapabilities(
++        schema_version="1.0",
++        observed_at=str(raw["observed_at"]),
++        hermes_version=str(raw["hermes_version"]),
++        upstream_commit=str(raw["upstream_commit"]),
++        source_checkout_commit=str(raw["source_checkout_commit"]),
++        server_source_sha256=str(raw["server_source_sha256"]),
++        transport="websocket_jsonrpc",
++        endpoint=str(raw["endpoint"]),
++        loopback_only=True,
++        relevant_methods_observed=relevant_methods,
++        **{key: evidence[key] is True for key in _EVIDENCE_KEYS},
++    )
++
++
++def evaluate_chat_gate(capabilities: HermesGatewayCapabilities) -> HermesChatGate:
++    chat_methods_present = _CHAT_METHODS.issubset(
++        capabilities.relevant_methods_observed
++    )
++    request_recovery = any(
++        (
++            capabilities.client_idempotency_key,
++            capabilities.request_correlation_metadata,
++            capabilities.request_lookup_by_client_id,
++        )
++    )
++    event_replay = capabilities.event_id and capabilities.event_cursor
++    provider_policy_locked = (
++        capabilities.session_provider_override
++        and capabilities.session_primary_provider_policy_immutable
++        and capabilities.session_provider_fallback_policy_immutable
++    )
++    chat_blockers: list[str] = []
++    if not chat_methods_present:
++        chat_blockers.append("missing_chat_methods")
++    if not request_recovery:
++        chat_blockers.append("missing_request_recovery")
++    if not capabilities.run_id:
++        chat_blockers.append("missing_run_identity")
++    if not provider_policy_locked:
++        chat_blockers.append("missing_provider_policy_lock")
++    if not capabilities.run_provider_evidence:
++        chat_blockers.append("missing_actual_provider_evidence")
++    write_enabled = not chat_blockers
++    stream_blockers = list(chat_blockers)
++    if not event_replay:
++        stream_blockers.append("missing_event_replay")
++    resume_blockers = list(stream_blockers)
++    if "session.resume" not in capabilities.relevant_methods_observed:
++        resume_blockers.append("missing_resume_method")
++    approval_blockers: list[str] = []
++    if chat_blockers:
++        approval_blockers.append("missing_chat_contract")
++    if "approval.respond" not in capabilities.relevant_methods_observed or not all(
++        (
++            capabilities.approval_command_digest_binding,
++            capabilities.approval_ttl,
++            capabilities.approval_single_use,
++        )
++    ):
++        approval_blockers.append("missing_approval_binding")
++    stop_blockers: list[str] = []
++    if not capabilities.run_id:
++        stop_blockers.append("missing_run_identity")
++    if "session.interrupt" not in capabilities.relevant_methods_observed or not all(
++        (capabilities.stop_idempotent, capabilities.stop_reconcilable)
++    ):
++        stop_blockers.append("missing_stop_contract")
++    return HermesChatGate(
++        chat_read_enabled=_READ_METHODS.issubset(
++            capabilities.relevant_methods_observed
++        ),
++        chat_write_enabled=write_enabled,
++        stream_enabled=not stream_blockers,
++        resume_enabled=not resume_blockers,
++        approval_enabled=not approval_blockers,
++        stop_enabled=not stop_blockers,
++        blockers=tuple(stream_blockers),
++        resume_blockers=tuple(resume_blockers),
++        approval_blockers=tuple(approval_blockers),
++        stop_blockers=tuple(stop_blockers),
++    )
+diff --git a/hqa/hermes_capability_cli.py b/hqa/hermes_capability_cli.py
+new file mode 100644
+index 0000000..6c1d955
+--- /dev/null
++++ b/hqa/hermes_capability_cli.py
+@@ -0,0 +1,317 @@
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import re
++import subprocess
++import sys
++from dataclasses import asdict
++from pathlib import Path
++from typing import Optional
++
++from hqa import config
++from hqa.hermes_capabilities import (
++    CapabilityContractError,
++    evaluate_chat_gate,
++    load_capabilities,
++)
++
++
++class _ArgumentError(ValueError):
++    pass
++
++
++class _Parser(argparse.ArgumentParser):
++    def error(self, message: str) -> None:
++        raise _ArgumentError(message)
++
++
++def _emit(document: dict) -> None:
++    sys.stdout.write(
++        json.dumps(
++            document,
++            ensure_ascii=False,
++            allow_nan=False,
++            sort_keys=True,
++            separators=(",", ":"),
++        )
++        + "\n"
++    )
++
++
++def _parser() -> argparse.ArgumentParser:
++    parser = _Parser(prog="hqa-hermes-capabilities")
++    sub = parser.add_subparsers(dest="command", required=True)
++    show = sub.add_parser("show")
++    show.add_argument(
++        "--contract",
++        type=Path,
++        default=config.HERMES_GATEWAY_CAPABILITIES_PATH,
++    )
++    sub.add_parser("verify-chat")
++    return parser
++
++
++def _read(path: Path) -> dict:
++    capabilities = load_capabilities(path)
++    gate = evaluate_chat_gate(capabilities)
++    contract = asdict(capabilities)
++    contract["relevant_methods_observed"] = sorted(
++        capabilities.relevant_methods_observed
++    )
++    return {"contract": contract, "declared_gate": gate.to_dict()}
++
++
++def _git_bytes(*args: str) -> bytes:
++    return subprocess.run(
++        ["git", "-C", str(config.REPO_DIR), *args],
++        check=True,
++        capture_output=True,
++        shell=False,
++        timeout=5,
++    ).stdout
++
++
++def _probe_review(contract_path: Path) -> dict:
++    if contract_path != config.HERMES_GATEWAY_CAPABILITIES_PATH:
++        return {
++            "trusted": False,
++            "verdict": "unreviewed",
++            "blocker": "custom_contract_unreviewed",
++        }
++    try:
++        contract_bytes = contract_path.read_bytes()
++        review_bytes = config.HERMES_GATEWAY_REVIEW_PATH.read_bytes()
++        review = json.loads(review_bytes.decode("utf-8"))
++        if not isinstance(review, dict) or set(review) != {
++            "schema_version",
++            "contract_sha256",
++            "reviewed_commit",
++            "reviewed_at",
++            "verdict",
++            "reason",
++        }:
++            raise ValueError("invalid review schema")
++        if review["schema_version"] != "1.0" or review["verdict"] not in {
++            "blocked",
++            "ready",
++        }:
++            raise ValueError("unsupported review")
++        digest = hashlib.sha256(contract_bytes).hexdigest()
++        if (
++            not re.fullmatch(r"[0-9a-f]{64}", str(review["contract_sha256"]))
++            or review["contract_sha256"] != digest
++            or not re.fullmatch(r"[0-9a-f]{40}", str(review["reviewed_commit"]))
++            or not re.fullmatch(
++                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
++                str(review["reviewed_at"]),
++            )
++            or not isinstance(review["reason"], str)
++            or not review["reason"].strip()
++        ):
++            raise ValueError("invalid review identity")
++        contract_rel = contract_path.relative_to(config.REPO_DIR).as_posix()
++        review_rel = config.HERMES_GATEWAY_REVIEW_PATH.relative_to(
++            config.REPO_DIR
++        ).as_posix()
++        ancestor = subprocess.run(
++            [
++                "git",
++                "-C",
++                str(config.REPO_DIR),
++                "merge-base",
++                "--is-ancestor",
++                str(review["reviewed_commit"]),
++                "HEAD",
++            ],
++            check=False,
++            capture_output=True,
++            shell=False,
++            timeout=5,
++        )
++        if ancestor.returncode != 0:
++            raise ValueError("reviewed commit is not an ancestor")
++        if _git_bytes("show", f"HEAD:{contract_rel}") != contract_bytes:
++            raise ValueError("contract is not checked in at HEAD")
++        if _git_bytes("show", f'{review["reviewed_commit"]}:{contract_rel}') != contract_bytes:
++            raise ValueError("reviewed contract differs")
++        if _git_bytes("show", f"HEAD:{review_rel}") != review_bytes:
++            raise ValueError("review record is not checked in")
++    except (
++        OSError,
++        UnicodeError,
++        json.JSONDecodeError,
++        KeyError,
++        TypeError,
++        ValueError,
++        subprocess.SubprocessError,
++    ):
++        return {
++            "trusted": False,
++            "verdict": "unreviewed",
++            "blocker": "contract_unreviewed",
++        }
++    verdict = str(review["verdict"])
++    return {
++        "trusted": True,
++        "verdict": verdict,
++        "blocker": None if verdict == "ready" else "contract_review_blocked",
++        "contract_sha256": str(review["contract_sha256"]),
++        "reviewed_commit": str(review["reviewed_commit"]),
++    }
++
++
++def _append_blocker(values: list[str], blocker: str) -> list[str]:
++    return values if blocker in values else [*values, blocker]
++
++
++def _close_gate(gate: dict, blocker: str, *, close_read: bool) -> dict:
++    closed = {
++        **gate,
++        "chat_write_enabled": False,
++        "stream_enabled": False,
++        "resume_enabled": False,
++        "approval_enabled": False,
++        "stop_enabled": False,
++    }
++    if close_read:
++        closed["chat_read_enabled"] = False
++    for field in (
++        "blockers",
++        "resume_blockers",
++        "approval_blockers",
++        "stop_blockers",
++    ):
++        closed[field] = _append_blocker(list(closed.get(field, [])), blocker)
++    return closed
++
++
++def _apply_review_gate(document: dict, contract_path: Path) -> dict:
++    review = _probe_review(contract_path)
++    gate = dict(document["declared_gate"])
++    blocker = review["blocker"]
++    if blocker is not None:
++        gate = _close_gate(gate, blocker, close_read=not review["trusted"])
++    return {
++        **document,
++        "snapshot_readable": True,
++        "gate": gate,
++        "review": review,
++    }
++
++
++def _probe_installation() -> dict:
++    version = subprocess.run(
++        [str(config.HERMES_BIN_PATH), "--version"],
++        check=True,
++        capture_output=True,
++        text=True,
++        shell=False,
++        timeout=5,
++    ).stdout
++    match = re.search(
++        r"^Hermes Agent v(?P<version>\S+).*upstream (?P<upstream>[0-9a-f]+)$",
++        version,
++        flags=re.MULTILINE,
++    )
++    if match is None:
++        raise ValueError("unrecognized Hermes version output")
++    checkout = subprocess.run(
++        ["git", "-C", str(config.HERMES_SOURCE_DIR), "rev-parse", "HEAD"],
++        check=True,
++        capture_output=True,
++        text=True,
++        shell=False,
++        timeout=5,
++    ).stdout.strip()
++    tracked_status = subprocess.run(
++        [
++            "git",
++            "-C",
++            str(config.HERMES_SOURCE_DIR),
++            "status",
++            "--porcelain",
++            "--untracked-files=no",
++        ],
++        check=True,
++        capture_output=True,
++        text=True,
++        shell=False,
++        timeout=5,
++    ).stdout
++    server_bytes = (config.HERMES_SOURCE_DIR / "tui_gateway" / "server.py").read_bytes()
++    return {
++        "hermes_version": match.group("version"),
++        "upstream_commit": match.group("upstream"),
++        "source_checkout_commit": checkout,
++        "server_source_sha256": hashlib.sha256(server_bytes).hexdigest(),
++        "source_tracked_clean": not tracked_status.strip(),
++    }
++
++
++def _apply_installation_gate(document: dict) -> dict:
++    expected = {
++        key: document["contract"][key]
++        for key in (
++            "hermes_version",
++            "upstream_commit",
++            "source_checkout_commit",
++            "server_source_sha256",
++        )
++    }
++    try:
++        actual = _probe_installation()
++        actual_identity = {key: actual.get(key) for key in expected}
++        if actual.get("source_tracked_clean") is not True:
++            blocker = "installation_source_dirty"
++        else:
++            blocker = (
++                None
++                if actual_identity == expected
++                else "installation_fingerprint_mismatch"
++            )
++    except (OSError, ValueError, subprocess.SubprocessError) as exc:
++        actual = {"error": type(exc).__name__}
++        blocker = "installation_probe_failed"
++    gate = document["gate"]
++    if blocker is not None:
++        gate = _close_gate(gate, blocker, close_read=True)
++    return {
++        **document,
++        "gate": gate,
++        "installation": {"matches_snapshot": blocker is None, "actual": actual},
++    }
++
++
++def main(argv: Optional[list[str]] = None) -> int:
++    try:
++        args = _parser().parse_args(argv)
++    except _ArgumentError as exc:
++        _emit({"error": {"code": "invalid_arguments", "message": str(exc)}})
++        return 2
++    try:
++        contract_path = (
++            args.contract
++            if args.command == "show"
++            else config.HERMES_GATEWAY_CAPABILITIES_PATH
++        )
++        document = _read(contract_path)
++        document = _apply_review_gate(document, contract_path)
++        document = _apply_installation_gate(document)
++    except CapabilityContractError as exc:
++        _emit({"error": {"code": "capability_contract_invalid", "message": str(exc)}})
++        return 1
++    if args.command == "show":
++        _emit(document)
++        return 0
++    enabled = (
++        document["gate"]["chat_write_enabled"] is True
++        and document["gate"]["stream_enabled"] is True
++    )
++    _emit({"status": "ready" if enabled else "blocked", **document})
++    return 0 if enabled else 3
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/test_hermes_capabilities.py b/tests/test_hermes_capabilities.py
+new file mode 100644
+index 0000000..6161384
+--- /dev/null
++++ b/tests/test_hermes_capabilities.py
+@@ -0,0 +1,234 @@
++from __future__ import annotations
++
++import json
++
++import pytest
++
++from hqa.hermes_capabilities import (
++    CapabilityContractError,
++    evaluate_chat_gate,
++    load_capabilities,
++)
++
++
++def _document() -> dict:
++    return {
++        "schema_version": "1.0",
++        "observed_at": "2026-07-13T09:13:45Z",
++        "hermes_version": "0.18.2",
++        "upstream_commit": "b03c94db",
++        "source_checkout_commit": "4281151ae859241351ba14d8c7682dc67ff4c126",
++        "server_source_sha256": "2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17",
++        "transport": "websocket_jsonrpc",
++        "endpoint": "ws://127.0.0.1:9119/api/ws",
++        "loopback_only": True,
++        "relevant_methods_observed": [
++            "approval.respond",
++            "config.set",
++            "prompt.submit",
++            "session.create",
++            "session.history",
++            "session.interrupt",
++            "session.list",
++            "session.resume",
++            "session.status",
++        ],
++        "evidence": {
++            "session_provider_override": True,
++            "session_primary_provider_policy_immutable": False,
++            "session_provider_fallback_policy_immutable": False,
++            "client_idempotency_key": False,
++            "request_correlation_metadata": False,
++            "request_lookup_by_client_id": False,
++            "run_id": False,
++            "event_id": False,
++            "event_cursor": False,
++            "run_provider_evidence": False,
++            "approval_command_digest_binding": False,
++            "approval_ttl": False,
++            "approval_single_use": False,
++            "stop_idempotent": False,
++            "stop_reconcilable": False,
++        },
++    }
++
++
++def test_known_gateway_is_readable_but_all_chat_mutations_fail_closed(tmp_path) -> None:
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(_document()), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_read_enabled is True
++    assert gate.chat_write_enabled is False
++    assert gate.stream_enabled is False
++    assert gate.resume_enabled is False
++    assert gate.approval_enabled is False
++    assert gate.approval_blockers == (
++        "missing_chat_contract",
++        "missing_approval_binding",
++    )
++    assert gate.stop_enabled is False
++    assert gate.stop_blockers == (
++        "missing_run_identity",
++        "missing_stop_contract",
++    )
++    assert gate.blockers == (
++        "missing_request_recovery",
++        "missing_run_identity",
++        "missing_provider_policy_lock",
++        "missing_actual_provider_evidence",
++        "missing_event_replay",
++    )
++
++
++def test_complete_contract_opens_each_capability_independently(tmp_path) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_write_enabled is True
++    assert gate.stream_enabled is True
++    assert gate.resume_enabled is True
++    assert gate.approval_enabled is True
++    assert gate.stop_enabled is True
++    assert gate.blockers == ()
++
++
++def test_resume_is_never_classified_as_a_read(tmp_path) -> None:
++    document = _document()
++    document["relevant_methods_observed"].remove("session.resume")
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_read_enabled is True
++    assert gate.resume_enabled is False
++    assert "missing_resume_method" in gate.resume_blockers
++
++
++def test_event_replay_is_required_for_stream_and_resume(tmp_path) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    document["evidence"]["event_cursor"] = False
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_write_enabled is True
++    assert gate.stream_enabled is False
++    assert gate.resume_enabled is False
++    assert gate.blockers == ("missing_event_replay",)
++
++
++def test_primary_and_fallback_provider_policies_must_both_be_immutable(
++    tmp_path,
++) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    document["evidence"]["session_primary_provider_policy_immutable"] = False
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_write_enabled is False
++    assert "missing_provider_policy_lock" in gate.blockers
++
++
++def test_missing_chat_method_is_an_explicit_fail_closed_blocker(tmp_path) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    document["relevant_methods_observed"].remove("prompt.submit")
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_write_enabled is False
++    assert gate.blockers == ("missing_chat_methods",)
++
++
++def test_safe_chat_does_not_open_approval_or_stop_from_method_names(tmp_path) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    for key in (
++        "approval_command_digest_binding",
++        "approval_ttl",
++        "approval_single_use",
++        "stop_idempotent",
++        "stop_reconcilable",
++    ):
++        document["evidence"][key] = False
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_write_enabled is True
++    assert gate.stream_enabled is True
++    assert gate.approval_enabled is False
++    assert gate.approval_blockers == ("missing_approval_binding",)
++    assert gate.stop_enabled is False
++    assert gate.stop_blockers == ("missing_stop_contract",)
++
++
++@pytest.mark.parametrize(
++    "recovery_field",
++    [
++        "client_idempotency_key",
++        "request_correlation_metadata",
++        "request_lookup_by_client_id",
++    ],
++)
++def test_any_one_deterministic_recovery_contract_is_sufficient(
++    tmp_path, recovery_field
++) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    for key in (
++        "client_idempotency_key",
++        "request_correlation_metadata",
++        "request_lookup_by_client_id",
++    ):
++        document["evidence"][key] = key == recovery_field
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    assert evaluate_chat_gate(load_capabilities(path)).chat_write_enabled is True
++
++
++@pytest.mark.parametrize(
++    ("field", "value"),
++    [
++        ("schema_version", "2.0"),
++        ("transport", "rest"),
++        ("endpoint", "ws://0.0.0.0:9119/api/ws"),
++        ("endpoint", "ws://localhost:9119/api/ws"),
++        ("endpoint", "ws://127.0.0.1:9119/other"),
++        ("endpoint", "ws://127.0.0.1:9119/api/ws?token=secret#fragment"),
++        ("endpoint", "ws://user:pass@127.0.0.1:9119/api/ws"),
++        ("endpoint", "ws://127.0.0.1:99999/api/ws"),
++        ("loopback_only", False),
++    ],
++)
++def test_unsafe_or_unknown_contract_is_rejected(tmp_path, field, value) -> None:
++    document = _document()
++    document[field] = value
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    with pytest.raises(CapabilityContractError):
++        load_capabilities(path)
++
++    # Error text must never reflect an endpoint that may contain credentials.
++    try:
++        load_capabilities(path)
++    except CapabilityContractError as exc:
++        assert "secret" not in str(exc)
++        assert "pass" not in str(exc)
+diff --git a/tests/test_hermes_capability_cli.py b/tests/test_hermes_capability_cli.py
+new file mode 100644
+index 0000000..599329f
+--- /dev/null
++++ b/tests/test_hermes_capability_cli.py
+@@ -0,0 +1,436 @@
++from __future__ import annotations
++
++import hashlib
++import json
++import subprocess
++from pathlib import Path
++
++import pytest
++
++from hqa import config, hermes_capability_cli
++
++
++def _contract() -> dict:
++    return {
++        "hermes_version": "0.18.2",
++        "upstream_commit": "e4ea0a0e",
++        "source_checkout_commit": "4281151ae859241351ba14d8c7682dc67ff4c126",
++        "server_source_sha256": "2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17",
++        "source_tracked_clean": True,
++    }
++
++
++def _gate(*, write: bool, stream: bool, read: bool = True) -> dict:
++    blocker = [] if write else ["missing_request_recovery"]
++    return {
++        "chat_read_enabled": read,
++        "chat_write_enabled": write,
++        "stream_enabled": stream,
++        "resume_enabled": stream,
++        "approval_enabled": False,
++        "stop_enabled": False,
++        "blockers": blocker + ([] if stream or not write else ["missing_event_replay"]),
++        "resume_blockers": blocker + ([] if stream else ["missing_event_replay"]),
++        "approval_blockers": ["missing_approval_binding"],
++        "stop_blockers": ["missing_stop_contract"],
++    }
++
++
++def _install_declared(monkeypatch, gate: dict) -> None:
++    monkeypatch.setattr(
++        hermes_capability_cli,
++        "_read",
++        lambda _path: {"contract": _contract(), "declared_gate": gate},
++    )
++    monkeypatch.setattr(hermes_capability_cli, "_probe_installation", _contract)
++
++
++def test_custom_show_is_diagnostic_but_never_authoritative(
++    monkeypatch, capsys, tmp_path
++) -> None:
++    contract = tmp_path / "capabilities.json"
++    contract.write_text("{}", encoding="utf-8")
++    _install_declared(monkeypatch, _gate(write=True, stream=True))
++    monkeypatch.setattr(
++        hermes_capability_cli,
++        "_probe_review",
++        lambda _path: {
++            "trusted": False,
++            "verdict": "unreviewed",
++            "blocker": "custom_contract_unreviewed",
++        },
++    )
++
++    assert hermes_capability_cli.main(["show", "--contract", str(contract)]) == 0
++    document = json.loads(capsys.readouterr().out)
++    assert document["snapshot_readable"] is True
++    assert document["declared_gate"]["chat_write_enabled"] is True
++    assert document["gate"]["chat_read_enabled"] is False
++    assert document["gate"]["chat_write_enabled"] is False
++    assert "custom_contract_unreviewed" in document["gate"]["blockers"]
++
++
++def test_verify_chat_returns_three_for_known_blocked_contract(monkeypatch, capsys) -> None:
++    _install_declared(monkeypatch, _gate(write=False, stream=False))
++    monkeypatch.setattr(
++        hermes_capability_cli,
++        "_probe_review",
++        lambda _path: {
++            "trusted": True,
++            "verdict": "blocked",
++            "blocker": "contract_review_blocked",
++        },
++    )
++
++    assert hermes_capability_cli.main(["verify-chat"]) == 3
++    document = json.loads(capsys.readouterr().out)
++    assert document["status"] == "blocked"
++    assert document["gate"]["chat_read_enabled"] is True
++
++
++def test_verify_chat_requires_replay_even_when_submit_is_safe(monkeypatch, capsys) -> None:
++    _install_declared(monkeypatch, _gate(write=True, stream=False))
++    monkeypatch.setattr(
++        hermes_capability_cli,
++        "_probe_review",
++        lambda _path: {"trusted": True, "verdict": "ready", "blocker": None},
++    )
++
++    assert hermes_capability_cli.main(["verify-chat"]) == 3
++    assert json.loads(capsys.readouterr().out)["status"] == "blocked"
++
++
++def test_ready_review_and_matching_installation_open_bridge_admission(
++    monkeypatch, capsys
++) -> None:
++    _install_declared(monkeypatch, _gate(write=True, stream=True))
++    monkeypatch.setattr(
++        hermes_capability_cli,
++        "_probe_review",
++        lambda _path: {"trusted": True, "verdict": "ready", "blocker": None},
++    )
++
++    assert hermes_capability_cli.main(["verify-chat"]) == 0
++    document = json.loads(capsys.readouterr().out)
++    assert document["status"] == "ready"
++    # Approval and stop are independent from ordinary safe chat admission.
++    assert document["gate"]["approval_enabled"] is False
++    assert document["gate"]["stop_enabled"] is False
++
++
++def test_matching_ready_snapshot_stays_blocked_when_installation_drifted(
++    monkeypatch, capsys
++) -> None:
++    _install_declared(monkeypatch, _gate(write=True, stream=True))
++    monkeypatch.setattr(
++        hermes_capability_cli,
++        "_probe_review",
++        lambda _path: {"trusted": True, "verdict": "ready", "blocker": None},
++    )
++    monkeypatch.setattr(
++        hermes_capability_cli,
++        "_probe_installation",
++        lambda: {**_contract(), "server_source_sha256": "0" * 64},
++    )
++
++    assert hermes_capability_cli.main(["verify-chat"]) == 3
++    document = json.loads(capsys.readouterr().out)
++    assert document["gate"]["chat_read_enabled"] is False
++    assert document["gate"]["chat_write_enabled"] is False
++    assert "installation_fingerprint_mismatch" in document["gate"]["blockers"]
++
++
++def test_missing_review_closes_reads_and_writes(monkeypatch, capsys) -> None:
++    _install_declared(monkeypatch, _gate(write=True, stream=True))
++    monkeypatch.setattr(
++        hermes_capability_cli,
++        "_probe_review",
++        lambda _path: {
++            "trusted": False,
++            "verdict": "unreviewed",
++            "blocker": "contract_unreviewed",
++        },
++    )
++
++    assert hermes_capability_cli.main(["verify-chat"]) == 3
++    gate = json.loads(capsys.readouterr().out)["gate"]
++    assert gate["chat_read_enabled"] is False
++    assert gate["chat_write_enabled"] is False
++
++
++def test_tracked_source_dirty_closes_reads_and_writes(monkeypatch, capsys) -> None:
++    _install_declared(monkeypatch, _gate(write=True, stream=True))
++    monkeypatch.setattr(
++        hermes_capability_cli,
++        "_probe_review",
++        lambda _path: {"trusted": True, "verdict": "ready", "blocker": None},
++    )
++    monkeypatch.setattr(
++        hermes_capability_cli,
++        "_probe_installation",
++        lambda: {**_contract(), "source_tracked_clean": False},
++    )
++
++    assert hermes_capability_cli.main(["verify-chat"]) == 3
++    gate = json.loads(capsys.readouterr().out)["gate"]
++    assert gate["chat_read_enabled"] is False
++    assert "installation_source_dirty" in gate["blockers"]
++
++
++def test_verify_chat_rejects_contract_override(capsys) -> None:
++    assert hermes_capability_cli.main(
++        ["verify-chat", "--contract", "/tmp/all-true.json"]
++    ) == 2
++    assert json.loads(capsys.readouterr().out)["error"]["code"] == "invalid_arguments"
++
++
++def test_installation_probe_failed_closes_reads_and_mutations(monkeypatch, capsys) -> None:
++    _install_declared(monkeypatch, _gate(write=True, stream=True))
++    monkeypatch.setattr(
++        hermes_capability_cli,
++        "_probe_review",
++        lambda _path: {"trusted": True, "verdict": "ready", "blocker": None},
++    )
++
++    def _boom() -> dict:
++        raise OSError("secret subprocess stderr must not leak")
++
++    monkeypatch.setattr(hermes_capability_cli, "_probe_installation", _boom)
++
++    assert hermes_capability_cli.main(["verify-chat"]) == 3
++    out = capsys.readouterr().out
++    document = json.loads(out)
++    gate = document["gate"]
++    assert document["status"] == "blocked"
++    assert gate["chat_read_enabled"] is False
++    assert gate["chat_write_enabled"] is False
++    assert gate["stream_enabled"] is False
++    assert gate["resume_enabled"] is False
++    assert gate["approval_enabled"] is False
++    assert gate["stop_enabled"] is False
++    assert "installation_probe_failed" in gate["blockers"]
++    assert "installation_probe_failed" in gate["resume_blockers"]
++    assert "installation_probe_failed" in gate["approval_blockers"]
++    assert "installation_probe_failed" in gate["stop_blockers"]
++    assert document["installation"]["matches_snapshot"] is False
++    assert document["installation"]["actual"] == {"error": "OSError"}
++    assert "secret subprocess stderr" not in out
++
++
++def _git(repo: Path, *args: str) -> str:
++    return subprocess.run(
++        ["git", "-C", str(repo), *args],
++        check=True,
++        capture_output=True,
++        text=True,
++        shell=False,
++        timeout=10,
++    ).stdout.strip()
++
++
++def _init_probe_repo(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
++    repo = tmp_path / "repo"
++    repo.mkdir()
++    _git(repo, "init")
++    _git(repo, "config", "user.email", "probe@example.com")
++    _git(repo, "config", "user.name", "Probe Test")
++    # Deterministic default branch name across git versions.
++    _git(repo, "checkout", "-b", "main")
++
++    config_dir = repo / "config"
++    config_dir.mkdir()
++    contract_path = config_dir / "hermes-gateway-capabilities.v1.json"
++    review_path = config_dir / "hermes-gateway-capabilities.v1.review.json"
++
++    monkeypatch.setattr(config, "REPO_DIR", repo)
++    monkeypatch.setattr(config, "HERMES_GATEWAY_CAPABILITIES_PATH", contract_path)
++    monkeypatch.setattr(config, "HERMES_GATEWAY_REVIEW_PATH", review_path)
++    return repo, contract_path, review_path
++
++
++def _valid_review(*, digest: str, reviewed_commit: str, verdict: str = "ready") -> dict:
++    return {
++        "schema_version": "1.0",
++        "contract_sha256": digest,
++        "reviewed_commit": reviewed_commit,
++        "reviewed_at": "2026-07-13T12:00:00Z",
++        "verdict": verdict,
++        "reason": "table-driven probe coverage",
++    }
++
++
++def _write_json(path: Path, document: dict) -> bytes:
++    payload = (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode(
++        "utf-8"
++    )
++    path.write_bytes(payload)
++    return payload
++
++
++def _commit_paths(repo: Path, *rels: str, message: str) -> str:
++    for rel in rels:
++        _git(repo, "add", rel)
++    _git(repo, "commit", "-m", message)
++    return _git(repo, "rev-parse", "HEAD")
++
++
++@pytest.mark.parametrize(
++    "case",
++    [
++        "missing_review_fields",
++        "unknown_review_fields",
++        "invalid_digest",
++        "invalid_commit",
++        "digest_mismatch",
++        "reviewed_not_ancestor",
++        "reviewed_contract_differs",
++        "working_differs_from_head",
++        "review_bytes_differ_from_head",
++    ],
++)
++def test_probe_review_rejects_untrusted_records(tmp_path, monkeypatch, case: str) -> None:
++    repo, contract_path, review_path = _init_probe_repo(tmp_path, monkeypatch)
++    contract_v1 = b'{"schema":"v1"}\n'
++    contract_v2 = b'{"schema":"v2"}\n'
++
++    if case == "missing_review_fields":
++        contract_path.write_bytes(contract_v1)
++        commit = _commit_paths(repo, "config/hermes-gateway-capabilities.v1.json", message="c1")
++        review = _valid_review(
++            digest=hashlib.sha256(contract_v1).hexdigest(),
++            reviewed_commit=commit,
++        )
++        del review["reason"]
++        _write_json(review_path, review)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.review.json", message="r1")
++
++    elif case == "unknown_review_fields":
++        contract_path.write_bytes(contract_v1)
++        commit = _commit_paths(repo, "config/hermes-gateway-capabilities.v1.json", message="c1")
++        review = _valid_review(
++            digest=hashlib.sha256(contract_v1).hexdigest(),
++            reviewed_commit=commit,
++        )
++        review["extra"] = "nope"
++        _write_json(review_path, review)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.review.json", message="r1")
++
++    elif case == "invalid_digest":
++        contract_path.write_bytes(contract_v1)
++        commit = _commit_paths(repo, "config/hermes-gateway-capabilities.v1.json", message="c1")
++        review = _valid_review(digest="not-a-sha256", reviewed_commit=commit)
++        _write_json(review_path, review)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.review.json", message="r1")
++
++    elif case == "invalid_commit":
++        contract_path.write_bytes(contract_v1)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.json", message="c1")
++        review = _valid_review(
++            digest=hashlib.sha256(contract_v1).hexdigest(),
++            reviewed_commit="deadbeef",
++        )
++        _write_json(review_path, review)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.review.json", message="r1")
++
++    elif case == "digest_mismatch":
++        contract_path.write_bytes(contract_v1)
++        commit = _commit_paths(repo, "config/hermes-gateway-capabilities.v1.json", message="c1")
++        review = _valid_review(digest="0" * 64, reviewed_commit=commit)
++        _write_json(review_path, review)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.review.json", message="r1")
++
++    elif case == "reviewed_not_ancestor":
++        contract_path.write_bytes(contract_v1)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.json", message="c1")
++        orphan = "a" * 40
++        review = _valid_review(
++            digest=hashlib.sha256(contract_v1).hexdigest(),
++            reviewed_commit=orphan,
++        )
++        _write_json(review_path, review)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.review.json", message="r1")
++
++    elif case == "reviewed_contract_differs":
++        # Ancestor has v1; HEAD/working have v2; review digests v2 but points at ancestor.
++        contract_path.write_bytes(contract_v1)
++        ancestor = _commit_paths(
++            repo, "config/hermes-gateway-capabilities.v1.json", message="c1"
++        )
++        contract_path.write_bytes(contract_v2)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.json", message="c2")
++        review = _valid_review(
++            digest=hashlib.sha256(contract_v2).hexdigest(),
++            reviewed_commit=ancestor,
++        )
++        _write_json(review_path, review)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.review.json", message="r1")
++
++    elif case == "working_differs_from_head":
++        # Reviewed ancestor and working bytes are v1; HEAD blob is v2.
++        contract_path.write_bytes(contract_v1)
++        ancestor = _commit_paths(
++            repo, "config/hermes-gateway-capabilities.v1.json", message="c1"
++        )
++        review = _valid_review(
++            digest=hashlib.sha256(contract_v1).hexdigest(),
++            reviewed_commit=ancestor,
++        )
++        _write_json(review_path, review)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.review.json", message="r1")
++        contract_path.write_bytes(contract_v2)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.json", message="c2")
++        contract_path.write_bytes(contract_v1)
++
++    elif case == "review_bytes_differ_from_head":
++        contract_path.write_bytes(contract_v1)
++        commit = _commit_paths(repo, "config/hermes-gateway-capabilities.v1.json", message="c1")
++        review = _valid_review(
++            digest=hashlib.sha256(contract_v1).hexdigest(),
++            reviewed_commit=commit,
++        )
++        _write_json(review_path, review)
++        _commit_paths(repo, "config/hermes-gateway-capabilities.v1.review.json", message="r1")
++        dirty = dict(review)
++        dirty["reason"] = "uncommitted local edit"
++        _write_json(review_path, dirty)
++
++    else:
++        raise AssertionError(f"unknown case {case}")
++
++    result = hermes_capability_cli._probe_review(contract_path)
++    assert result == {
++        "trusted": False,
++        "verdict": "unreviewed",
++        "blocker": "contract_unreviewed",
++    }
++
++
++def test_probe_review_accepts_ready_checked_in_record(tmp_path, monkeypatch) -> None:
++    repo, contract_path, review_path = _init_probe_repo(tmp_path, monkeypatch)
++    contract_bytes = b'{"schema":"v1"}\n'
++    contract_path.write_bytes(contract_bytes)
++    commit = _commit_paths(repo, "config/hermes-gateway-capabilities.v1.json", message="c1")
++    digest = hashlib.sha256(contract_bytes).hexdigest()
++    review = _valid_review(digest=digest, reviewed_commit=commit, verdict="ready")
++    _write_json(review_path, review)
++    _commit_paths(repo, "config/hermes-gateway-capabilities.v1.review.json", message="r1")
++
++    result = hermes_capability_cli._probe_review(contract_path)
++    assert result == {
++        "trusted": True,
++        "verdict": "ready",
++        "blocker": None,
++        "contract_sha256": digest,
++        "reviewed_commit": commit,
++    }
++
++
++def test_probe_review_custom_path_never_authorizes(tmp_path, monkeypatch) -> None:
++    _init_probe_repo(tmp_path, monkeypatch)
++    custom = tmp_path / "other.json"
++    custom.write_text("{}", encoding="utf-8")
++    assert hermes_capability_cli._probe_review(custom) == {
++        "trusted": False,
++        "verdict": "unreviewed",
++        "blocker": "custom_contract_unreviewed",
++    }

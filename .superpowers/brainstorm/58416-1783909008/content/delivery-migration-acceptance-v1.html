@@ -1,0 +1,94 @@
+<h2>设计第 6 部分：实施切片、旧页面迁移与验收</h2>
+<p class="subtitle">目标不是一次性“大重写”，而是每一阶段都能看到真实进展、独立验收和安全回滚。现有线框只验证信息架构，绝不会直接翻译成生产界面。</p>
+
+<div style="margin-top:28px;display:grid;gap:14px">
+  <div style="display:grid;grid-template-columns:110px 1fr 270px;gap:16px;padding:20px;border:1px solid #67528d;border-radius:13px;background:rgba(139,92,246,.07)">
+    <div><div class="letter">0</div><strong style="color:#d8c2f5">视觉定稿</strong></div>
+    <div><h3>专业前端 Agent 重新设计</h3><p style="color:#aaa3ae">先审计真实页面、设计 token 和数据形态；给出 2–3 个高保真方向，再完成可点击的全状态原型。当前 brainstorm 线框不能复制进生产代码。</p></div>
+    <div style="padding:12px;border-left:3px solid #9a73d1;color:#cbb9e4"><b>用户可见成果</b><br>1440 / 1280 / 768 / 390 四档真实尺寸；首页、会话、结果、审批均可走查。</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:110px 1fr 270px;gap:16px;padding:20px;border:1px solid #6d3c43;border-radius:13px;background:rgba(239,68,68,.045)">
+    <div><div class="letter">1</div><strong style="color:#ef9aa5">安全与合同</strong></div>
+    <div><h3>先修不能带入新工作台的底层风险</h3><p style="color:#aaa3ae">修正候选根目录；Gate 2 review lock 绑定 candidate metadata + source digest；回测和 promotion 复核摘要。冻结 Hermes Sessions / Runs / SSE / approval / stop 与 provider capability 合同。</p></div>
+    <div style="padding:12px;border-left:3px solid #b15261;color:#d8aab1"><b>硬门槛</b><br>摘要变化必定 stale；聊天文本永远不能触发 Gate。</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:110px 1fr 270px;gap:16px;padding:20px;border:1px solid #405b81;border-radius:13px;background:rgba(59,130,246,.055)">
+    <div><div class="letter">2</div><strong style="color:#a9c4ef">真实对话</strong></div>
+    <div><h3>完成第一条端到端竖切</h3><p style="color:#aaa3ae">专用 Hermes profile/API、同源 BFF、会话 provider 选择、发送/流式/停止/重连、幂等与离线缓存接通。先只开放普通对话和安全只读能力。</p></div>
+    <div style="padding:12px;border-left:3px solid #517bab;color:#aec6e4"><b>用户可见成果</b><br>网页里真的与本地 Hermes 对话；每个 Run 显示实际 provider / model。</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:110px 1fr 270px;gap:16px;padding:20px;border:1px solid #405b81;border-radius:13px;background:rgba(59,130,246,.055)">
+    <div><div class="letter">3</div><strong style="color:#a9c4ef">研究任务</strong></div>
+    <div><h3>自然语言变成可恢复的 HQA Task</h3><p style="color:#aaa3ae">新增 append-only research task ledger；实现计划卡、plan hash、Gate 1、Run attempts、结构化步骤、停止与恢复。根路由在此阶段正式默认进入 <code>/hermes</code>。</p></div>
+    <div style="padding:12px;border-left:3px solid #517bab;color:#aec6e4"><b>用户可见成果</b><br>提出研究目标 → 看懂计划 → 确认 → 实时看到真实执行步骤。</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:110px 1fr 270px;gap:16px;padding:20px;border:1px solid #356044;border-radius:13px;background:rgba(34,197,94,.05)">
+    <div><div class="letter">4</div><strong style="color:#7ed99c">结果与审批</strong></div>
+    <div><h3>重做统一结果页和审批中心</h3><p style="color:#aaa3ae">因子证据、回测曲线/订单/持仓/归因、实验比较、源码/审计进入 Hermes 路由；接入 Gate 2/3、stale/digest 状态与“待我确认”。自动化首页只展示结论和异常。</p></div>
+    <div style="padding:12px;border-left:3px solid #4d9366;color:#a9d9b8"><b>用户可见成果</b><br>不离开 Hermes 就能理解结果、继续讨论并完成正式审批。</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:110px 1fr 270px;gap:16px;padding:20px;border:1px solid #6b4f24;border-radius:13px;background:rgba(245,158,11,.045)">
+    <div><div class="letter">5</div><strong style="color:#f2c874">旧页退场</strong></div>
+    <div><h3>功能等价后再隐藏、重定向、删除 UI 壳</h3><p style="color:#aaa3ae">先移除导航入口但保留旧路由回滚；深链、结果详情和审批 E2E 全部通过后设置兼容重定向，最后删除旧表单组件。后端引擎、API、产物和安全 Gate 全部保留。</p></div>
+    <div style="padding:12px;border-left:3px solid #a67837;color:#dcc18f"><b>禁止伪进度</b><br>不能通过先删页面来宣称整合完成。</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:110px 1fr 270px;gap:16px;padding:20px;border:1px solid #4f4a55;border-radius:13px;background:rgba(255,255,255,.018)">
+    <div><div class="letter">6</div><strong style="color:#d2cbd6">硬化交付</strong></div>
+    <div><h3>故障、迁移、全量测试与真实本地体验</h3><p style="color:#aaa3ae">验证 Hermes 离线、SSE 断线、数据库不可用、provider quota/fallback、partial result、stale approval 和 rollback；启动前后端、Docker PostgreSQL 与 Hermes，完成明确授权的本地 smoke。</p></div>
+    <div style="padding:12px;border-left:3px solid #716a77;color:#c2bbc7"><b>最终成果</b><br>文档、迁移、服务启动方式和项目现状同步，旧数据零丢失。</div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:30px">
+  <div class="mockup-header">旧 URL 如何迁移</div>
+  <div class="mockup-body" style="padding:22px;background:#121116">
+    <div style="display:grid;grid-template-columns:1fr 60px 1fr;gap:10px;align-items:center">
+      <code>/factor-lab</code><span style="color:#81798a;text-align:center">→</span><code>/hermes?intent=factor-research</code>
+      <code>/factor-lab/[runId]</code><span style="color:#81798a;text-align:center">→</span><code>/hermes/results/factors/[runId]</code>
+      <code>/backtest</code><span style="color:#81798a;text-align:center">→</span><code>/hermes?intent=backtest</code>
+      <code>/backtest/[runId]</code><span style="color:#81798a;text-align:center">→</span><code>/hermes/results/backtests/[runId]</code>
+      <code>/experiments</code><span style="color:#81798a;text-align:center">→</span><code>/hermes/results/experiments</code>
+      <code>/agent-studio</code><span style="color:#81798a;text-align:center">→</span><code>/hermes/approvals</code>
+    </div>
+    <div style="margin-top:16px;padding:13px;border-left:3px solid #f4bd63;background:#1d1914;color:#d8c6aa">动态详情 URL 必须保留原 run ID；书签、前进后退、多语言路由、离线与 404 均要单独验收。</div>
+  </div>
+</div>
+
+<div class="split" style="margin-top:28px;align-items:stretch">
+  <div class="mockup">
+    <div class="mockup-header">自动化验证：不消耗真实额度</div>
+    <div class="mockup-body" style="padding:21px;background:#121116">
+      <ul style="color:#aaa3ae;line-height:1.8">
+        <li>Fake Hermes Server + 可控 SSE / approval / stop / quota fixtures</li>
+        <li>HQA ledger 原子写、损坏恢复、attempt 与 operation idempotency</li>
+        <li>candidate digest、Gate stale、promotion TOCTOU 回归测试</li>
+        <li>React 状态目录、Playwright 全流程、固定视口视觉回归</li>
+        <li>Hermes 离线、重连、partial、数据库故障和显式 fallback</li>
+      </ul>
+      <p style="margin-top:12px;color:#d8c6aa">CI 和常规测试不得调用真实 Grok / Codex，也不得触发 paper/live 交易路径。</p>
+    </div>
+  </div>
+  <div class="mockup">
+    <div class="mockup-header">人工验收：真实但有边界</div>
+    <div class="mockup-body" style="padding:21px;background:#121116">
+      <ul style="color:#aaa3ae;line-height:1.8">
+        <li>用户先批准高保真，再批准生产壳，再批准功能等价</li>
+        <li>本地 Grok 与 Codex 各完成一条明确授权的普通对话 smoke</li>
+        <li>完成一条 proposal-only 研究链路与 Gate 1/2/3 演练</li>
+        <li>确认 paper_only、live disabled、kill switch 与人工 Gate 未被绕过</li>
+        <li>前端 console 0 error；键盘、对比度、长文本与移动端可用</li>
+      </ul>
+      <p style="margin-top:12px;color:#a9d9b8">最后才移除旧 UI 组件；禁用新工作台即可回滚，原有产物和引擎不受影响。</p>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:26px;padding:17px;border:1px solid #67528d;border-radius:12px;background:rgba(139,92,246,.06)">
+  <strong>专业前端硬门槛：</strong>全状态高保真必须先经你确认；实现后由另一名前端/UX reviewer 在真实接入、统一结果、旧页退场三个节点独立复审。无裁切、无横向溢出、无“微卡片墙”，正常自动化压缩，异常与待办优先。
+</div>

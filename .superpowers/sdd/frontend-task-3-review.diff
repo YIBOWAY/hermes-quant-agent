@@ -1,0 +1,2934 @@
+# Review package: c5c614d..HEAD
+
+## Commits
+2e4704b feat(frontend): derive truthful Hermes read-only workbench state
+
+## Files changed
+ src/frontend/lib/hermes/copy.ts                    | 135 +++++++
+ src/frontend/lib/hermes/featureFlags.test.ts       |  40 ++
+ src/frontend/lib/hermes/featureFlags.ts            |  20 +
+ src/frontend/lib/hermes/routes.test.ts             |  53 +++
+ src/frontend/lib/hermes/routes.ts                  |  45 +++
+ src/frontend/lib/hermes/types.ts                   |  71 ++++
+ src/frontend/lib/hermes/viewModel.test.ts          |  95 +++++
+ src/frontend/lib/hermes/viewModel.ts               | 422 +++++++++++++++++++++
+ src/frontend/lib/hermes/viewModelFixtures.ts       | 204 ++++++++++
+ src/frontend/playwright.config.ts                  | 120 ++++--
+ .../tests/fixtures/hermes-workbench/degraded.json  | 292 ++++++++++++++
+ .../tests/fixtures/hermes-workbench/empty.json     |  61 +++
+ .../fixtures/hermes-workbench/long-content.json    | 253 ++++++++++++
+ .../tests/fixtures/hermes-workbench/normal.json    | 316 +++++++++++++++
+ .../tests/fixtures/hermes-workbench/offline.json   |  98 +++++
+ src/frontend/tests/support/hermes-fixture-api.mjs  | 272 +++++++++++++
+ .../tests/support/hermes-fixture-api.test.mjs      | 232 +++++++++++
+ 17 files changed, 2695 insertions(+), 34 deletions(-)
+
+## Diff
+diff --git a/src/frontend/lib/hermes/copy.ts b/src/frontend/lib/hermes/copy.ts
+new file mode 100644
+index 0000000..721fdfd
+--- /dev/null
++++ b/src/frontend/lib/hermes/copy.ts
+@@ -0,0 +1,135 @@
++import type { Locale } from "@/lib/locale";
++import type { HermesDeliveryState } from "./types";
++
++export type HermesWorkbenchCopy = {
++  nav: {
++    landmark: string;
++    today: string;
++    conversation: string;
++    conversationUnavailable: string;
++    tasks: string;
++    approvals: string;
++    results: string;
++  };
++  capability: {
++    blocked_in_this_slice: {
++      title: string;
++      body: string;
++    };
++  };
++  labels: {
++    researchApproval: string;
++    marketPrediction: string;
++    automationHealthy: string;
++    automationAttention: string;
++    automationUnavailable: string;
++    technicalDetails: string;
++    attention: string;
++    recentResults: string;
++  };
++  states: {
++    empty: string;
++    normal: string;
++    degraded: string;
++    offline: string;
++  };
++  composer: {
++    label: string;
++    placeholder: string;
++    unavailable: string;
++    sendDisabled: string;
++  };
++};
++
++const en: HermesWorkbenchCopy = {
++  nav: {
++    landmark: "Hermes workbench",
++    today: "Today",
++    conversation: "Conversation",
++    conversationUnavailable: "Conversation unavailable in this delivery",
++    tasks: "Tasks",
++    approvals: "Approvals",
++    results: "Results",
++  },
++  capability: {
++    blocked_in_this_slice: {
++      title: "Hermes write capabilities are not connected in this delivery",
++      body: "Chat, execution, unified dynamic results, and legacy redirects stay off. This is a fixed delivery fact for this slice, not a live gateway probe.",
++    },
++  },
++  labels: {
++    researchApproval: "Research approval item",
++    marketPrediction: "Market prediction proposals",
++    automationHealthy: "Automation healthy",
++    automationAttention: "Automation needs attention",
++    automationUnavailable: "Automation source unavailable",
++    technicalDetails: "Technical details",
++    attention: "Needs attention",
++    recentResults: "Recent results",
++  },
++  states: {
++    empty: "No research activity yet",
++    normal: "Research posture is healthy",
++    degraded: "Research posture is degraded",
++    offline: "Hermes artifact sources unavailable",
++  },
++  composer: {
++    label: "Talk with Hermes",
++    placeholder: "Hermes write capability is not connected in this delivery",
++    unavailable: "Composer cannot submit research tasks in this delivery",
++    sendDisabled: "Send (disabled)",
++  },
++};
++
++const zh: HermesWorkbenchCopy = {
++  nav: {
++    landmark: "Hermes 工作台",
++    today: "今日",
++    conversation: "对话",
++    conversationUnavailable: "本交付未开放对话",
++    tasks: "任务",
++    approvals: "审批",
++    results: "结果",
++  },
++  capability: {
++    blocked_in_this_slice: {
++      title: "本交付未连接 Hermes 写入能力",
++      body: "对话、执行、统一动态结果与旧重定向保持关闭。这是本切片的固定交付事实，不是实时网关探测结果。",
++    },
++  },
++  labels: {
++    researchApproval: "研究审批项",
++    marketPrediction: "市场预测提案",
++    automationHealthy: "自动化正常",
++    automationAttention: "自动化需要关注",
++    automationUnavailable: "自动化源不可用",
++    technicalDetails: "技术细节",
++    attention: "需要关注",
++    recentResults: "最近结果",
++  },
++  states: {
++    empty: "今日尚无研究活动",
++    normal: "研究态势正常",
++    degraded: "研究态势已降级",
++    offline: "Hermes 产物源不可用",
++  },
++  composer: {
++    label: "和 Hermes 对话",
++    placeholder: "真实 Hermes 写入能力尚未通过",
++    unavailable: "本交付中撰写区不能提交研究任务",
++    sendDisabled: "发送（已禁用）",
++  },
++};
++
++const byLocale: Record<Locale, HermesWorkbenchCopy> = { en, zh };
++
++export function hermesWorkbenchCopy(locale: Locale): HermesWorkbenchCopy {
++  return byLocale[locale] ?? en;
++}
++
++export function hermesCapabilityCopy(
++  locale: Locale,
++  deliveryState: HermesDeliveryState,
++): { title: string; body: string } {
++  return hermesWorkbenchCopy(locale).capability[deliveryState];
++}
+diff --git a/src/frontend/lib/hermes/featureFlags.test.ts b/src/frontend/lib/hermes/featureFlags.test.ts
+new file mode 100644
+index 0000000..f5475a0
+--- /dev/null
++++ b/src/frontend/lib/hermes/featureFlags.test.ts
+@@ -0,0 +1,40 @@
++import { describe, expect, it } from "vitest";
++import { hermesFeatureFlags } from "./featureFlags";
++
++const attemptedCapabilityOverrides = {
++  QS_HERMES_SHELL_ENABLED: "true",
++  QS_HERMES_CHAT_ENABLED: "true",
++  QS_HERMES_EXECUTION_ENABLED: "true",
++  QS_HERMES_UNIFIED_RESULTS_ENABLED: "true",
++  QS_HERMES_LEGACY_REDIRECTS_ENABLED: "true",
++};
++
++describe("hermesFeatureFlags", () => {
++  it("allows only the shell flag to vary in this slice", () => {
++    expect(hermesFeatureFlags(attemptedCapabilityOverrides)).toEqual({
++      shell: true,
++      chat: false,
++      execution: false,
++      unifiedResults: false,
++      legacyRedirects: false,
++      deliveryState: "blocked_in_this_slice",
++    });
++    expect(
++      hermesFeatureFlags({
++        ...attemptedCapabilityOverrides,
++        QS_HERMES_SHELL_ENABLED: "false",
++      }),
++    ).toEqual({
++      shell: false,
++      chat: false,
++      execution: false,
++      unifiedResults: false,
++      legacyRedirects: false,
++      deliveryState: "blocked_in_this_slice",
++    });
++  });
++
++  it("defaults shell to true when the shell env var is unset", () => {
++    expect(hermesFeatureFlags({}).shell).toBe(true);
++  });
++});
+diff --git a/src/frontend/lib/hermes/featureFlags.ts b/src/frontend/lib/hermes/featureFlags.ts
+new file mode 100644
+index 0000000..db0e613
+--- /dev/null
++++ b/src/frontend/lib/hermes/featureFlags.ts
+@@ -0,0 +1,20 @@
++import type { HermesFeatureFlags } from "./types";
++
++/**
++ * Shell is the only env-configurable capability in this slice.
++ * chat / execution / unifiedResults / legacyRedirects are hard false and
++ * must not be read from environment variables.
++ * deliveryState is a versioned delivery fact, never a live probe.
++ */
++export function hermesFeatureFlags(
++  env: { [key: string]: string | undefined } = process.env,
++): HermesFeatureFlags {
++  return {
++    shell: env.QS_HERMES_SHELL_ENABLED !== "false",
++    chat: false,
++    execution: false,
++    unifiedResults: false,
++    legacyRedirects: false,
++    deliveryState: "blocked_in_this_slice",
++  } as const;
++}
+diff --git a/src/frontend/lib/hermes/routes.test.ts b/src/frontend/lib/hermes/routes.test.ts
+new file mode 100644
+index 0000000..9fa0994
+--- /dev/null
++++ b/src/frontend/lib/hermes/routes.test.ts
+@@ -0,0 +1,53 @@
++import { describe, expect, it } from "vitest";
++import { hermesHomeHref, hermesRouteHref, hermesRoutes } from "./routes";
++
++describe("hermesRoutes", () => {
++  it("exports the four internal workbench paths without conversation", () => {
++    expect(hermesRoutes).toEqual({
++      today: "/hermes",
++      tasks: "/hermes/tasks",
++      approvals: "/hermes/approvals",
++      results: "/hermes/results",
++    });
++    expect(Object.values(hermesRoutes).join(" ")).not.toContain("conversation");
++  });
++});
++
++describe("hermesHomeHref", () => {
++  it("localizes with no query string", () => {
++    expect(hermesHomeHref("en", {})).toBe("/en/hermes");
++    expect(hermesHomeHref("zh", {})).toBe("/zh/hermes");
++  });
++
++  it("preserves a single query parameter", () => {
++    expect(hermesHomeHref("en", { focus: "approvals" })).toBe(
++      "/en/hermes?focus=approvals",
++    );
++  });
++
++  it("preserves repeated query parameters", () => {
++    expect(hermesHomeHref("zh", { tag: ["a", "b"] })).toBe(
++      "/zh/hermes?tag=a&tag=b",
++    );
++  });
++
++  it("orders query keys deterministically", () => {
++    expect(hermesHomeHref("en", { z: "1", a: "2", m: "3" })).toBe(
++      "/en/hermes?a=2&m=3&z=1",
++    );
++  });
++
++  it("skips undefined values", () => {
++    expect(hermesHomeHref("en", { a: "1", b: undefined })).toBe(
++      "/en/hermes?a=1",
++    );
++  });
++});
++
++describe("hermesRouteHref", () => {
++  it("localizes nested routes with ordered query keys", () => {
++    expect(hermesRouteHref("approvals", "zh", { b: "2", a: "1" })).toBe(
++      "/zh/hermes/approvals?a=1&b=2",
++    );
++  });
++});
+diff --git a/src/frontend/lib/hermes/routes.ts b/src/frontend/lib/hermes/routes.ts
+new file mode 100644
+index 0000000..780eb1c
+--- /dev/null
++++ b/src/frontend/lib/hermes/routes.ts
+@@ -0,0 +1,45 @@
++import { localizePath, type Locale } from "@/lib/locale";
++
++export const hermesRoutes = {
++  today: "/hermes",
++  tasks: "/hermes/tasks",
++  approvals: "/hermes/approvals",
++  results: "/hermes/results",
++} as const;
++
++export type HermesSearchParams = Record<
++  string,
++  string | string[] | undefined
++>;
++
++export function hermesHomeHref(
++  locale: Locale,
++  searchParams: HermesSearchParams,
++): string {
++  const query = new URLSearchParams();
++  for (const key of Object.keys(searchParams).sort()) {
++    const values = searchParams[key];
++    for (const value of Array.isArray(values) ? values : [values]) {
++      if (value !== undefined) query.append(key, value);
++    }
++  }
++  const suffix = query.size ? `?${query.toString()}` : "";
++  return localizePath(`/hermes${suffix}`, locale);
++}
++
++export function hermesRouteHref(
++  route: keyof typeof hermesRoutes,
++  locale: Locale,
++  searchParams: HermesSearchParams = {},
++): string {
++  const base = hermesRoutes[route];
++  const query = new URLSearchParams();
++  for (const key of Object.keys(searchParams).sort()) {
++    const values = searchParams[key];
++    for (const value of Array.isArray(values) ? values : [values]) {
++      if (value !== undefined) query.append(key, value);
++    }
++  }
++  const suffix = query.size ? `?${query.toString()}` : "";
++  return localizePath(`${base}${suffix}`, locale);
++}
+diff --git a/src/frontend/lib/hermes/types.ts b/src/frontend/lib/hermes/types.ts
+new file mode 100644
+index 0000000..0bbcb7a
+--- /dev/null
++++ b/src/frontend/lib/hermes/types.ts
+@@ -0,0 +1,71 @@
++import type {
++  AgentCandidatesResponse,
++  HermesArtifactShelfEnvelope,
++} from "@/lib/api";
++
++export type HermesAttentionItem = {
++  id: string;
++  kind: "approval" | "failure" | "stale" | "offline" | "degraded";
++  title: string;
++  summary: string;
++  href?: string;
++};
++
++export type HermesResultSummary = {
++  id: string;
++  kind: string;
++  title: string;
++  summary: string;
++  status: string;
++  occurredAt: string;
++  href?: string;
++  limitations: string[];
++};
++
++export type HermesTechnicalSource = {
++  id: string;
++  label: string;
++  status: "available" | "degraded" | "unavailable";
++  lastSyncedAt?: string;
++  details: Array<{ label: string; value: string }>;
++};
++
++export type HermesAutomationSummary = {
++  healthy: number;
++  total: number;
++  status: "healthy" | "attention" | "unavailable";
++  exceptions: Array<{
++    jobId: string;
++    status: string;
++    reason: string;
++  }>;
++};
++
++export type HermesTodayModel = {
++  state: "empty" | "normal" | "degraded" | "offline";
++  attention: HermesAttentionItem[];
++  automation: HermesAutomationSummary;
++  recentResults: HermesResultSummary[];
++  technical: HermesTechnicalSource[];
++};
++
++export type HermesTodayModelInput = {
++  artifacts: HermesArtifactShelfEnvelope;
++  candidates: AgentCandidatesResponse;
++};
++
++export type HermesDeliveryState = "blocked_in_this_slice";
++
++export type HermesFeatureFlags = {
++  shell: boolean;
++  chat: false;
++  execution: false;
++  unifiedResults: false;
++  legacyRedirects: false;
++  deliveryState: HermesDeliveryState;
++};
++
++/** Backend CandidateReadItem keys required on every list payload (nullable ≠ optional). */
++export type HermesCandidateReadItem = AgentCandidatesResponse["candidates"][number] & {
++  universe?: string[] | null;
++};
+diff --git a/src/frontend/lib/hermes/viewModel.test.ts b/src/frontend/lib/hermes/viewModel.test.ts
+new file mode 100644
+index 0000000..3312b5d
+--- /dev/null
++++ b/src/frontend/lib/hermes/viewModel.test.ts
+@@ -0,0 +1,95 @@
++import { describe, expect, it } from "vitest";
++import type { AgentCandidatesResponse } from "@/lib/api";
++import { buildHermesTodayModel } from "./viewModel";
++import {
++  candidateFixture,
++  degradedArtifacts,
++  healthyArtifacts,
++  noArtifacts,
++} from "./viewModelFixtures";
++
++describe("buildHermesTodayModel", () => {
++  it("compresses healthy automation to one summary and emits no normal job cards", () => {
++    const model = buildHermesTodayModel({
++      artifacts: healthyArtifacts,
++      candidates: { candidates: [] },
++    });
++    expect(model.automation).toMatchObject({
++      healthy: 4,
++      total: 4,
++      status: "healthy",
++      exceptions: [],
++    });
++    expect(model.attention).toEqual([]);
++  });
++
++  it("promotes only failed/stale jobs and research approvals to attention", () => {
++    const model = buildHermesTodayModel({
++      artifacts: degradedArtifacts,
++      candidates: {
++        candidates: [
++          candidateFixture({
++            candidate_id: "factor-long-approval-id",
++            artifact_type: "factor",
++            goal: "Evaluate a deterministic reversal factor",
++            universe: ["AAPL"],
++            status: "pending",
++            manifest_digest: "a".repeat(64),
++            observed_manifest_digest: null,
++            approval_binding: "pending",
++            integrity_state: "verified",
++            approval_enabled: true,
++            integrity_error_code: null,
++          }),
++        ],
++      } satisfies AgentCandidatesResponse,
++    });
++    expect(model.state).toBe("degraded");
++    expect(model.attention.map((item) => item.kind)).toEqual([
++      "approval",
++      "stale",
++    ]);
++    expect(model.automation.exceptions).toHaveLength(1);
++  });
++
++  it("distinguishes empty feed from unavailable Hermes sources", () => {
++    expect(
++      buildHermesTodayModel({
++        artifacts: noArtifacts("empty"),
++        candidates: { candidates: [] },
++      }).state,
++    ).toBe("empty");
++    expect(
++      buildHermesTodayModel({
++        artifacts: noArtifacts("unavailable"),
++        candidates: { candidates: [] },
++      }).state,
++    ).toBe("offline");
++  });
++
++  it("shows unversioned candidates as migration attention, never approval", () => {
++    const model = buildHermesTodayModel({
++      artifacts: healthyArtifacts,
++      candidates: {
++        candidates: [
++          candidateFixture({
++            candidate_id: "legacy-pending",
++            artifact_type: "factor",
++            goal: "Migrate an unversioned factor candidate",
++            universe: ["AAPL"],
++            status: "pending",
++            manifest_digest: null,
++            observed_manifest_digest: "b".repeat(64),
++            approval_binding: "pending",
++            integrity_state: "migration_required",
++            approval_enabled: false,
++            integrity_error_code: null,
++          }),
++        ],
++      } satisfies AgentCandidatesResponse,
++    });
++    expect(model.attention).toEqual([
++      expect.objectContaining({ kind: "degraded", id: "legacy-pending" }),
++    ]);
++  });
++});
+diff --git a/src/frontend/lib/hermes/viewModel.ts b/src/frontend/lib/hermes/viewModel.ts
+new file mode 100644
+index 0000000..ab079b8
+--- /dev/null
++++ b/src/frontend/lib/hermes/viewModel.ts
+@@ -0,0 +1,422 @@
++import type {
++  AgentCandidatesResponse,
++  HermesArtifact,
++  HermesArtifactShelfEnvelope,
++  HermesAutomationStatusArtifactData,
++  HermesArtifactSource,
++} from "@/lib/api";
++import { hermesRoutes } from "./routes";
++import type {
++  HermesAttentionItem,
++  HermesAutomationSummary,
++  HermesCandidateReadItem,
++  HermesResultSummary,
++  HermesTechnicalSource,
++  HermesTodayModel,
++} from "./types";
++
++const KNOWN_JOB_IDS = [
++  "daily_close",
++  "freshness",
++  "weekly",
++  "notification_drain",
++] as const;
++
++type KnownJobId = (typeof KNOWN_JOB_IDS)[number];
++
++const KNOWN_JOB_ID_SET = new Set<string>(KNOWN_JOB_IDS);
++
++const DEGRADED_NOTIFICATION = new Set([
++  "fallback_persisted",
++  "delivery_unknown",
++]);
++
++const ATTENTION_KIND_ORDER: Record<HermesAttentionItem["kind"], number> = {
++  approval: 0,
++  failure: 1,
++  stale: 2,
++  offline: 3,
++  degraded: 4,
++};
++
++function isKnownJobId(value: string): value is KnownJobId {
++  return KNOWN_JOB_ID_SET.has(value);
++}
++
++function isAutomationItem(
++  item: HermesArtifact,
++): item is Extract<HermesArtifact, { kind: "automation_status" }> {
++  return item.kind === "automation_status";
++}
++
++function pickLatestAutomation(
++  items: HermesArtifact[],
++): Extract<HermesArtifact, { kind: "automation_status" }> | null {
++  const automationItems = items.filter(isAutomationItem);
++  if (automationItems.length === 0) return null;
++  return automationItems.reduce((latest, item) =>
++    item.occurred_at > latest.occurred_at ? item : latest,
++  );
++}
++
++function jobIsException(
++  job: HermesAutomationStatusArtifactData["jobs"][number],
++): boolean {
++  if (
++    job.status === "failed" ||
++    job.status === "stale" ||
++    job.status === "never_run"
++  ) {
++    return true;
++  }
++  return DEGRADED_NOTIFICATION.has(job.notification_status);
++}
++
++function exceptionAttentionKind(
++  job: HermesAutomationStatusArtifactData["jobs"][number],
++): HermesAttentionItem["kind"] {
++  if (job.status === "stale") return "stale";
++  if (job.status === "failed" || job.status === "never_run") return "failure";
++  return "degraded";
++}
++
++function buildAutomation(
++  artifacts: HermesArtifactShelfEnvelope,
++): HermesAutomationSummary {
++  if (artifacts.read_status === "unavailable") {
++    return {
++      healthy: 0,
++      total: KNOWN_JOB_IDS.length,
++      status: "unavailable",
++      exceptions: [],
++    };
++  }
++
++  const latest = pickLatestAutomation(artifacts.items);
++  if (!latest) {
++    return {
++      healthy: 0,
++      total: KNOWN_JOB_IDS.length,
++      status: artifacts.read_status === "empty" ? "healthy" : "unavailable",
++      exceptions: [],
++    };
++  }
++
++  const jobs = latest.data.jobs.filter((job) => isKnownJobId(job.job_id));
++  const exceptions = jobs
++    .filter(jobIsException)
++    .map((job) => ({
++      jobId: job.job_id,
++      status: job.status,
++      reason:
++        job.reason_code ??
++        (DEGRADED_NOTIFICATION.has(job.notification_status)
++          ? `notification:${job.notification_status}`
++          : job.status),
++    }))
++    .sort((a, b) => a.jobId.localeCompare(b.jobId));
++
++  const healthy = jobs.length - exceptions.length;
++  return {
++    healthy,
++    total: KNOWN_JOB_IDS.length,
++    status: exceptions.length > 0 ? "attention" : "healthy",
++    exceptions,
++  };
++}
++
++function automationAttention(
++  artifacts: HermesArtifactShelfEnvelope,
++  automation: HermesAutomationSummary,
++): HermesAttentionItem[] {
++  const latest = pickLatestAutomation(artifacts.items);
++  if (!latest) return [];
++  const byId = new Map<
++    string,
++    HermesAutomationStatusArtifactData["jobs"][number]
++  >(
++    latest.data.jobs
++      .filter((job) => isKnownJobId(job.job_id))
++      .map((job) => [job.job_id, job]),
++  );
++
++  return automation.exceptions.map((exception) => {
++    const job = byId.get(exception.jobId);
++    const kind = job ? exceptionAttentionKind(job) : "degraded";
++    return {
++      id: `automation:${exception.jobId}`,
++      kind,
++      title: `Automation job ${exception.jobId}`,
++      summary: exception.reason,
++      href: hermesRoutes.tasks,
++    };
++  });
++}
++
++function candidateAttention(
++  candidates: AgentCandidatesResponse,
++): HermesAttentionItem[] {
++  const items: HermesAttentionItem[] = [];
++  for (const raw of candidates.candidates) {
++    const candidate = raw as HermesCandidateReadItem;
++    const id = candidate.candidate_id;
++    const integrity = candidate.integrity_state ?? null;
++    const approvalEnabled = candidate.approval_enabled === true;
++    const pending =
++      candidate.status === "pending" ||
++      candidate.approval_binding === "pending";
++
++    if (
++      integrity === "verified" &&
++      approvalEnabled &&
++      pending &&
++      candidate.manifest_digest
++    ) {
++      items.push({
++        id,
++        kind: "approval",
++        title: "Research approval item",
++        summary: candidate.goal ?? id,
++        href: hermesRoutes.approvals,
++      });
++      continue;
++    }
++
++    if (
++      integrity === "migration_required" ||
++      integrity === "corrupt" ||
++      candidate.approval_binding === "legacy_unbound"
++    ) {
++      items.push({
++        id,
++        kind: "degraded",
++        title:
++          integrity === "migration_required"
++            ? "Candidate requires migration"
++            : integrity === "corrupt"
++              ? "Candidate integrity failed"
++              : "Legacy unbound candidate",
++        summary: candidate.goal ?? id,
++      });
++    }
++  }
++  return items;
++}
++
++function offlineAttention(
++  artifacts: HermesArtifactShelfEnvelope,
++): HermesAttentionItem[] {
++  if (artifacts.read_status !== "unavailable") return [];
++  return [
++    {
++      id: "artifact-feed",
++      kind: "offline",
++      title: "Hermes artifact sources unavailable",
++      summary:
++        artifacts.warnings[0]?.code ??
++        artifacts.apiError ??
++        "artifact_feed_unavailable",
++    },
++  ];
++}
++
++function sortAttention(items: HermesAttentionItem[]): HermesAttentionItem[] {
++  return [...items].sort((a, b) => {
++    const kindDelta =
++      ATTENTION_KIND_ORDER[a.kind] - ATTENTION_KIND_ORDER[b.kind];
++    if (kindDelta !== 0) return kindDelta;
++    return a.id.localeCompare(b.id);
++  });
++}
++
++function limitationsFromData(data: Record<string, unknown>): string[] {
++  const value = data.limitations;
++  if (!Array.isArray(value)) return [];
++  return value.filter((entry): entry is string => typeof entry === "string");
++}
++
++function resultTitle(item: HermesArtifact): string {
++  if (item.kind === "weekly_review") {
++    return `Weekly review · ${item.data.week_id}`;
++  }
++  if (item.kind === "opportunity_summary") {
++    return "Opportunity review";
++  }
++  if (item.kind === "prediction") {
++    return `Prediction · ${item.data.symbol}`;
++  }
++  if (item.kind === "market_foresight") {
++    return item.data.summary || "Market foresight";
++  }
++  if (item.kind === "portfolio_risk") {
++    return "Portfolio risk";
++  }
++  return item.kind;
++}
++
++function resultSummary(item: HermesArtifact): string {
++  if (item.kind === "weekly_review") {
++    return `signals=${item.data.unique_signal_count}; missed=${item.data.opportunity_missed_count}`;
++  }
++  if (item.kind === "opportunity_summary") {
++    return `total=${item.data.total_count}`;
++  }
++  if (item.kind === "prediction") {
++    return `${item.data.direction} · ${item.data.state}`;
++  }
++  if (item.kind === "market_foresight") {
++    return `${item.data.candidate_count} market prediction proposals`;
++  }
++  if (item.kind === "portfolio_risk") {
++    return item.data.largest_symbol
++      ? `largest=${item.data.largest_symbol}`
++      : "portfolio risk snapshot";
++  }
++  return item.status;
++}
++
++function buildRecentResults(
++  artifacts: HermesArtifactShelfEnvelope,
++): HermesResultSummary[] {
++  return artifacts.items
++    .filter((item) => item.kind !== "automation_status")
++    .slice()
++    .sort((a, b) => {
++      if (a.occurred_at === b.occurred_at) return a.id.localeCompare(b.id);
++      return a.occurred_at < b.occurred_at ? 1 : -1;
++    })
++    .map((item) => ({
++      id: item.id,
++      kind: item.kind,
++      title: resultTitle(item),
++      summary: resultSummary(item),
++      status: item.status,
++      occurredAt: item.occurred_at,
++      href: hermesRoutes.results,
++      limitations: limitationsFromData(
++        item.data as unknown as Record<string, unknown>,
++      ),
++    }));
++}
++
++function mapSourceStatus(
++  status: HermesArtifactSource["status"],
++): HermesTechnicalSource["status"] {
++  if (status === "degraded") return "degraded";
++  if (status === "unavailable") return "unavailable";
++  return "available";
++}
++
++function buildTechnical(
++  artifacts: HermesArtifactShelfEnvelope,
++): HermesTechnicalSource[] {
++  const sources: HermesTechnicalSource[] = artifacts.sources
++    .slice()
++    .sort((a, b) => a.kind.localeCompare(b.kind))
++    .map((source) => {
++      const details: HermesTechnicalSource["details"] = [
++        { label: "status", value: source.status },
++      ];
++      if (source.reason_code) {
++        details.push({ label: "reason_code", value: source.reason_code });
++      }
++      if (source.latest_at) {
++        details.push({ label: "latest_at", value: source.latest_at });
++      }
++      return {
++        id: source.kind,
++        label: source.kind,
++        status: mapSourceStatus(source.status),
++        lastSyncedAt: source.latest_at ?? undefined,
++        details,
++      };
++    });
++
++  if (artifacts.warnings.length > 0) {
++    sources.push({
++      id: "artifact_feed_warnings",
++      label: "artifact_feed",
++      status:
++        artifacts.read_status === "unavailable" ? "unavailable" : "degraded",
++      details: artifacts.warnings.map((warning) => ({
++        label: warning.source,
++        value: warning.code,
++      })),
++    });
++  }
++
++  if (artifacts.as_of) {
++    sources.push({
++      id: "feed_as_of",
++      label: "as_of",
++      status: "available",
++      lastSyncedAt: artifacts.as_of,
++      details: [{ label: "as_of", value: artifacts.as_of }],
++    });
++  }
++
++  return sources;
++}
++
++function deriveState(input: {
++  artifacts: HermesArtifactShelfEnvelope;
++  attention: HermesAttentionItem[];
++  automation: HermesAutomationSummary;
++  recentResults: HermesResultSummary[];
++}): HermesTodayModel["state"] {
++  if (input.artifacts.read_status === "unavailable") {
++    return "offline";
++  }
++  if (input.attention.some((item) => item.kind === "offline")) {
++    return "offline";
++  }
++  if (
++    input.attention.length > 0 ||
++    input.automation.exceptions.length > 0 ||
++    input.artifacts.read_status === "degraded" ||
++    input.automation.status === "attention"
++  ) {
++    return "degraded";
++  }
++  if (
++    input.artifacts.read_status === "empty" ||
++    (input.recentResults.length === 0 &&
++      input.attention.length === 0 &&
++      input.artifacts.items.length === 0)
++  ) {
++    return "empty";
++  }
++  return "normal";
++}
++
++/**
++ * Pure derivation of the read-only Hermes Today workbench model.
++ * No timers, network, or capability probes.
++ */
++export function buildHermesTodayModel(input: {
++  artifacts: HermesArtifactShelfEnvelope;
++  candidates: AgentCandidatesResponse;
++}): HermesTodayModel {
++  const automation = buildAutomation(input.artifacts);
++  const attention = sortAttention([
++    ...candidateAttention(input.candidates),
++    ...automationAttention(input.artifacts, automation),
++    ...offlineAttention(input.artifacts),
++  ]);
++  const recentResults = buildRecentResults(input.artifacts);
++  const technical = buildTechnical(input.artifacts);
++  const state = deriveState({
++    artifacts: input.artifacts,
++    attention,
++    automation,
++    recentResults,
++  });
++
++  return {
++    state,
++    attention,
++    automation,
++    recentResults,
++    technical,
++  };
++}
+diff --git a/src/frontend/lib/hermes/viewModelFixtures.ts b/src/frontend/lib/hermes/viewModelFixtures.ts
+new file mode 100644
+index 0000000..b08bda6
+--- /dev/null
++++ b/src/frontend/lib/hermes/viewModelFixtures.ts
+@@ -0,0 +1,204 @@
++import type {
++  HermesArtifactShelfEnvelope,
++  HermesAutomationStatusArtifactData,
++} from "@/lib/api";
++import type { HermesCandidateReadItem } from "./types";
++
++const KNOWN_JOB_IDS = [
++  "daily_close",
++  "freshness",
++  "weekly",
++  "notification_drain",
++] as const;
++
++type KnownJobId = (typeof KNOWN_JOB_IDS)[number];
++
++const JOB_SCHEDULES: Record<
++  KnownJobId,
++  { expected_schedule: string; freshness_budget_seconds: number }
++> = {
++  daily_close: {
++    expected_schedule: "15 8 * * 2-6",
++    freshness_budget_seconds: 108_000,
++  },
++  freshness: {
++    expected_schedule: "17 */2 * * *",
++    freshness_budget_seconds: 10_800,
++  },
++  weekly: {
++    expected_schedule: "0 9 * * 0",
++    freshness_budget_seconds: 691_200,
++  },
++  notification_drain: {
++    expected_schedule: "*/15 * * * *",
++    freshness_budget_seconds: 1_800,
++  },
++};
++
++function freshJob(
++  jobId: KnownJobId,
++): HermesAutomationStatusArtifactData["jobs"][number] {
++  const meta = JOB_SCHEDULES[jobId];
++  return {
++    job_id: jobId,
++    expected_schedule: meta.expected_schedule,
++    timezone: "Asia/Shanghai",
++    freshness_budget_seconds: meta.freshness_budget_seconds,
++    last_attempt_at: "2026-07-12T00:50:00Z",
++    last_success_at: "2026-07-12T00:50:00Z",
++    fresh_until: "2026-07-13T06:50:00Z",
++    status: "fresh",
++    reason_code: null,
++    last_run_id: `run-${jobId}-healthy`,
++    notification_status: "delivered",
++  };
++}
++
++function automationItem(
++  jobs: HermesAutomationStatusArtifactData["jobs"],
++  overall: "fresh" | "degraded",
++  occurredAt = "2026-07-12T00:57:00Z",
++) {
++  return {
++    id: "automation-latest",
++    kind: "automation_status" as const,
++    occurred_at: occurredAt,
++    quality: overall === "fresh" ? ("available" as const) : ("degraded" as const),
++    status: overall,
++    data: {
++      checked_at: occurredAt,
++      overall_status: overall,
++      jobs,
++      proposal_only: true as const,
++      trading_allowed: false as const,
++    },
++  };
++}
++
++const weeklyReviewItem = {
++  id: "weekly-2026-W28",
++  kind: "weekly_review" as const,
++  occurred_at: "2026-07-12T00:59:00Z",
++  quality: "available" as const,
++  status: "available",
++  data: {
++    week_id: "2026-W28",
++    period_start: "2026-07-05T00:00:00Z",
++    period_end: "2026-07-12T00:00:00Z",
++    safety_alert_count: 1,
++    unique_signal_count: 3,
++    review_draft_count: 2,
++    review_confirmed_count: 1,
++    prediction_created_count: 0,
++    prediction_scored_count: 0,
++    prediction_hit_count: 0,
++    mean_direction_brier: null,
++    opportunity_observed_count: 4,
++    opportunity_missed_count: 1,
++    opportunity_coverage_unknown_count: 1,
++    limitations: ["read_only_research_summary"],
++    proposal_only: true as const,
++    trading_allowed: false as const,
++  },
++};
++
++const baseSources = [
++  {
++    kind: "weekly_review" as const,
++    status: "available" as const,
++    latest_at: "2026-07-12T00:59:00Z",
++    reason_code: null,
++  },
++  {
++    kind: "automation_status" as const,
++    status: "available" as const,
++    latest_at: "2026-07-12T00:57:00Z",
++    reason_code: null,
++  },
++];
++
++/**
++ * Shared builder enumerating every required CandidateReadItem field,
++ * including required nullable keys (null ≠ omitted).
++ */
++export function candidateFixture(
++  overrides: Partial<HermesCandidateReadItem> = {},
++): HermesCandidateReadItem {
++  return {
++    candidate_id: "factor-complete-fixture",
++    artifact_type: "factor",
++    goal: "Evaluate a deterministic factor",
++    universe: ["AAPL"],
++    status: "pending",
++    integrity_state: "verified",
++    manifest_digest: "a".repeat(64),
++    observed_manifest_digest: null,
++    approval_binding: "pending",
++    approval_enabled: true,
++    integrity_error_code: null,
++    ...overrides,
++  } satisfies HermesCandidateReadItem;
++}
++
++export const healthyArtifacts = {
++  schema_version: "1.1",
++  read_status: "available",
++  as_of: "2026-07-12T01:00:00Z",
++  items: [
++    weeklyReviewItem,
++    automationItem(KNOWN_JOB_IDS.map((id) => freshJob(id)), "fresh"),
++  ],
++  sources: baseSources,
++  warnings: [],
++} satisfies HermesArtifactShelfEnvelope;
++
++export const degradedArtifacts = {
++  schema_version: "1.1",
++  read_status: "available",
++  as_of: "2026-07-12T01:00:00Z",
++  items: [
++    weeklyReviewItem,
++    automationItem(
++      [
++        freshJob("daily_close"),
++        freshJob("freshness"),
++        {
++          ...freshJob("weekly"),
++          status: "stale",
++          reason_code: "freshness_budget_exceeded",
++          last_success_at: "2026-07-05T01:00:11Z",
++          fresh_until: "2026-07-13T01:00:00Z",
++          last_run_id: "run-weekly-stale",
++          notification_status: "queued",
++        },
++        freshJob("notification_drain"),
++      ],
++      "degraded",
++    ),
++  ],
++  sources: baseSources,
++  warnings: [],
++} satisfies HermesArtifactShelfEnvelope;
++
++export function noArtifacts(
++  mode: "empty" | "unavailable",
++): HermesArtifactShelfEnvelope {
++  if (mode === "empty") {
++    return {
++      schema_version: "1.1",
++      read_status: "empty",
++      as_of: null,
++      items: [],
++      sources: [],
++      warnings: [{ source: "artifact_feed", code: "feed_not_built" }],
++    } satisfies HermesArtifactShelfEnvelope;
++  }
++  return {
++    schema_version: "1.1",
++    read_status: "unavailable",
++    as_of: null,
++    items: [],
++    sources: [],
++    warnings: [{ source: "artifact_feed", code: "api_unavailable" }],
++  } satisfies HermesArtifactShelfEnvelope;
++}
+diff --git a/src/frontend/playwright.config.ts b/src/frontend/playwright.config.ts
+index 8a97069..e302d5e 100644
+--- a/src/frontend/playwright.config.ts
++++ b/src/frontend/playwright.config.ts
+@@ -1,25 +1,44 @@
+ import fs from "node:fs";
+ import path from "node:path";
+ import { defineConfig, devices } from "@playwright/test";
+ 
++const HERMES_WORKBENCH_FIXTURES = new Set([
++  "normal",
++  "degraded",
++  "offline",
++  "empty",
++  "long-content",
++]);
++
+ const runE2E = process.env.PW_E2E === "1";
+ const repoRoot = findRepoRoot(process.cwd());
+ const frontendRoot = path.join(repoRoot, "src", "frontend");
+ const e2eDataRoot = path.join(frontendRoot, ".tmp", "e2e-data");
+ const hermesArtifactFixture = path.join(
+   frontendRoot,
+   "tests",
+   "fixtures",
+   "hermes-artifacts.v1.json",
+ );
+ const reuseExistingServer = process.env.PW_REUSE_SERVER === "1";
++const hermesWorkbenchFixture = readHermesWorkbenchFixture(
++  process.env.PW_HERMES_WORKBENCH_FIXTURE,
++);
++const fixtureMode = hermesWorkbenchFixture !== null;
++if (
++  fixtureMode &&
++  (process.env.QUANT_API_COMMAND || process.env.PW_REUSE_SERVER === "1")
++) {
++  // Fail before any process or socket is opened.
++  throw new Error("fixture mode cannot reuse or override the backend");
++}
+ const backendPort = readPort("PW_BACKEND_PORT", 8765);
+ const frontendPort = readPort("PW_FRONTEND_PORT", 3001);
+ const backendUrl = `http://127.0.0.1:${backendPort}`;
+ const frontendUrl = `http://127.0.0.1:${frontendPort}`;
+ const e2eCorsOrigins = Array.from(
+   new Set([
+     "http://127.0.0.1:3000",
+     "http://127.0.0.1:3001",
+     "http://localhost:3000",
+     "http://localhost:3001",
+@@ -28,20 +47,40 @@ const e2eCorsOrigins = Array.from(
+ );
+ const frontendDevCommand =
+   frontendPort === 3001
+     ? "npm run dev"
+     : `npx next dev --hostname 127.0.0.1 --port ${frontendPort}`;
+ const frontendCommand = [
+   `node scripts/prepare-e2e-workspace.mjs ${frontendPort}`,
+   `cd ".tmp/e2e-frontend-${frontendPort}"`,
+   frontendDevCommand,
+ ].join(" && ");
++const backendCommand = fixtureMode
++  ? `node src/frontend/tests/support/hermes-fixture-api.mjs ${backendPort} ${hermesWorkbenchFixture}`
++  : (process.env.QUANT_API_COMMAND ??
++    `python -m uvicorn quant_system.api.server:create_app --factory --host 127.0.0.1 --port ${backendPort}`);
++const backendReuse = fixtureMode ? false : reuseExistingServer;
++const frontendReuse = fixtureMode ? false : reuseExistingServer;
++
++function readHermesWorkbenchFixture(
++  raw: string | undefined,
++): string | null {
++  if (raw === undefined || raw === "") {
++    return null;
++  }
++  if (!HERMES_WORKBENCH_FIXTURES.has(raw)) {
++    throw new Error(
++      `PW_HERMES_WORKBENCH_FIXTURE must be one of: ${[...HERMES_WORKBENCH_FIXTURES].join(", ")}`,
++    );
++  }
++  return raw;
++}
+ 
+ function readPort(name: string, fallback: number) {
+   const raw = process.env[name];
+   if (!raw) {
+     return fallback;
+   }
+   const port = Number(raw);
+   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+     throw new Error(`${name} must be an integer TCP port between 1 and 65535.`);
+   }
+@@ -71,65 +110,78 @@ export default defineConfig({
+   use: {
+     baseURL: frontendUrl,
+     trace: "retain-on-failure",
+   },
+   projects: [
+     {
+       name: "chromium",
+       use: { ...devices["Desktop Chrome"] },
+     },
+   ],
++  // Fixture name stays in Playwright process/config metadata only.
++  metadata: fixtureMode
++    ? { hermesWorkbenchFixture }
++    : undefined,
+   webServer: runE2E
+     ? [
+         {
+-          command:
+-            process.env.QUANT_API_COMMAND ??
+-            `python -m uvicorn quant_system.api.server:create_app --factory --host 127.0.0.1 --port ${backendPort}`,
++          command: backendCommand,
+           cwd: repoRoot,
+           url: `${backendUrl}/api/health`,
+-          reuseExistingServer,
++          reuseExistingServer: backendReuse,
+           timeout: 60_000,
+-          env: {
+-            QS_ENVIRONMENT: "test",
+-            QS_DATABASE_ENABLED: "false",
+-            QS_DATABASE_AUTO_MIGRATE: "false",
+-            QS_AIHOT_ENABLED: "false",
+-            QS_HERMES_ARTIFACT_FEED_PATH: hermesArtifactFixture,
+-            QS_HERMES_ARTIFACT_FRESHNESS_BUDGET_SECONDS: "315360000",
+-            QS_API_CORS_ORIGINS: JSON.stringify(e2eCorsOrigins),
+-            QS_DATA_DIR: e2eDataRoot,
+-            QS_AGENT_OUTPUT_DIR: path.join(e2eDataRoot, "agent-output"),
+-            QS_PARQUET_DIR: path.join(e2eDataRoot, "parquet"),
+-            QS_DUCKDB_PATH: path.join(e2eDataRoot, "quant_system.duckdb"),
+-            QS_OPTIONS_RADAR_OUTPUT_DIR: path.join(e2eDataRoot, "options_scans"),
+-            QS_OPTIONS_RADAR_UNIVERSE_PATH: path.join(
+-              e2eDataRoot,
+-              "options_universe",
+-              "universe.csv",
+-            ),
+-            QS_OPTIONS_RADAR_EARNINGS_CALENDAR_PATH: path.join(
+-              e2eDataRoot,
+-              "options_universe",
+-              "earnings_calendar.csv",
+-            ),
+-            QS_OPTIONS_RADAR_VIX_HISTORY_PATH: path.join(
+-              e2eDataRoot,
+-              "options_universe",
+-              "vix_history.csv",
+-            ),
+-          },
++          // Fixture server is pure Node and ignores QS_* settings.
++          // Only real-smoke mode injects hermetic platform env. Never forward
++          // the fixture name into this process environment.
++          ...(fixtureMode
++            ? {}
++            : {
++                env: {
++                  QS_ENVIRONMENT: "test",
++                  QS_DATABASE_ENABLED: "false",
++                  QS_DATABASE_AUTO_MIGRATE: "false",
++                  QS_AIHOT_ENABLED: "false",
++                  QS_HERMES_ARTIFACT_FEED_PATH: hermesArtifactFixture,
++                  QS_HERMES_ARTIFACT_FRESHNESS_BUDGET_SECONDS: "315360000",
++                  QS_API_CORS_ORIGINS: JSON.stringify(e2eCorsOrigins),
++                  QS_DATA_DIR: e2eDataRoot,
++                  QS_AGENT_OUTPUT_DIR: path.join(e2eDataRoot, "agent-output"),
++                  QS_PARQUET_DIR: path.join(e2eDataRoot, "parquet"),
++                  QS_DUCKDB_PATH: path.join(e2eDataRoot, "quant_system.duckdb"),
++                  QS_OPTIONS_RADAR_OUTPUT_DIR: path.join(
++                    e2eDataRoot,
++                    "options_scans",
++                  ),
++                  QS_OPTIONS_RADAR_UNIVERSE_PATH: path.join(
++                    e2eDataRoot,
++                    "options_universe",
++                    "universe.csv",
++                  ),
++                  QS_OPTIONS_RADAR_EARNINGS_CALENDAR_PATH: path.join(
++                    e2eDataRoot,
++                    "options_universe",
++                    "earnings_calendar.csv",
++                  ),
++                  QS_OPTIONS_RADAR_VIX_HISTORY_PATH: path.join(
++                    e2eDataRoot,
++                    "options_universe",
++                    "vix_history.csv",
++                  ),
++                },
++              }),
+         },
+         {
+           command: frontendCommand,
+           cwd: frontendRoot,
+           url: frontendUrl,
+-          reuseExistingServer,
++          reuseExistingServer: frontendReuse,
+           timeout: 120_000,
+           env: {
+             // Pin the API base for hermetic E2E runs: shell env beats .env.local
+             // in Next.js, so this overrides any local override (e.g. 8800/8700).
++            // Never inject PW_HERMES_WORKBENCH_FIXTURE or fixture name here.
+             NEXT_PUBLIC_QUANT_API_BASE_URL: backendUrl,
+           },
+         },
+       ]
+     : undefined,
+ });
+diff --git a/src/frontend/tests/fixtures/hermes-workbench/degraded.json b/src/frontend/tests/fixtures/hermes-workbench/degraded.json
+new file mode 100644
+index 0000000..76e6319
+--- /dev/null
++++ b/src/frontend/tests/fixtures/hermes-workbench/degraded.json
+@@ -0,0 +1,292 @@
++{
++  "schema_version": "1.0",
++  "health": {
++    "status": "ok",
++    "app_name": "AI Quant Research Platform",
++    "environment": "test",
++    "data_provider": {
++      "configured_default": "sample",
++      "tiingo_token_present": false
++    },
++    "futu_opend": {
++      "enabled": false,
++      "reachable": false,
++      "host": "127.0.0.1",
++      "port": 11111,
++      "error": null
++    },
++    "database": {
++      "enabled": false,
++      "reachable": false,
++      "error": null
++    },
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  },
++  "artifacts": {
++    "schema_version": "1.1",
++    "read_status": "available",
++    "as_of": "2026-07-12T01:00:00Z",
++    "items": [
++      {
++        "id": "weekly-2026-W28",
++        "kind": "weekly_review",
++        "occurred_at": "2026-07-12T00:59:00Z",
++        "quality": "available",
++        "status": "available",
++        "data": {
++          "week_id": "2026-W28",
++          "period_start": "2026-07-05T00:00:00Z",
++          "period_end": "2026-07-12T00:00:00Z",
++          "safety_alert_count": 1,
++          "unique_signal_count": 3,
++          "review_draft_count": 2,
++          "review_confirmed_count": 1,
++          "prediction_created_count": 1,
++          "prediction_scored_count": 1,
++          "prediction_hit_count": 0,
++          "mean_direction_brier": 0.12,
++          "opportunity_observed_count": 4,
++          "opportunity_missed_count": 1,
++          "opportunity_coverage_unknown_count": 1,
++          "limitations": [
++            "read_only_research_summary"
++          ],
++          "proposal_only": true,
++          "trading_allowed": false
++        }
++      },
++      {
++        "id": "opportunities-2026-W28",
++        "kind": "opportunity_summary",
++        "occurred_at": "2026-07-12T00:58:00Z",
++        "quality": "available",
++        "status": "available",
++        "data": {
++          "window_start": "2026-07-05T00:00:00Z",
++          "window_end": "2026-07-12T00:00:00Z",
++          "total_count": 4,
++          "resolution_counts": {
++            "open": 1,
++            "deferred": 0,
++            "acted": 1,
++            "action_failed": 0,
++            "declined": 0,
++            "missed": 1,
++            "expired_coverage_unknown": 1,
++            "not_actionable": 0,
++            "unknown": 0
++          },
++          "miss_reason_counts": {
++            "no_decision": 1,
++            "act_without_action": 0,
++            "defer_expired": 0
++          },
++          "proposal_only": true,
++          "trading_allowed": false
++        }
++      },
++      {
++        "id": "automation-latest",
++        "kind": "automation_status",
++        "occurred_at": "2026-07-12T00:57:00Z",
++        "quality": "degraded",
++        "status": "degraded",
++        "data": {
++          "checked_at": "2026-07-12T00:57:00Z",
++          "overall_status": "degraded",
++          "jobs": [
++            {
++              "job_id": "daily_close",
++              "expected_schedule": "15 8 * * 2-6",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 108000,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-12T00:50:00Z",
++              "fresh_until": "2026-07-13T06:50:00Z",
++              "status": "fresh",
++              "reason_code": null,
++              "last_run_id": "run-daily_close-healthy",
++              "notification_status": "delivered"
++            },
++            {
++              "job_id": "freshness",
++              "expected_schedule": "17 */2 * * *",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 10800,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-12T00:50:00Z",
++              "fresh_until": "2026-07-13T06:50:00Z",
++              "status": "fresh",
++              "reason_code": null,
++              "last_run_id": "run-freshness-healthy",
++              "notification_status": "delivered"
++            },
++            {
++              "job_id": "weekly",
++              "expected_schedule": "0 9 * * 0",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 691200,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-05T01:00:11Z",
++              "fresh_until": "2026-07-13T01:00:00Z",
++              "status": "stale",
++              "reason_code": "freshness_budget_exceeded",
++              "last_run_id": "run-weekly-stale",
++              "notification_status": "queued"
++            },
++            {
++              "job_id": "notification_drain",
++              "expected_schedule": "*/15 * * * *",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 1800,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-12T00:50:00Z",
++              "fresh_until": "2026-07-13T06:50:00Z",
++              "status": "fresh",
++              "reason_code": null,
++              "last_run_id": "run-notification_drain-healthy",
++              "notification_status": "delivered"
++            }
++          ],
++          "proposal_only": true,
++          "trading_allowed": false
++        }
++      },
++      {
++        "id": "risk:2026-07-12T00:50:00Z",
++        "kind": "portfolio_risk",
++        "occurred_at": "2026-07-12T00:50:00Z",
++        "quality": "available",
++        "status": "available",
++        "data": {
++          "account_id": "default",
++          "currency": "USD",
++          "gross_value": 315.32,
++          "gross_pct_equity": 0.000315,
++          "largest_symbol": "AAPL",
++          "top1_gross_pct": 1,
++          "historical_status": "available",
++          "benchmark": "SPY",
++          "betas": [
++            {
++              "aligned_return_count": 274,
++              "benchmark": "SPY",
++              "first_return_date": "2025-06-06",
++              "last_return_date": "2026-07-10",
++              "reason": null,
++              "status": "available",
++              "symbol": "AAPL",
++              "value": 0.858
++            }
++          ],
++          "reason_codes": [],
++          "limitations": [
++            "partial_series_gap",
++            "degraded_feed"
++          ]
++        }
++      },
++      {
++        "id": "prediction:pred-20260712-0001",
++        "kind": "prediction",
++        "occurred_at": "2026-07-12T00:40:00Z",
++        "quality": "available",
++        "status": "scored",
++        "data": {
++          "prediction_id": "pred-20260712-0001",
++          "state": "scored",
++          "symbol": "AAPL",
++          "direction": "up",
++          "confidence": 0.7,
++          "horizon_date": "2026-07-19",
++          "rationale": "Momentum remains positive within the research band.",
++          "outcome_return": 0.02,
++          "direction_brier": 0.09
++        }
++      }
++    ],
++    "sources": [
++      {
++        "kind": "portfolio_risk",
++        "status": "available",
++        "latest_at": "2026-07-12T00:50:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "prediction",
++        "status": "available",
++        "latest_at": "2026-07-12T00:40:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "market_foresight",
++        "status": "available",
++        "latest_at": "2026-07-12T00:30:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "weekly_review",
++        "status": "available",
++        "latest_at": "2026-07-12T00:59:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "opportunity_summary",
++        "status": "available",
++        "latest_at": "2026-07-12T00:58:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "automation_status",
++        "status": "degraded",
++        "latest_at": "2026-07-12T00:57:00Z",
++        "reason_code": "job_stale"
++      }
++    ],
++    "warnings": [
++      {
++        "source": "automation_status",
++        "code": "job_stale"
++      }
++    ],
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  },
++  "candidates": {
++    "candidates": [
++      {
++        "candidate_id": "legacy-pending-migration",
++        "artifact_type": "factor",
++        "goal": "Migrate an unversioned factor candidate",
++        "universe": [
++          "AAPL"
++        ],
++        "status": "pending",
++        "integrity_state": "migration_required",
++        "manifest_digest": null,
++        "observed_manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
++        "approval_binding": "pending",
++        "approval_enabled": false,
++        "integrity_error_code": null
++      }
++    ],
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  }
++}
+diff --git a/src/frontend/tests/fixtures/hermes-workbench/empty.json b/src/frontend/tests/fixtures/hermes-workbench/empty.json
+new file mode 100644
+index 0000000..bfe84d3
+--- /dev/null
++++ b/src/frontend/tests/fixtures/hermes-workbench/empty.json
+@@ -0,0 +1,61 @@
++{
++  "schema_version": "1.0",
++  "health": {
++    "status": "ok",
++    "app_name": "AI Quant Research Platform",
++    "environment": "test",
++    "data_provider": {
++      "configured_default": "sample",
++      "tiingo_token_present": false
++    },
++    "futu_opend": {
++      "enabled": false,
++      "reachable": false,
++      "host": "127.0.0.1",
++      "port": 11111,
++      "error": null
++    },
++    "database": {
++      "enabled": false,
++      "reachable": false,
++      "error": null
++    },
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  },
++  "artifacts": {
++    "schema_version": "1.1",
++    "read_status": "empty",
++    "as_of": null,
++    "items": [],
++    "sources": [],
++    "warnings": [
++      {
++        "source": "artifact_feed",
++        "code": "feed_not_built"
++      }
++    ],
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  },
++  "candidates": {
++    "candidates": [],
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  }
++}
+diff --git a/src/frontend/tests/fixtures/hermes-workbench/long-content.json b/src/frontend/tests/fixtures/hermes-workbench/long-content.json
+new file mode 100644
+index 0000000..099d157
+--- /dev/null
++++ b/src/frontend/tests/fixtures/hermes-workbench/long-content.json
+@@ -0,0 +1,253 @@
++{
++  "schema_version": "1.0",
++  "health": {
++    "status": "ok",
++    "app_name": "AI Quant Research Platform",
++    "environment": "test",
++    "data_provider": {
++      "configured_default": "sample",
++      "tiingo_token_present": false
++    },
++    "futu_opend": {
++      "enabled": false,
++      "reachable": false,
++      "host": "127.0.0.1",
++      "port": 11111,
++      "error": null
++    },
++    "database": {
++      "enabled": false,
++      "reachable": false,
++      "error": null
++    },
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  },
++  "artifacts": {
++    "schema_version": "1.1",
++    "read_status": "degraded",
++    "as_of": "2026-07-13T09:12:00Z",
++    "items": [
++      {
++        "id": "weekly-long-content",
++        "kind": "weekly_review",
++        "occurred_at": "2026-07-13T09:10:00Z",
++        "quality": "degraded",
++        "status": "completed_degraded",
++        "data": {
++          "week_id": "2026-W28-long",
++          "period_start": "2026-07-05T00:00:00Z",
++          "period_end": "2026-07-12T00:00:00Z",
++          "safety_alert_count": 1,
++          "unique_signal_count": 3,
++          "review_draft_count": 2,
++          "review_confirmed_count": 1,
++          "prediction_created_count": 1,
++          "prediction_scored_count": 1,
++          "prediction_hit_count": 0,
++          "mean_direction_brier": 0.12,
++          "opportunity_observed_count": 4,
++          "opportunity_missed_count": 1,
++          "opportunity_coverage_unknown_count": 1,
++          "limitations": [
++            "HOME_LONG_CONTENT_DETAIL: job=weekly schedule=\"0 9 * * 0\" last_success=2026-07-05T01:00:11Z expected_next=2026-07-12T01:00:00Z observed_at=2026-07-13T09:12:00Z staleness_seconds=707520; exception compressed to one row; technical detail remains collapsed; no action eligibility upgraded; promotion_eligibility=false paper_path=blocked live_path=blocked kill_switch=true.",
++            "长错误详情：周报复盘任务超时未刷新；最近成功时间为 2026-07-05T01:00:11Z；观测时间为 2026-07-13T09:12:00Z；已超过保鲜预算；结果仍可读但不授予 paper/live 资格；研究审批项与自动化摘要保持只读；禁止任何写路径与重定向绕过。",
++            "completed_degraded",
++            "no_trading_eligibility"
++          ],
++          "proposal_only": true,
++          "trading_allowed": false
++        }
++      },
++      {
++        "id": "automation-latest",
++        "kind": "automation_status",
++        "occurred_at": "2026-07-12T00:57:00Z",
++        "quality": "degraded",
++        "status": "degraded",
++        "data": {
++          "checked_at": "2026-07-12T00:57:00Z",
++          "overall_status": "degraded",
++          "jobs": [
++            {
++              "job_id": "daily_close",
++              "expected_schedule": "15 8 * * 2-6",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 108000,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-12T00:50:00Z",
++              "fresh_until": "2026-07-13T06:50:00Z",
++              "status": "fresh",
++              "reason_code": null,
++              "last_run_id": "run-daily_close-healthy",
++              "notification_status": "delivered"
++            },
++            {
++              "job_id": "freshness",
++              "expected_schedule": "17 */2 * * *",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 10800,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-12T00:50:00Z",
++              "fresh_until": "2026-07-13T06:50:00Z",
++              "status": "fresh",
++              "reason_code": null,
++              "last_run_id": "run-freshness-healthy",
++              "notification_status": "delivered"
++            },
++            {
++              "job_id": "weekly",
++              "expected_schedule": "0 9 * * 0",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 691200,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-05T01:00:11Z",
++              "fresh_until": "2026-07-13T06:50:00Z",
++              "status": "failed",
++              "reason_code": "runner_nonzero_exit",
++              "last_run_id": "research-aapl-risk-plan-2026-07-13-0912-aaaa-bbbb-cccc-ddddeeee0001-extra-long-run-identifier-for-overflow-checks",
++              "notification_status": "fallback_persisted"
++            },
++            {
++              "job_id": "notification_drain",
++              "expected_schedule": "*/15 * * * *",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 1800,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-12T00:50:00Z",
++              "fresh_until": "2026-07-13T06:50:00Z",
++              "status": "fresh",
++              "reason_code": null,
++              "last_run_id": "run-notification_drain-healthy",
++              "notification_status": "delivered"
++            }
++          ],
++          "proposal_only": true,
++          "trading_allowed": false
++        }
++      },
++      {
++        "id": "risk:2026-07-12T00:50:00Z",
++        "kind": "portfolio_risk",
++        "occurred_at": "2026-07-12T00:50:00Z",
++        "quality": "available",
++        "status": "available",
++        "data": {
++          "account_id": "default",
++          "currency": "USD",
++          "gross_value": 315.32,
++          "gross_pct_equity": 0.000315,
++          "largest_symbol": "AAPL",
++          "top1_gross_pct": 1,
++          "historical_status": "available",
++          "benchmark": "SPY",
++          "betas": [
++            {
++              "aligned_return_count": 274,
++              "benchmark": "SPY",
++              "first_return_date": "2025-06-06",
++              "last_return_date": "2026-07-10",
++              "reason": null,
++              "status": "available",
++              "symbol": "AAPL",
++              "value": 0.858
++            }
++          ],
++          "reason_codes": [],
++          "limitations": [
++            "HOME_LONG_CONTENT_DETAIL: job=weekly schedule=\"0 9 * * 0\" last_success=2026-07-05T01:00:11Z expected_next=2026-07-12T01:00:00Z observed_at=2026-07-13T09:12:00Z staleness_seconds=707520; exception compressed to one row; technical detail remains collapsed; no action eligibility upgraded; promotion_eligibility=false paper_path=blocked live_path=blocked kill_switch=true.",
++            "长错误详情：周报复盘任务超时未刷新；最近成功时间为 2026-07-05T01:00:11Z；观测时间为 2026-07-13T09:12:00Z；已超过保鲜预算；结果仍可读但不授予 paper/live 资格；研究审批项与自动化摘要保持只读；禁止任何写路径与重定向绕过。"
++          ]
++        }
++      }
++    ],
++    "sources": [
++      {
++        "kind": "portfolio_risk",
++        "status": "available",
++        "latest_at": "2026-07-12T00:50:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "prediction",
++        "status": "available",
++        "latest_at": "2026-07-12T00:40:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "market_foresight",
++        "status": "available",
++        "latest_at": "2026-07-12T00:30:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "weekly_review",
++        "status": "degraded",
++        "latest_at": "2026-07-13T09:10:00Z",
++        "reason_code": "completed_degraded"
++      },
++      {
++        "kind": "opportunity_summary",
++        "status": "available",
++        "latest_at": "2026-07-12T00:58:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "automation_status",
++        "status": "degraded",
++        "latest_at": "2026-07-12T00:57:00Z",
++        "reason_code": "completed_degraded"
++      }
++    ],
++    "warnings": [
++      {
++        "source": "weekly_review",
++        "code": "completed_degraded"
++      },
++      {
++        "source": "automation_status",
++        "code": "runner_nonzero_exit"
++      }
++    ],
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  },
++  "candidates": {
++    "candidates": [
++      {
++        "candidate_id": "factor-long-approval-id-with-extended-suffix-for-layout",
++        "artifact_type": "factor",
++        "goal": "长错误详情：周报复盘任务超时未刷新；最近成功时间为 2026-07-05T01:00:11Z；观测时间为 2026-07-13T09:12:00Z；已超过保鲜预算；结果仍可读但不授予 paper/live 资格；研究审批项与自动化摘要保持只读；禁止任何写路径与重定向绕过。",
++        "universe": [
++          "AAPL",
++          "MSFT",
++          "NVDA"
++        ],
++        "status": "pending",
++        "integrity_state": "verified",
++        "manifest_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
++        "observed_manifest_digest": null,
++        "approval_binding": "pending",
++        "approval_enabled": true,
++        "integrity_error_code": null
++      }
++    ],
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  }
++}
+diff --git a/src/frontend/tests/fixtures/hermes-workbench/normal.json b/src/frontend/tests/fixtures/hermes-workbench/normal.json
+new file mode 100644
+index 0000000..59e6ca3
+--- /dev/null
++++ b/src/frontend/tests/fixtures/hermes-workbench/normal.json
+@@ -0,0 +1,316 @@
++{
++  "schema_version": "1.0",
++  "health": {
++    "status": "ok",
++    "app_name": "AI Quant Research Platform",
++    "environment": "test",
++    "data_provider": {
++      "configured_default": "sample",
++      "tiingo_token_present": false
++    },
++    "futu_opend": {
++      "enabled": false,
++      "reachable": false,
++      "host": "127.0.0.1",
++      "port": 11111,
++      "error": null
++    },
++    "database": {
++      "enabled": false,
++      "reachable": false,
++      "error": null
++    },
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  },
++  "artifacts": {
++    "schema_version": "1.1",
++    "read_status": "available",
++    "as_of": "2026-07-12T01:00:00Z",
++    "items": [
++      {
++        "id": "weekly-2026-W28",
++        "kind": "weekly_review",
++        "occurred_at": "2026-07-12T00:59:00Z",
++        "quality": "available",
++        "status": "available",
++        "data": {
++          "week_id": "2026-W28",
++          "period_start": "2026-07-05T00:00:00Z",
++          "period_end": "2026-07-12T00:00:00Z",
++          "safety_alert_count": 1,
++          "unique_signal_count": 3,
++          "review_draft_count": 2,
++          "review_confirmed_count": 1,
++          "prediction_created_count": 1,
++          "prediction_scored_count": 1,
++          "prediction_hit_count": 0,
++          "mean_direction_brier": 0.12,
++          "opportunity_observed_count": 4,
++          "opportunity_missed_count": 1,
++          "opportunity_coverage_unknown_count": 1,
++          "limitations": [
++            "read_only_research_summary"
++          ],
++          "proposal_only": true,
++          "trading_allowed": false
++        }
++      },
++      {
++        "id": "opportunities-2026-W28",
++        "kind": "opportunity_summary",
++        "occurred_at": "2026-07-12T00:58:00Z",
++        "quality": "available",
++        "status": "available",
++        "data": {
++          "window_start": "2026-07-05T00:00:00Z",
++          "window_end": "2026-07-12T00:00:00Z",
++          "total_count": 4,
++          "resolution_counts": {
++            "open": 1,
++            "deferred": 0,
++            "acted": 1,
++            "action_failed": 0,
++            "declined": 0,
++            "missed": 1,
++            "expired_coverage_unknown": 1,
++            "not_actionable": 0,
++            "unknown": 0
++          },
++          "miss_reason_counts": {
++            "no_decision": 1,
++            "act_without_action": 0,
++            "defer_expired": 0
++          },
++          "proposal_only": true,
++          "trading_allowed": false
++        }
++      },
++      {
++        "id": "automation-latest",
++        "kind": "automation_status",
++        "occurred_at": "2026-07-12T00:57:00Z",
++        "quality": "available",
++        "status": "fresh",
++        "data": {
++          "checked_at": "2026-07-12T00:57:00Z",
++          "overall_status": "fresh",
++          "jobs": [
++            {
++              "job_id": "daily_close",
++              "expected_schedule": "15 8 * * 2-6",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 108000,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-12T00:50:00Z",
++              "fresh_until": "2026-07-13T06:50:00Z",
++              "status": "fresh",
++              "reason_code": null,
++              "last_run_id": "run-daily_close-healthy",
++              "notification_status": "delivered"
++            },
++            {
++              "job_id": "freshness",
++              "expected_schedule": "17 */2 * * *",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 10800,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-12T00:50:00Z",
++              "fresh_until": "2026-07-13T06:50:00Z",
++              "status": "fresh",
++              "reason_code": null,
++              "last_run_id": "run-freshness-healthy",
++              "notification_status": "delivered"
++            },
++            {
++              "job_id": "weekly",
++              "expected_schedule": "0 9 * * 0",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 691200,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-12T00:50:00Z",
++              "fresh_until": "2026-07-13T06:50:00Z",
++              "status": "fresh",
++              "reason_code": null,
++              "last_run_id": "run-weekly-healthy",
++              "notification_status": "delivered"
++            },
++            {
++              "job_id": "notification_drain",
++              "expected_schedule": "*/15 * * * *",
++              "timezone": "Asia/Shanghai",
++              "freshness_budget_seconds": 1800,
++              "last_attempt_at": "2026-07-12T00:50:00Z",
++              "last_success_at": "2026-07-12T00:50:00Z",
++              "fresh_until": "2026-07-13T06:50:00Z",
++              "status": "fresh",
++              "reason_code": null,
++              "last_run_id": "run-notification_drain-healthy",
++              "notification_status": "delivered"
++            }
++          ],
++          "proposal_only": true,
++          "trading_allowed": false
++        }
++      },
++      {
++        "id": "risk:2026-07-12T00:50:00Z",
++        "kind": "portfolio_risk",
++        "occurred_at": "2026-07-12T00:50:00Z",
++        "quality": "available",
++        "status": "available",
++        "data": {
++          "account_id": "default",
++          "currency": "USD",
++          "gross_value": 315.32,
++          "gross_pct_equity": 0.000315,
++          "largest_symbol": "AAPL",
++          "top1_gross_pct": 1,
++          "historical_status": "available",
++          "benchmark": "SPY",
++          "betas": [
++            {
++              "aligned_return_count": 274,
++              "benchmark": "SPY",
++              "first_return_date": "2025-06-06",
++              "last_return_date": "2026-07-10",
++              "reason": null,
++              "status": "available",
++              "symbol": "AAPL",
++              "value": 0.858
++            }
++          ],
++          "reason_codes": [],
++          "limitations": [
++            "historical_relationship_not_forecast"
++          ]
++        }
++      },
++      {
++        "id": "prediction:pred-20260712-0001",
++        "kind": "prediction",
++        "occurred_at": "2026-07-12T00:40:00Z",
++        "quality": "available",
++        "status": "scored",
++        "data": {
++          "prediction_id": "pred-20260712-0001",
++          "state": "scored",
++          "symbol": "AAPL",
++          "direction": "up",
++          "confidence": 0.7,
++          "horizon_date": "2026-07-19",
++          "rationale": "Momentum remains positive within the research band.",
++          "outcome_return": 0.02,
++          "direction_brier": 0.09
++        }
++      },
++      {
++        "id": "foresight:mf-20260712-0001",
++        "kind": "market_foresight",
++        "occurred_at": "2026-07-12T00:30:00Z",
++        "quality": "available",
++        "status": "available",
++        "data": {
++          "run_id": "mf-20260712-0001",
++          "summary": "One candidate prediction is ready for human review.",
++          "candidate_count": 1,
++          "candidates": [
++            {
++              "id": "mfp_candidate_001",
++              "symbol": "MSFT",
++              "direction": "flat",
++              "confidence": 0.58,
++              "horizon_date": "2026-07-19",
++              "falsifier": "The first eligible close leaves the flat band.",
++              "rationale": "A bounded validation candidate.",
++              "entry_session_date": "2026-07-11",
++              "entry_close": 510.05,
++              "provider": "futu",
++              "adjustment": "qfq",
++              "proposal_only": true,
++              "requires_human_confirmation": true,
++              "trading_allowed": false
++            }
++          ]
++        }
++      }
++    ],
++    "sources": [
++      {
++        "kind": "portfolio_risk",
++        "status": "available",
++        "latest_at": "2026-07-12T00:50:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "prediction",
++        "status": "available",
++        "latest_at": "2026-07-12T00:40:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "market_foresight",
++        "status": "available",
++        "latest_at": "2026-07-12T00:30:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "weekly_review",
++        "status": "available",
++        "latest_at": "2026-07-12T00:59:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "opportunity_summary",
++        "status": "available",
++        "latest_at": "2026-07-12T00:58:00Z",
++        "reason_code": null
++      },
++      {
++        "kind": "automation_status",
++        "status": "available",
++        "latest_at": "2026-07-12T00:57:00Z",
++        "reason_code": null
++      }
++    ],
++    "warnings": [],
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  },
++  "candidates": {
++    "candidates": [
++      {
++        "candidate_id": "factor-momentum_20d_reversal-323b045e4b",
++        "artifact_type": "factor",
++        "goal": "Evaluate a deterministic reversal factor on AAPL",
++        "universe": [
++          "AAPL"
++        ],
++        "status": "pending",
++        "integrity_state": "verified",
++        "manifest_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "observed_manifest_digest": null,
++        "approval_binding": "pending",
++        "approval_enabled": true,
++        "integrity_error_code": null
++      }
++    ],
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  }
++}
+diff --git a/src/frontend/tests/fixtures/hermes-workbench/offline.json b/src/frontend/tests/fixtures/hermes-workbench/offline.json
+new file mode 100644
+index 0000000..f93bc7f
+--- /dev/null
++++ b/src/frontend/tests/fixtures/hermes-workbench/offline.json
+@@ -0,0 +1,98 @@
++{
++  "schema_version": "1.0",
++  "health": {
++    "status": "offline",
++    "app_name": "AI Quant Research Platform",
++    "environment": "test",
++    "data_provider": {
++      "configured_default": "sample",
++      "tiingo_token_present": false
++    },
++    "futu_opend": {
++      "enabled": false,
++      "reachable": false,
++      "host": "127.0.0.1",
++      "port": 11111,
++      "error": null
++    },
++    "database": {
++      "enabled": false,
++      "reachable": false,
++      "error": null
++    },
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  },
++  "artifacts": {
++    "schema_version": "1.1",
++    "read_status": "unavailable",
++    "as_of": null,
++    "items": [],
++    "sources": [
++      {
++        "kind": "portfolio_risk",
++        "status": "unavailable",
++        "latest_at": null,
++        "reason_code": "artifact_source_unreadable"
++      },
++      {
++        "kind": "prediction",
++        "status": "unavailable",
++        "latest_at": null,
++        "reason_code": "artifact_source_unreadable"
++      },
++      {
++        "kind": "market_foresight",
++        "status": "unavailable",
++        "latest_at": null,
++        "reason_code": "artifact_source_unreadable"
++      },
++      {
++        "kind": "weekly_review",
++        "status": "unavailable",
++        "latest_at": null,
++        "reason_code": "artifact_source_unreadable"
++      },
++      {
++        "kind": "opportunity_summary",
++        "status": "unavailable",
++        "latest_at": null,
++        "reason_code": "artifact_source_unreadable"
++      },
++      {
++        "kind": "automation_status",
++        "status": "unavailable",
++        "latest_at": null,
++        "reason_code": "artifact_source_unreadable"
++      }
++    ],
++    "warnings": [
++      {
++        "source": "artifact_feed",
++        "code": "artifact_source_unreadable"
++      }
++    ],
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  },
++  "candidates": {
++    "candidates": [],
++    "safety": {
++      "dry_run": true,
++      "paper_trading": true,
++      "live_trading_enabled": false,
++      "kill_switch": true,
++      "bind_address": "127.0.0.1"
++    }
++  }
++}
+diff --git a/src/frontend/tests/support/hermes-fixture-api.mjs b/src/frontend/tests/support/hermes-fixture-api.mjs
+new file mode 100644
+index 0000000..4739fcf
+--- /dev/null
++++ b/src/frontend/tests/support/hermes-fixture-api.mjs
+@@ -0,0 +1,272 @@
++/**
++ * Loopback GET-only Hermes workbench fixture API.
++ * Serves combined fixtures for hermetic Playwright runs.
++ * No platform modules, database, provider, or external network.
++ */
++import http from "node:http";
++import fs from "node:fs";
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++
++const __dirname = path.dirname(fileURLToPath(import.meta.url));
++const FIXTURE_DIR = path.resolve(
++  __dirname,
++  "..",
++  "fixtures",
++  "hermes-workbench",
++);
++
++export const HERMES_WORKBENCH_FIXTURE_NAMES = Object.freeze([
++  "normal",
++  "degraded",
++  "offline",
++  "empty",
++  "long-content",
++]);
++
++const ROOT_KEYS = Object.freeze([
++  "schema_version",
++  "health",
++  "artifacts",
++  "candidates",
++]);
++
++/** Eleven required CandidateReadItem keys (nullable ≠ omitted). */
++export const CANDIDATE_REQUIRED_KEYS = Object.freeze([
++  "candidate_id",
++  "artifact_type",
++  "goal",
++  "universe",
++  "status",
++  "integrity_state",
++  "manifest_digest",
++  "observed_manifest_digest",
++  "approval_binding",
++  "approval_enabled",
++  "integrity_error_code",
++]);
++
++const ARTIFACT_REQUIRED_KEYS = Object.freeze([
++  "schema_version",
++  "read_status",
++  "as_of",
++  "items",
++  "sources",
++  "warnings",
++]);
++
++const HEALTH_REQUIRED_KEYS = Object.freeze([
++  "status",
++  "app_name",
++  "environment",
++  "data_provider",
++]);
++
++function isPlainObject(value) {
++  return value !== null && typeof value === "object" && !Array.isArray(value);
++}
++
++function assert(condition, message) {
++  if (!condition) {
++    throw new Error(message);
++  }
++}
++
++/**
++ * Shared contract validator for combined workbench fixtures.
++ * Rejects unknown root keys, incomplete candidate rows, and malformed envelopes.
++ */
++export function validateCombinedFixture(payload) {
++  assert(isPlainObject(payload), "fixture payload must be an object");
++  const keys = Object.keys(payload).sort();
++  assert(
++    keys.length === ROOT_KEYS.length &&
++      ROOT_KEYS.every((key) => Object.hasOwn(payload, key)),
++    `fixture root must have exactly ${ROOT_KEYS.join(", ")}; got ${keys.join(", ")}`,
++  );
++
++  assert(
++    typeof payload.schema_version === "string" && payload.schema_version.length > 0,
++    "schema_version must be a non-empty string",
++  );
++
++  assert(isPlainObject(payload.health), "health must be an object");
++  for (const key of HEALTH_REQUIRED_KEYS) {
++    assert(Object.hasOwn(payload.health, key), `health missing required key: ${key}`);
++  }
++  assert(
++    isPlainObject(payload.health.data_provider),
++    "health.data_provider must be an object",
++  );
++
++  assert(isPlainObject(payload.artifacts), "artifacts must be an object");
++  for (const key of ARTIFACT_REQUIRED_KEYS) {
++    assert(
++      Object.hasOwn(payload.artifacts, key),
++      `artifacts missing required key: ${key}`,
++    );
++  }
++  assert(Array.isArray(payload.artifacts.items), "artifacts.items must be an array");
++  assert(Array.isArray(payload.artifacts.sources), "artifacts.sources must be an array");
++  assert(
++    Array.isArray(payload.artifacts.warnings),
++    "artifacts.warnings must be an array",
++  );
++
++  assert(isPlainObject(payload.candidates), "candidates must be an object");
++  assert(
++    Array.isArray(payload.candidates.candidates),
++    "candidates.candidates must be an array",
++  );
++
++  for (const [index, candidate] of payload.candidates.candidates.entries()) {
++    assert(
++      isPlainObject(candidate),
++      `candidates.candidates[${index}] must be an object`,
++    );
++    for (const key of CANDIDATE_REQUIRED_KEYS) {
++      assert(
++        Object.hasOwn(candidate, key),
++        `candidates.candidates[${index}] missing required key: ${key}`,
++      );
++    }
++    assert(
++      typeof candidate.candidate_id === "string" && candidate.candidate_id.length > 0,
++      `candidates.candidates[${index}].candidate_id must be a non-empty string`,
++    );
++  }
++
++  return payload;
++}
++
++export function loadFixture(name) {
++  if (!HERMES_WORKBENCH_FIXTURE_NAMES.includes(name)) {
++    throw new Error(
++      `unknown hermes workbench fixture: ${name}; allowlist=${HERMES_WORKBENCH_FIXTURE_NAMES.join(",")}`,
++    );
++  }
++  const fixturePath = path.join(FIXTURE_DIR, `${name}.json`);
++  let raw;
++  try {
++    raw = fs.readFileSync(fixturePath, "utf8");
++  } catch (error) {
++    throw new Error(`failed to read fixture ${name}: ${error.message}`);
++  }
++  let parsed;
++  try {
++    parsed = JSON.parse(raw);
++  } catch (error) {
++    throw new Error(`fixture ${name} is not valid JSON: ${error.message}`);
++  }
++  return validateCombinedFixture(parsed);
++}
++
++/**
++ * Create a GET-only HTTP server bound by the caller.
++ * Accepts only a validated combined fixture object.
++ */
++export function createFixtureServer(fixture) {
++  const validated = validateCombinedFixture(
++    typeof structuredClone === "function"
++      ? structuredClone(fixture)
++      : JSON.parse(JSON.stringify(fixture)),
++  );
++
++  const routes = new Map([
++    ["/api/health", validated.health],
++    ["/api/hermes/artifacts", validated.artifacts],
++    ["/api/agent/candidates", validated.candidates],
++  ]);
++
++  const server = http.createServer((req, res) => {
++    const method = req.method ?? "GET";
++    const url = new URL(req.url ?? "/", "http://127.0.0.1");
++    const pathname = url.pathname;
++
++    const finish = (status, body) => {
++      const payload =
++        body === undefined || body === null
++          ? ""
++          : typeof body === "string"
++            ? body
++            : JSON.stringify(body);
++      res.statusCode = status;
++      res.setHeader("Cache-Control", "no-store");
++      if (payload) {
++        res.setHeader("Content-Type", "application/json; charset=utf-8");
++      }
++      res.end(payload);
++      console.log(`${method} ${pathname} ${status}`);
++    };
++
++    if (method !== "GET") {
++      finish(405, { detail: "method_not_allowed" });
++      return;
++    }
++
++    if (!routes.has(pathname)) {
++      finish(404, { detail: "not_found" });
++      return;
++    }
++
++    finish(200, routes.get(pathname));
++  });
++
++  return server;
++}
++
++export function startFixtureServer(port, fixtureName) {
++  const fixture = loadFixture(fixtureName);
++  const server = createFixtureServer(fixture);
++  return new Promise((resolve, reject) => {
++    const onError = (error) => {
++      server.off("error", onError);
++      reject(error);
++    };
++    server.once("error", onError);
++    server.listen(port, "127.0.0.1", () => {
++      server.off("error", onError);
++      resolve(server);
++    });
++  });
++}
++
++function main(argv) {
++  const [, , portRaw, fixtureName] = argv;
++  if (!portRaw || !fixtureName) {
++    console.error("usage: node hermes-fixture-api.mjs <port> <fixture>");
++    process.exit(2);
++  }
++  const port = Number(portRaw);
++  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
++    console.error("port must be an integer TCP port between 1 and 65535");
++    process.exit(2);
++  }
++
++  let fixture;
++  try {
++    fixture = loadFixture(fixtureName);
++  } catch (error) {
++    console.error(error instanceof Error ? error.message : String(error));
++    process.exit(2);
++  }
++
++  const server = createFixtureServer(fixture);
++  server.on("error", (error) => {
++    console.error(error instanceof Error ? error.message : String(error));
++    process.exit(1);
++  });
++  server.listen(port, "127.0.0.1", () => {
++    console.log(
++      `hermes-fixture-api listening on 127.0.0.1:${port} fixture=${fixtureName}`,
++    );
++  });
++}
++
++const isDirectRun =
++  process.argv[1] &&
++  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
++
++if (isDirectRun) {
++  main(process.argv);
++}
+diff --git a/src/frontend/tests/support/hermes-fixture-api.test.mjs b/src/frontend/tests/support/hermes-fixture-api.test.mjs
+new file mode 100644
+index 0000000..6de828c
+--- /dev/null
++++ b/src/frontend/tests/support/hermes-fixture-api.test.mjs
+@@ -0,0 +1,232 @@
++import assert from "node:assert/strict";
++import { spawn } from "node:child_process";
++import http from "node:http";
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++import { describe, it } from "node:test";
++
++import {
++  CANDIDATE_REQUIRED_KEYS,
++  HERMES_WORKBENCH_FIXTURE_NAMES,
++  createFixtureServer,
++  loadFixture,
++  validateCombinedFixture,
++} from "./hermes-fixture-api.mjs";
++
++const __dirname = path.dirname(fileURLToPath(import.meta.url));
++const frontendRoot = path.resolve(__dirname, "..", "..");
++const repoRoot = path.resolve(frontendRoot, "..", "..");
++
++function listenEphemeral(server) {
++  return new Promise((resolve, reject) => {
++    const onError = (error) => {
++      server.off("error", onError);
++      reject(error);
++    };
++    server.once("error", onError);
++    server.listen(0, "127.0.0.1", () => {
++      server.off("error", onError);
++      const address = server.address();
++      if (!address || typeof address === "string") {
++        reject(new Error("expected TCP address"));
++        return;
++      }
++      resolve(address.port);
++    });
++  });
++}
++
++function closeServer(server) {
++  return new Promise((resolve, reject) => {
++    server.close((error) => (error ? reject(error) : resolve()));
++  });
++}
++
++function request(port, method, pathname) {
++  return new Promise((resolve, reject) => {
++    const req = http.request(
++      {
++        host: "127.0.0.1",
++        port,
++        path: pathname,
++        method,
++        headers: { accept: "application/json" },
++      },
++      (res) => {
++        const chunks = [];
++        res.on("data", (chunk) => chunks.push(chunk));
++        res.on("end", () => {
++          resolve({
++            status: res.statusCode ?? 0,
++            headers: res.headers,
++            body: Buffer.concat(chunks),
++          });
++        });
++      },
++    );
++    req.on("error", reject);
++    req.end();
++  });
++}
++
++function spawnCapture(command, args, env) {
++  return new Promise((resolve) => {
++    const child = spawn(command, args, {
++      cwd: frontendRoot,
++      env: { ...process.env, ...env },
++      stdio: ["ignore", "pipe", "pipe"],
++    });
++    let stdout = "";
++    let stderr = "";
++    child.stdout.on("data", (chunk) => {
++      stdout += chunk.toString();
++    });
++    child.stderr.on("data", (chunk) => {
++      stderr += chunk.toString();
++    });
++    child.on("close", (code) => {
++      resolve({ code: code ?? 1, stdout, stderr });
++    });
++  });
++}
++
++describe("hermes-fixture-api", () => {
++  it("loads all five exact fixture names through the shared validator", () => {
++    for (const name of HERMES_WORKBENCH_FIXTURE_NAMES) {
++      const fixture = loadFixture(name);
++      assert.deepEqual(Object.keys(fixture).sort(), [
++        "artifacts",
++        "candidates",
++        "health",
++        "schema_version",
++      ]);
++      assert.equal(typeof fixture.schema_version, "string");
++      assert.ok(fixture.health);
++      assert.ok(fixture.artifacts);
++      assert.ok(fixture.candidates);
++    }
++  });
++
++  it("serves the three exact GET routes with Cache-Control no-store", async () => {
++    const fixture = loadFixture("normal");
++    const server = createFixtureServer(fixture);
++    const port = await listenEphemeral(server);
++    try {
++      const health = await request(port, "GET", "/api/health");
++      const artifacts = await request(port, "GET", "/api/hermes/artifacts");
++      const candidates = await request(port, "GET", "/api/agent/candidates");
++
++      assert.equal(health.status, 200);
++      assert.equal(artifacts.status, 200);
++      assert.equal(candidates.status, 200);
++      assert.equal(health.headers["cache-control"], "no-store");
++      assert.equal(artifacts.headers["cache-control"], "no-store");
++      assert.equal(candidates.headers["cache-control"], "no-store");
++      assert.deepEqual(JSON.parse(health.body.toString("utf8")), fixture.health);
++      assert.deepEqual(
++        JSON.parse(artifacts.body.toString("utf8")),
++        fixture.artifacts,
++      );
++      assert.deepEqual(
++        JSON.parse(candidates.body.toString("utf8")),
++        fixture.candidates,
++      );
++    } finally {
++      await closeServer(server);
++    }
++  });
++
++  it("returns 404 for unknown GET and 405 for non-GET without mutating fixtures", async () => {
++    const fixture = loadFixture("degraded");
++    const before = JSON.stringify(fixture);
++    const server = createFixtureServer(fixture);
++    const port = await listenEphemeral(server);
++    try {
++      const unknown = await request(port, "GET", "/api/unknown");
++      assert.equal(unknown.status, 404);
++
++      for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
++        const response = await request(port, method, "/api/health");
++        assert.equal(response.status, 405, method);
++      }
++
++      const health = await request(port, "GET", "/api/health");
++      assert.equal(health.status, 200);
++      assert.deepEqual(JSON.parse(health.body.toString("utf8")), fixture.health);
++      assert.equal(JSON.stringify(fixture), before);
++    } finally {
++      await closeServer(server);
++    }
++  });
++
++  it("rejects an unknown fixture before listen()", () => {
++    assert.throws(() => loadFixture("not-a-real-fixture"), /unknown hermes workbench fixture/);
++  });
++
++  it("rejects fixtures that omit any required candidate key", () => {
++    const base = loadFixture("normal");
++    for (const key of CANDIDATE_REQUIRED_KEYS) {
++      const clone = structuredClone(base);
++      assert.ok(clone.candidates.candidates.length > 0);
++      delete clone.candidates.candidates[0][key];
++      assert.throws(
++        () => validateCombinedFixture(clone),
++        new RegExp(`missing required key: ${key}`),
++        `expected rejection when omitting ${key}`,
++      );
++    }
++
++    // Explicit coverage for goal, universe, and required nullable keys.
++    for (const key of [
++      "goal",
++      "universe",
++      "manifest_digest",
++      "observed_manifest_digest",
++      "approval_binding",
++      "artifact_type",
++      "status",
++      "integrity_error_code",
++    ]) {
++      const clone = structuredClone(base);
++      delete clone.candidates.candidates[0][key];
++      assert.throws(() => validateCombinedFixture(clone), /missing required key/);
++    }
++  });
++
++  it("rejects unknown fixture names from createFixtureServer path via loadFixture only", () => {
++    assert.throws(() => loadFixture("bogus"), /unknown hermes workbench fixture/);
++  });
++
++  it("fails playwright config load when fixture mode coexists with backend override", async () => {
++    const stable = "fixture mode cannot reuse or override the backend";
++    const withCommand = await spawnCapture(
++      "npx",
++      ["playwright", "test", "--list"],
++      {
++        PW_HERMES_WORKBENCH_FIXTURE: "normal",
++        QUANT_API_COMMAND: "echo should-not-run",
++        PW_E2E: "1",
++      },
++    );
++    assert.notEqual(withCommand.code, 0);
++    assert.match(
++      `${withCommand.stdout}\n${withCommand.stderr}`,
++      new RegExp(stable),
++    );
++
++    const withReuse = await spawnCapture(
++      "npx",
++      ["playwright", "test", "--list"],
++      {
++        PW_HERMES_WORKBENCH_FIXTURE: "normal",
++        PW_REUSE_SERVER: "1",
++        PW_E2E: "1",
++      },
++    );
++    assert.notEqual(withReuse.code, 0);
++    assert.match(
++      `${withReuse.stdout}\n${withReuse.stderr}`,
++      new RegExp(stable),
++    );
++  });
++});

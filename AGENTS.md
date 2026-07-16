@@ -11,9 +11,18 @@ Rules for AI agents working in this repository.
 - The product roadmap is `docs/design/2026-07-01-roadmap-phases-0b-4.md`.
   The completed Phase 1a-4 v2 implementation record is
   `docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md`; Slices 9A through 9H
-  are all delivered. The current implementation/delivery record is
-  `docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`; the full
-  9H record is completed historical delivery evidence, not the active queue.
+  are all delivered. The only active implementation plan is
+  `docs/superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`.
+  `docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md` is the
+  predecessor Wave 3 delivery record and blocker input, not an active queue;
+  the full 9H record is also completed historical delivery evidence.
+  D-32 freezes the target as a real Agent v0.2 with complete `/hermes` Web Chat.
+  Discord remains an independently usable Hermes-native channel; do not build a
+  temporary web chat, Discord/TUI bridge, direct-Hermes composer, or
+  `/api/agent/tasks` fallback. Internal slices stay dark and the public composer
+  remains OFF until the v0.2 plan's full release gate passes. Discord/historical
+  sessions are Web read-only; Web writes use a new managed Hermes Session, and
+  continuing external context requires an explicit fork with immutable lineage.
   D-31 status (2026-07-16 evidence): the old TUI gateway contract has drifted and
   is fail-closed; the official API Server session-read contract and platform
   server-side GET-only BFF are delivered for real session list/detail/messages.
@@ -26,8 +35,13 @@ Rules for AI agents working in this repository.
   has delivered only notify/periodic-scan/expired-lease reconciliation and does not
   claim queued commands, with zero Hermes mutation/provider use. 3C.1's HQA
   Task/Attempt/payload authority, exact binding, and reverse audit are code-accepted,
-  but platform migration 006 is not live-applied; this must not enable claim or
-  dispatch. Wave 3D chat remains BLOCKED. Wave
+  but platform migration 006 is not live-applied. A 2026-07-16 review found its
+  `UNIQUE(task_id)` cardinality incompatible with multi-Attempt research; do
+  not authorize or apply the current 006. D-32 selects revising never-live 006
+  and redoing its full evidence; the current replay-all runner cannot safely use
+  a later 007 as a patch. First freeze the v0.2 cardinality, disable implicit startup
+  migration, and repeat isolated PostgreSQL/independent review. None of this may
+  enable claim or dispatch. Wave 3D chat remains BLOCKED. Wave
   3E-A has delivered and locally accepted the read-only Unified Results catalog,
   details and exact-link projection; independent Hermes research Run results and
   full results cutover remain blocked. Wave 3F has only a page-scoped,
@@ -44,6 +58,21 @@ Rules for AI agents working in this repository.
 
 - Keep Phase 0/1a read-only or proposal-only unless a plan explicitly says
   otherwise.
+- Agent v0.2 development may use final production modules behind dark gates, but
+  `chat_write_ready`, browser mutation, worker claim/dispatch, and public
+  composer submission stay OFF until the active plan's V8 release gate. A fake
+  Hermes adapter is for hermetic tests only, never a temporary user path.
+- Do not live-apply the current migration 006. Its `UNIQUE(task_id)` conflicts
+  with the required multi-Attempt research cardinality. Migration auto-apply
+  must be fixed first; revise never-live 006 together with schema metadata,
+  readiness, repository/claim SQL, reverse audit, rollback and tests. Under the
+  current replay-all runner, do not assume an appended 007 can repair it. The
+  reviewed final migration still needs a new explicit live authorization.
+- Treat the local `~/.hermes/hermes-agent` checkout as a third owned dependency
+  for v0.2 Durable Run work. Pin source/install/runtime identity and develop in a
+  controlled branch/worktree; do not patch an unidentified live checkout in
+  place. Platform projections must never counterfeit missing Hermes canonical
+  Run/event/provider/approval/stop facts.
 - Never bypass `paper_trading`, `live_trading_enabled=false`, `kill_switch`,
   or human approval gates.
 - The supported HQA Scene-B path uses three human gates: formula confirmation,

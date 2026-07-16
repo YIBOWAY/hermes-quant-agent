@@ -5,6 +5,14 @@
 > integrity/Gate 3 已代码交付；professional frontend/read-only shell 已代码交付
 > （2026-07-14）。本文仍不能直接当作 chat/bridge 或旧页退场的施工清单。
 >
+> **2026-07-16 execution amendment（优先于本文后续旧顺序）：** D-32 已冻结真正 Agent v0.2
+> + 完整 `/hermes` Web Chat，唯一 active implementation plan 是
+> [`../plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](../plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md)。
+> Discord/历史 Session 在 Web 只读，网页写入须新建或显式 fork 到 managed Session。尚未 live
+> apply 的 migration 006 与 multi-Attempt research 冲突；当前 runner 会重放旧 SQL，因此选择
+> 修订未上线的 006 并重做证据，不能默认追加 007。Scene-B 三道 Gate 保持各自权威和 route，
+> plan confirmation 不能冒充 Gate 1。下面历史候选顺序不得覆盖该修订。
+>
 > 决策来源：2026-07-13 `superpowers:brainstorming`，逐节确认了产品范围、信息架构、
 > Hermes 对接、provider 规则、研究生命周期、数据归属、故障恢复与迁移顺序。
 >
@@ -12,8 +20,10 @@
 > 以及平台 `docs/superpowers/plans/2026-07-08-frontend-redesign-hermes-integration.md`
 > 的 Slice 0-8 交付记录。D-31 扩大并修订 D-17 的具体 UI 范围，但继承全部安全门。
 >
-> 双仓定位：`Hermes-quant-agent`（HQA）拥有研究编排；
-> `/Users/sunyibo/programs/ai-quant-platform` 拥有领域后端、PostgreSQL 和平台前端。
+> 三方代码/运行时边界：`Hermes-quant-agent`（HQA）拥有研究编排；
+> `/Users/sunyibo/programs/ai-quant-platform` 拥有领域后端、PostgreSQL 和平台前端；本机受控
+> Hermes source/install/runtime 是 canonical Session/Run/event/provider/approval/stop 的第三个
+> owned dependency，必须固定身份后在独立 branch/worktree 开发。
 
 ---
 
@@ -281,14 +291,18 @@ generic file write、patch、cron 修改、browser、自由 shell、delegation �
 
 ```text
 自然语言目标
+  -> HQA Task + plan-only Hermes Run attempt
   -> Hermes 结构化研究计划
-  -> Gate 1（需要时确认公式/计划摘要）
-  -> HQA Task + Hermes Run attempt
-  -> 平台确定性研究执行
-  -> 统一结果与 provenance
+  -> ConfirmResearchPlan（exact plan digest，不是 Domain Gate）
+  -> Gate 1（exact reviewed formula/source SHA-256 + non-empty note）
+  -> new proposal Attempt/Run
+  -> candidate created
+  -> HQA persist/audit exact Gate 1 candidate/manifest binding
   -> Gate 2（candidate 源码摘要绑定审批）
   -> 一次性研究回测
-  -> Gate 3（promotion diff 人工审查 + commit）
+  -> 统一结果与 provenance
+  -> Gate 3 prepare（HQA revalidate + platform isolated diff）
+  -> 人类 Git review + commit
   -> 复盘与 Hermes 长期上下文
 ```
 
@@ -303,8 +317,10 @@ generic file write、patch、cron 修改、browser、自由 shell、delegation �
 - 预期 artifact 和成功/降级判定；
 - 仍需用户回答的问题。
 
-普通只读查询可以直接执行；公式翻译、候选生成或会影响后续研究解释的计划必须先经过
-Gate 1。计划内容变化会产生新 `plan_version` 和 `plan_hash`，旧确认立即失效。
+普通只读查询可以直接执行。研究计划必须经过独立的 `ConfirmResearchPlan`；计划内容变化会产生
+新 `plan_version` 和 `plan_hash`，旧 plan confirmation 立即失效。它不是 Scene-B Gate 1。
+公式翻译/来源审阅后，Gate 1 仍须绑定 exact reviewed source bytes SHA-256、非空说明，并在
+candidate 产生后保存 exact candidate/manifest binding；plan hash 不能替代这份 provenance。
 
 ### 6.2 执行过程
 
@@ -322,12 +338,13 @@ attempt，或进入正式 Gate；旧手工表单不作为旁路保留。
 
 ## 7. 数据归属与持久化
 
-> **2026-07-15 authority amendment（替代本节旧的 BridgeRequest 所有权）：** 后续 Wave 3
+> **2026-07-16 authority amendment（替代本节旧的 BridgeRequest 与“planned ledger”描述）：** Wave 3
 > 采用 PostgreSQL durable queue。PostgreSQL 是 transport command、`client_request_id` 幂等、
 > command event/outbox、delivery lease 和 exact run link 的唯一权威；HQA 不再另写一份
 > BridgeRequest command journal。Hermes 仍是 Session/Run/messages/provider evidence 的唯一
-> 权威；计划中的 HQA task ledger 将成为 research plan/Attempt/Gate/result refs 的唯一权威，
-> 但该 ledger/CLI 当前尚不存在。旧文中把
+> 权威。HQA append-only Task/Attempt/payload ledger、窄 CLI、projection/replay/CAS 和 exact
+> cross-authority binding foundation 已 code-accepted；但 Attempt lifecycle 尚未深化，修订后的
+> platform schema 尚未 live apply，worker 仍不 claim/dispatch。旧文中把
 > request digest/idempotency/run correlation 交给 HQA bridge journal 的描述由本 amendment
 > 明确 supersede，避免双写、双主和崩溃后不确定重发。
 
@@ -337,7 +354,7 @@ attempt，或进入正式 Gate；旧手工表单不作为旁路保留。
 |---|---|---|
 | Hermes | Session/Run store | 消息上下文、Hermes Run 原始状态/事件、实际 provider/model、command approval。 |
 | 平台 PostgreSQL command ledger | transactional command/event/outbox | platform session、transport request digest/client idempotency、command version/lease/outbox、Hermes run exact correlation。 |
-| HQA task ledger（planned / not implemented） | append-only research ledger | 研究计划版本、步骤、attempt、Gate refs、result refs、派生任务阶段。 |
+| HQA Task/Attempt authority（foundation code-accepted） | append-only research ledger | 研究计划版本、步骤、Attempt、Gate refs、result refs、派生任务阶段；v0.2 仍须补完整 lifecycle。 |
 | 平台 | 现有 repositories/artifacts/locks/git diff | 因子、回测、实验、日报、candidate 源码、领域 review、promotion diff。 |
 
 command ledger 只拥有传输意图、投递状态和精确关联，不拥有对话正文、研究结果或领域审批。
@@ -353,10 +370,9 @@ session policy 和每个 Run 的**实际 provider/model**才是运行事实。HQ
 implementation，负责同事务 create、expected-version CAS、lease fencing 和 append-only event。
 BFF 不直接拼 SQL，HQA connector 不在本地文件复制 command authority。
 
-HQA 后续必须实现窄的 versioned CLI/模块，作为 research task ledger 的唯一 mutation
-implementation；**当前仓库没有这套 Task/Attempt ledger 或 CLI**。落地后，BFF、Hermes skill、
-connector 和人工 CLI 都必须调用该入口，不得自行 append
-task 文件。入口负责：
+HQA 已有窄的 versioned CLI/模块 foundation，作为 research task ledger 的唯一 mutation
+implementation；v0.2 必须在同一入口深化 lifecycle，不能另建第二套 ledger。BFF、Hermes skill、
+connector 和人工 CLI 都必须调用该入口，不得自行 append task 文件。入口负责：
 
 - 使用 OS 级跨进程锁串行化 journal 写入；
 - 对每个 aggregate 做 `expected_version` CAS；
@@ -386,32 +402,31 @@ Event
 ```
 
 ledger 不复制回测指标、candidate 正文或审批状态；`result_refs` 只保存 repository、kind、
-stable ID。projection 损坏时从 journal replay。领域审批先在平台 canonical repository 完成，
-再由同一 HQA mutation boundary 记录“observed”事件；若第二步失败，下次 reconcile 从 Gate ref
-重新读取平台事实并补写观察，不回滚或伪造领域审批。
+stable ID。projection 损坏时从 journal replay。Gate 1 confirmation/binding 由 HQA 权威保存；
+Gate 2 先在 platform candidate repository 做 exact CAS，再由 HQA 记录 observed ref；Gate 3 由
+HQA 重验 Gate 1/final receipt 后委托 platform primitive prepare，最终完成事实是 human Git
+commit。任何观察失败都由 exact ref reconcile，不回滚或猜测另一权威。
 
-### 7.3 平台 PostgreSQL command authority、投影与离线缓存
+### 7.3 平台 PostgreSQL command authority 与可重建 observation projection
 
-平台通过 additive、幂等 migration 保存 command authority，并镜像 HQA task ledger 与 Hermes
-可查询历史：
+平台通过显式授权的 migration 保存 command authority，并建立可删除重建的 HQA/Hermes
+observation projection：
 
 - platform session、request digest/client idempotency、command event/outbox/lease 和 Hermes run
   exact correlation；
 - 每个 Run 作用域内的白名单 event cursor/快照；
-- task/run 到既有 artifact stable ID 的索引；
-- 用于 Hermes 暂时离线时展示的 transcript 缓存。
+- task/run 到既有 artifact stable ID 的索引。
 
 command/event/outbox 不能从另一份隐含 command journal 猜回；必须正式备份并 fail closed。
 Hermes/HQA/平台领域投影可从各自 canonical source 重建。PostgreSQL 不可用或 schema 未就绪
 时禁止接收新 command；HQA task ledger 不可写时禁止创建研究 task/attempt。任何一层失效都
 不得转用内存、文件 fallback 或旧 `/api/agent/tasks` 绕过。
 
-离线 transcript 只缓存 user/assistant 的用户可见文本和白名单状态摘要，排除 raw tool
-payload、文件正文、secret、bearer、账户凭证和 broker 数据；默认保留 30 天。完整文本使用
-本机 keychain/secret store 提供的 key 做应用层加密，key 不进入数据库或日志；安全 key
-不可用时只缓存 session metadata/最近 task/result 摘要，不落完整 transcript。用户清除
-session 时同步删除 PostgreSQL 缓存，并将 Hermes canonical 删除作为单独、明确的操作。
-所有离线显示必须带 `last_synced_at` 和 `stale`。
+PostgreSQL 不保存 prompt/message 正文；transcript 只从 authenticated Hermes BFF 读取。普通
+chat/research 输入进入 owner-only、加密、content-addressed 的 HQA Intent payload seam，并按
+D-32 retention matrix 到期删除；payload 删除不等于 Hermes canonical transcript 删除。PG 只保留
+digest、refs、events、lineage 和 source cursor，因此 Hermes 离线时可以展示 metadata/last-known
+状态与 `stale`，但不能用平台缓存伪装完整 transcript。
 
 ### 7.4 Task、Attempt 与 Run 状态
 
@@ -495,17 +510,19 @@ Hermes Run 已停止不代表平台回测已取消，也不代表 Task 已终止
 
 | Gate | 必须绑定的 revision |
 |---|---|
-| Gate 1 | 完整 plan/formula canonical payload 的 hash；计划变化立即失效。 |
-| Gate 2 | candidate_id、artifact_type、goal、universe、有序相对文件路径、每个文件 exact-bytes SHA-256、metadata digest。 |
-| Gate 3 | candidate digest、promotion base commit、promotion manifest 和 scoped-path diff digest；目标路径或 scoped diff 变化即失效，无关 dirty diff 不进入摘要。 |
+| Gate 1（HQA） | exact reviewed formula/source bytes SHA-256 + non-empty confirmation note；candidate 生成后再绑定 exact candidate ID/manifest digest。 |
+| Gate 2（platform） | human-supplied candidate ID + expected digest + expected status=`pending` + note 的 exact CAS；不得 list/refetch/substitute。 |
+| Gate 3 preparation（HQA wrapper → platform primitive） | exact Gate 1 binding、同 candidate/digest 的 content-addressed successful final receipt、promotion base commit、manifest 和 scoped-path diff；最终完成仍是 human Git commit。 |
 
-审批提交时服务端重新读取 canonical target 并做 compare-and-set 校验。过期、已决或 digest
-不同统一返回 stale/409，要求刷新和重新审批。
+三种 Gate 使用不同 action schema 和物理 route。Gate 1 由 HQA 保存 provenance；Gate 2 只对
+调用者已经审阅并提交的 exact 值做 CAS，不能在 mutation 内 list/refetch/替换；Gate 3 由 HQA
+wrapper 重验 Gate 1/final receipt 后委托平台 primitive prepare。过期、已决或 digest 不同统一
+返回 stale/409。
 
-普通聊天文本不能形成 Gate 1/2/3。所有领域 Gate 只能通过专用 same-origin mutation，携带
-CSRF、target ID、revision digest 和 expected status，由服务端 CAS 后写入 canonical
-repository。Gate 3 的最终完成事实仍是人类审查后的 git commit；网页只能展示/刷新 diff，
-不能代为 commit。
+普通聊天文本和 plan confirmation 都不能形成 Gate 1/2/3。所有领域 Gate 只能通过各自专用
+same-origin mutation，携带各自 exact payload、CSRF 和 actor ownership；不得用通用
+`gate_kind` runtime dispatch。Gate 3 的最终完成事实仍是人类审查后的 git commit；网页只能
+展示/刷新 exact diff，不能代为 commit。
 
 ### 8.3 Candidate integrity baseline（2026-07-13 已代码交付）
 
@@ -549,7 +566,7 @@ chat/bridge mutation。在 professional frontend/bridge gates 完成前，不得
 | Provider quota/unavailable | 展示 requested/actual provider、失败原因和已发生的显式 fallback；无预授权 fallback 时失败并提供“用另一 provider 分叉 session”。 |
 | Stop/cancel 部分成功 | 分别展示 Hermes Run、HQA Attempt、platform async job 和对账状态；任何仍运行或未知的层都不能显示“任务已停止”。 |
 | 部分 artifact | 有合法 artifact + limitations 才能 `completed_degraded`；没有可验证 artifact 就是 failed，聊天总结不能补成成功。 |
-| 审批过期/目标变化 | 重新读取 canonical target 并比较 digest；返回 stale，禁止沿用旧批准。 |
+| 审批过期/目标变化 | 按该 approval/Gate 的 exact expected fields 做 CAS；返回 stale，禁止沿用旧批准。Gate 2 mutation 不 list/refetch/substitute 用户已审阅的 digest/status。 |
 | HQA journal/ledger 不可写或损坏 | 新 session/Run、artifact 和审批全部 fail closed；只读 projection/artifact 浏览继续；损坏 journal 不自动截断或猜测修复。 |
 | PostgreSQL command authority 不可用 | 禁止创建任何新的 transport command，也不得绕过到 HQA journal 或直接调用 Hermes；既有领域 artifact、HQA task projection 与 Hermes 只读历史可在各自权威仍健康时继续读取，并明确标记 command ledger unavailable。 |
 | Origin/CSRF/session 校验失败 | 所有 mutation 返回拒绝且不触碰 Hermes/HQA/平台；只记录不含 secret/request body 的安全审计摘要。 |
@@ -720,6 +737,15 @@ CI/常规测试不得调用真实 Grok/Codex、不得外网、不得触发回测
 
 ## 14. 下一步
 
+> **2026-07-16 execution amendment：** 本节原有“另写 bridge/chat plan”的顺序已经完成其
+> 历史作用，不再是 active queue。D-32 已冻结真正 Agent v0.2 + 完整 `/hermes` Web Chat，
+> 唯一 implementation plan 为
+> [`../plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](../plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md)。
+> Discord 保持可用但不是临时网页方案；公共 composer 在最终 Gate 前保持 OFF。新复核还发现
+> migration 006 的 `UNIQUE(task_id)` 与 multi-Attempt research 冲突，因此不得按下文旧
+> 顺序先行 live apply；当前 runner 下不能默认追加 007，须以新计划的 revised-006、
+> migration guard 和重新验收为准。
+
 The first implementation wave is split into three independently testable plans:
 gateway capability contract, candidate integrity/Gate 3, and professional
 frontend/read-only shell. The bridge/chat plan is admitted only when
@@ -749,8 +775,9 @@ live blocker 阻断。3E-A 只读 Unified Results 索引、动态详情、权威
 redirect 机制；exact digest-bound audit parity、用户 cutover 批准、另三页退场与全局
 `legacyRedirects` 均未完成。这仍不是任何新 chat/execution 生产能力已交付。
 
-当前 transport/缺失语义以 `docs/contracts/hermes-api-server-0.18.2.md` 和
-`docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md` 为准；正式本机连接选择见
+当前 transport/缺失语义以 `docs/contracts/hermes-api-server-0.18.2.md` 和 Wave 3 predecessor
+`docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md` 为证据输入；当前施工顺序以
+`docs/superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md` 为准。正式本机连接选择见
 `docs/design/2026-07-15-local-hermes-integration-decision.md`。旧
 `docs/contracts/hermes-gateway-0.18.2.md` 与
 `config/hermes-gateway-capabilities.v1.json` 只保留历史诊断价值，不能用于写端准入。

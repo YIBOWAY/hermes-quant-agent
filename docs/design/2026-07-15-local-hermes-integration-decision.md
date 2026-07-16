@@ -1,8 +1,9 @@
 # 本机平台连接本机 Hermes：集成方案调研与架构决定
 
 > 状态：**ACCEPTED（2026-07-15）**。本文记录外部调研后的长期集成决定；具体交付状态仍以
-> [`../superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`](../superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md)
-> 为准。
+> [`../README.md`](../README.md) 为入口，当前施工顺序以
+> [`../superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](../superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md)
+> 为准。Wave 3 plan 只保留为前序交付记录。
 
 ## 结论
 
@@ -153,7 +154,7 @@ cutover 批准。两组
 | Unified Results | Wave 3E-A 只读目录、真实数据与 UI 验收 DONE；完整 cutover 仍未批准，独立 Hermes Run 证据仍等 3D |
 | legacy page retirement | Agent Studio 已具独立可回滚开关但默认 OFF；另三页仍有写任务，不能一次切掉 |
 
-## 3C.1 已代码交付；下一步是 live acceptance
+## 3C.1 已代码交付；原 live-acceptance 顺序已被 D-32 修订
 
 在任何 queued-command claim/dispatch 之前，**Slice 3C.1 — workflow identity、payload 与 exact
 binding foundation** 已完成代码、故障注入、全量/目标测试和隔离 PostgreSQL 验收，并继续保持
@@ -167,14 +168,18 @@ binding foundation** 已完成代码、故障注入、全量/目标测试和隔�
 4. PostgreSQL 与 HQA 两个单写权威之间可在每个 crash point 恢复的幂等 saga/reconcile；
 5. 在 3C.1 验收期间 browser POST、worker claim、Hermes mutation 和 provider call 全部保持 0。
 
-当前尚未完成的是 live acceptance：在已校验备份的基础上取得 migration 006 单独授权，执行
-apply 与幂等重放、readiness/零行复核和 reverse authority audit，再完成 HQA authority
-backup/restore drill。该步骤只激活 workflow identity/binding 权威，不会自动启用 browser POST、
+后续 v0.2 复核发现当前 migration 006 对 `task_id` 做唯一约束，无法支持一个 Research Task 的
+多个 Attempt，因此原“下一步直接请求 migration 006 授权并 live apply”的顺序已撤销。当前
+migration runner 会先重放旧 SQL，不能默认追加 007 事后修补；D-32 选择直接修订从未 live
+apply 的 006，并同步 schema meta/readiness/repository/claim/reverse audit/rollback/tests。先关闭
+默认 startup auto-migration，并重新完成
+空库/现有 005 库/幂等/权限/backup-restore/独立 review；只有这些全部通过后，才重新请求一次
+明确 live migration 授权。apply 后仍只激活 authority foundation，不自动启用 browser POST、
 worker claim 或 Hermes/provider mutation。
 
-随后才是 deterministic claim worker、upstream recovery 合同、authenticated mutation BFF/CSRF、
-dispatch supervision、
-composer/SSE/resume/stop、独立 Hermes Run Results，最后逐页 cutover。
+最终施工顺序是 Agent Workspace Interface/cardinality → stop-the-line baseline → Hermes durable
+Run contract 与 HQA lifecycle → 修正后的 schema/authenticated BFF → supervised dispatch → 完整
+workspace/SSE/approval/stop/results → 对抗验收后一次打开 Web Chat。逐页 cutover 仍独立后置。
 
 ## 调研来源
 

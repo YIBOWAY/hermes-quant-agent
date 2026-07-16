@@ -1,0 +1,1700 @@
+# Review package: 8aaa278c778e10ab145a658292bdf4d579df6ce6..HEAD
+
+## Commits
+392485a feat(agent): require candidate revision on every review surface
+
+## Files changed
+ src/frontend/app/agent-studio/page.tsx          |  12 +-
+ src/frontend/app/brief/page.tsx                 |  14 +-
+ src/frontend/app/hermes/page.tsx                |  12 +-
+ src/frontend/components/forms/AgentTaskForm.tsx | 182 ++++++++++++++++++++----
+ src/frontend/lib/api.generated.ts               |  51 ++++++-
+ src/frontend/lib/api.ts                         |  39 ++++-
+ src/quant_system/api/routes/agent.py            |  69 +++++----
+ src/quant_system/api/schemas/agent.py           |   4 +-
+ src/quant_system/cli.py                         |  82 +++++++----
+ tests/test_api_agent.py                         | 128 +++++++++++++++--
+ tests/test_api_response_models.py               |  29 ++++
+ tests/test_cli_json_output.py                   | 121 ++++++++++++++--
+ 12 files changed, 616 insertions(+), 127 deletions(-)
+
+## Diff
+diff --git a/src/frontend/app/agent-studio/page.tsx b/src/frontend/app/agent-studio/page.tsx
+index 4ccd5ab..68bf5c4 100644
+--- a/src/frontend/app/agent-studio/page.tsx
++++ b/src/frontend/app/agent-studio/page.tsx
+@@ -87,22 +87,22 @@ const copy = {
+     keySet: "已设置",
+     keyUnset: "未设置",
+     none: "无",
+     status: "状态",
+     type: "类型",
+   },
+ } as const;
+ 
+ type Tone = "neutral" | "success" | "warning" | "danger" | "info";
+ 
+-function statusTone(status: string): Tone {
+-  const normalized = status.toLowerCase();
++function statusTone(status: string | null | undefined): Tone {
++  const normalized = (status ?? "").toLowerCase();
+   if (normalized === "approved") return "success";
+   if (normalized === "rejected") return "danger";
+   if (normalized === "pending") return "warning";
+   return "neutral";
+ }
+ 
+ export default async function AgentStudio() {
+   const locale = await getServerLocale();
+   const text = copy[locale];
+   const [candidates, factors, llmConfig] = await Promise.all([
+@@ -146,24 +146,28 @@ export default async function AgentStudio() {
+                     key={candidate.candidate_id}
+                     className="rounded-lg border border-border-subtle bg-bg-surface-muted p-3"
+                   >
+                     <div className="flex items-center gap-2">
+                       <Cpu size={14} className="shrink-0 text-text-secondary" />
+                       <span className="truncate font-data-mono text-xs text-text-primary">
+                         {candidate.candidate_id}
+                       </span>
+                     </div>
+                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
+-                      <StatusPill label={text.type} value={candidate.artifact_type} tone="neutral" />
++                      <StatusPill
++                        label={text.type}
++                        value={candidate.artifact_type ?? "—"}
++                        tone="neutral"
++                      />
+                       <StatusPill
+                         label={text.status}
+-                        value={candidate.status}
++                        value={candidate.status ?? "—"}
+                         tone={statusTone(candidate.status)}
+                       />
+                     </div>
+                   </li>
+                 ))}
+               </ul>
+             ) : (
+               <EmptyState title={text.noCandidatesTitle} description={text.noCandidatesDesc} />
+             )}
+           </section>
+diff --git a/src/frontend/app/brief/page.tsx b/src/frontend/app/brief/page.tsx
+index fb799c3..5761040 100644
+--- a/src/frontend/app/brief/page.tsx
++++ b/src/frontend/app/brief/page.tsx
+@@ -537,47 +537,53 @@ function buildRunAction(run: RecentRun, locale: "en" | "zh"): BriefLogEntry {
+   };
+ }
+ 
+ function buildBriefLogEntries({
+   runs,
+   candidates,
+   optionsStatus,
+   locale,
+ }: {
+   runs: RecentRun[];
+-  candidates: { candidate_id: string; artifact_type: string; status: string; goal?: string }[];
++  candidates: {
++    candidate_id: string;
++    artifact_type?: string | null;
++    status?: string | null;
++    goal?: string | null;
++  }[];
+   optionsStatus: OptionsDailyScanStatusResponse;
+   locale: "en" | "zh";
+ }) {
+   const entries = runs.slice(0, 5).map((run) => buildRunAction(run, locale));
+   const status = optionsStatus.status;
+   if (status) {
+     const strategies = status.strategies?.length ? status.strategies.join(" / ") : "--";
+     entries.push({
+       timestamp: status.finished_at ?? status.started_at,
+       status: status.status === "completed" ? "ok" : "warn",
+       text:
+         locale === "zh"
+           ? `期权每日扫描${status.status === "completed" ? "完成" : "更新"} · ${strategies}`
+           : `Options daily scan ${status.status ?? "updated"} · ${strategies}`,
+       summary: status.provider ? `provider=${status.provider}` : undefined,
+     });
+   }
+   for (const candidate of candidates.slice(0, 2)) {
++    const artifactType = candidate.artifact_type ?? "unknown";
+     entries.push({
+       timestamp: null,
+       status: candidate.status === "pending" ? "warn" : "ok",
+       text:
+         locale === "zh"
+-          ? `Hermes 产出候选 ${candidate.artifact_type} · ${candidate.candidate_id}`
+-          : `Hermes produced candidate ${candidate.artifact_type} · ${candidate.candidate_id}`,
+-      summary: candidate.goal ?? `status=${candidate.status}`,
++          ? `Hermes 产出候选 ${artifactType} · ${candidate.candidate_id}`
++          : `Hermes produced candidate ${artifactType} · ${candidate.candidate_id}`,
++      summary: candidate.goal ?? `status=${candidate.status ?? "unknown"}`,
+     });
+   }
+   entries.push({
+     timestamp: new Date().toISOString(),
+     status: "warn",
+     text: locale === "zh" ? "晨报已排印 · 导语由主笔撰写" : "Morning brief printed · lede prepared by Hermes",
+   });
+   return entries.slice(0, 8);
+ }
+ 
+diff --git a/src/frontend/app/hermes/page.tsx b/src/frontend/app/hermes/page.tsx
+index a008de9..a2dbd47 100644
+--- a/src/frontend/app/hermes/page.tsx
++++ b/src/frontend/app/hermes/page.tsx
+@@ -44,22 +44,22 @@ const copy = {
+     status: "状态",
+     composerPlaceholder: "描述研究任务…（提交已禁用）",
+     composerLabel: "Hermes 撰写区",
+     composerSendLabel: "发送（已禁用）",
+     composerUnavailable: "研究任务提交已禁用",
+   },
+ } as const;
+ 
+ type Tone = "neutral" | "success" | "warning" | "danger" | "info";
+ 
+-function statusTone(status: string): Tone {
+-  const normalized = status.toLowerCase();
++function statusTone(status: string | null | undefined): Tone {
++  const normalized = (status ?? "").toLowerCase();
+   if (normalized === "approved") return "success";
+   if (normalized === "rejected") return "danger";
+   if (normalized === "pending") return "warning";
+   return "neutral";
+ }
+ 
+ export default async function HermesWorkbenchPage() {
+   const locale = await getServerLocale();
+   const text = copy[locale];
+   const [candidates, artifacts] = await Promise.all([
+@@ -85,24 +85,28 @@ export default async function HermesWorkbenchPage() {
+                   key={candidate.candidate_id}
+                   className="rounded-lg border border-border-subtle bg-bg-surface-muted p-3"
+                 >
+                   <div className="flex items-center gap-2">
+                     <Cpu size={14} className="shrink-0 text-text-secondary" />
+                     <span className="truncate font-data-mono text-xs text-text-primary">
+                       {candidate.candidate_id}
+                     </span>
+                   </div>
+                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
+-                    <StatusPill label={text.type} value={candidate.artifact_type} tone="neutral" />
++                    <StatusPill
++                      label={text.type}
++                      value={candidate.artifact_type ?? "—"}
++                      tone="neutral"
++                    />
+                     <StatusPill
+                       label={text.status}
+-                      value={candidate.status}
++                      value={candidate.status ?? "—"}
+                       tone={statusTone(candidate.status)}
+                     />
+                   </div>
+                 </li>
+               ))}
+             </ul>
+           ) : candidates.apiError ? (
+             <EmptyState
+               title={text.candidatesLoadFailedTitle}
+               description={text.candidatesLoadFailedDesc}
+diff --git a/src/frontend/components/forms/AgentTaskForm.tsx b/src/frontend/components/forms/AgentTaskForm.tsx
+index 2c6b3b0..d28ec4b 100644
+--- a/src/frontend/components/forms/AgentTaskForm.tsx
++++ b/src/frontend/components/forms/AgentTaskForm.tsx
+@@ -1,20 +1,26 @@
+ 'use client';
+ 
+ import { zodResolver } from "@hookform/resolvers/zod";
+-import { useMutation } from "@tanstack/react-query";
++import { useMutation, useQuery } from "@tanstack/react-query";
+ import { useRouter } from "next/navigation";
+ import { useState } from "react";
+ import { useForm } from "react-hook-form";
+ import { toast } from "sonner";
+ import { z } from "zod";
+-import type { AgentReviewResponse, AgentTaskResponse, CandidateSummary } from "@/lib/api";
++import type {
++  AgentCandidateDetailResponse,
++  AgentReviewResponse,
++  AgentTaskResponse,
++  CandidateSummary,
++} from "@/lib/api";
++import { getAgentCandidateDetail } from "@/lib/api";
+ import { ApiClientError, apiPost, splitSymbols } from "@/lib/apiClient";
+ import { useIsHydrated } from "@/lib/hydration";
+ import type { Locale } from "@/lib/locale";
+ import {
+   Card,
+   SectionTitle,
+   StatusPill,
+   TerminalToolbarButton,
+   terminalInputClass,
+ } from "@/components/ui/primitives";
+@@ -36,26 +42,32 @@ const copy = {
+     rejectedToast: "Rejected",
+     runAgentTask: "Run Agent Task",
+     taskType: "Task type",
+     goal: "Goal",
+     universe: "Universe",
+     experimentId: "Experiment ID",
+     factorId: "Factor ID",
+     running: "Running...",
+     runTask: "Run task",
+     manualReview: "Manual Review",
+-    manualReviewNote: "Review writes lock files only. It never registers a factor.",
++    manualReviewNote:
++      "Review writes lock files only after reading the selected candidate detail and binding both digest and pending status. It never registers a factor.",
+     noCandidate: "No candidate available.",
+     candidateCreatedToast: "Agent candidate created:",
+     runTaskHint: "Generates an inert candidate file. Nothing is registered or executed.",
+     status: "status",
+     pendingReview: "pending review",
++    loadingDetail: "Loading candidate detail…",
++    reviewDisabled:
++      "Approve/reject disabled until a verified pending detail with an authoritative digest is available.",
++    migrationEvidence: "Migration evidence only — cannot approve.",
++    digestLabel: "manifest digest",
+   },
+   zh: {
+     approve: "批准",
+     reject: "拒绝",
+     approveTitle: "批准候选",
+     rejectTitle: "拒绝候选",
+     approveNote:
+       "批准仅会创建一个 `approved.lock` 文件，不会自动注册该因子。",
+     rejectNote: "拒绝仅会创建一个 `rejected.lock` 文件。",
+     reviewNote: "复核备注",
+@@ -66,127 +78,205 @@ const copy = {
+     rejectedToast: "已拒绝",
+     runAgentTask: "运行智能体任务",
+     taskType: "任务类型",
+     goal: "目标",
+     universe: "标的池",
+     experimentId: "实验 ID",
+     factorId: "因子 ID",
+     running: "运行中……",
+     runTask: "运行任务",
+     manualReview: "人工复核",
+-    manualReviewNote: "复核仅写入锁文件，绝不会注册因子。",
++    manualReviewNote:
++      "复核会先读取候选详情并同时绑定 digest 与 pending 状态后才写入锁文件，绝不会注册因子。",
+     noCandidate: "暂无可用候选。",
+     candidateCreatedToast: "已创建智能体候选：",
+     runTaskHint: "生成一个惰性候选文件，不会注册或执行任何内容。",
+     status: "状态",
+     pendingReview: "待复核",
++    loadingDetail: "正在加载候选详情……",
++    reviewDisabled: "在获得已验证、pending 且带权威 digest 的详情之前，批准/拒绝不可用。",
++    migrationEvidence: "迁移证据，不能审批",
++    digestLabel: "manifest digest",
+   },
+ } as const;
+ 
+ const taskSchema = z.object({
+   task_type: z.enum(["propose-factor", "propose-experiment", "summarize", "audit-leakage"]),
+   goal: z.string(),
+   universe: z.string().min(1),
+   experiment_id: z.string(),
+   factor_id: z.string(),
+ });
+ 
+ const reviewSchema = z.object({
+-  note: z.string().min(1, "Review note is required"),
++  note: z.string().min(1, "Review note is required").max(2000),
+ });
+ 
+ type Tone = "neutral" | "success" | "warning" | "danger" | "info";
+ type TaskValues = z.infer<typeof taskSchema>;
+ type ReviewValues = z.infer<typeof reviewSchema>;
+ type ReviewDecision = "approve" | "reject";
+ 
+-function statusTone(status: string): Tone {
+-  const normalized = status.toLowerCase();
++function statusTone(status: string | null | undefined): Tone {
++  const normalized = (status ?? "").toLowerCase();
+   if (normalized === "approved") return "success";
+   if (normalized === "rejected") return "danger";
+   if (normalized === "pending") return "warning";
+   return "neutral";
+ }
+ 
+ const fieldClass = terminalInputClass;
+ 
++function canReview(detail: AgentCandidateDetailResponse | undefined): detail is AgentCandidateDetailResponse & {
++  manifest_digest: string;
++} {
++  if (!detail) return false;
++  if (detail.approval_enabled !== true) return false;
++  if (detail.status !== "pending") return false;
++  if (detail.integrity_state && detail.integrity_state !== "verified") return false;
++  const digest = detail.manifest_digest;
++  return typeof digest === "string" && /^[0-9a-f]{64}$/.test(digest);
++}
++
+ function ReviewDialog({
+   candidate,
+   decision,
+   locale = "en",
+ }: {
+   candidate: CandidateSummary;
+   decision: ReviewDecision;
+   locale?: Locale;
+ }) {
+   const router = useRouter();
+   const [open, setOpen] = useState(false);
+   const isHydrated = useIsHydrated();
+   const text = copy[locale];
+   const form = useForm<ReviewValues>({
+     resolver: zodResolver(reviewSchema),
+     defaultValues: { note: "" },
+   });
++
++  const detailQuery = useQuery({
++    queryKey: ["agent-candidate-detail", candidate.candidate_id],
++    queryFn: () => getAgentCandidateDetail(candidate.candidate_id),
++    enabled: open && isHydrated,
++    staleTime: 0,
++    refetchOnMount: "always",
++  });
++
++  const detail = detailQuery.data;
++  const reviewReady = canReview(detail);
++
+   const mutation = useMutation({
+-    mutationFn: (values: ReviewValues) =>
+-      apiPost<AgentReviewResponse>(`/api/agent/candidates/${candidate.candidate_id}/review`, {
+-        decision,
+-        note: values.note,
+-      }),
++    mutationFn: (values: ReviewValues) => {
++      if (!canReview(detail)) {
++        throw new Error("candidate detail is not reviewable");
++      }
++      return apiPost<AgentReviewResponse>(
++        `/api/agent/candidates/${candidate.candidate_id}/review`,
++        {
++          decision,
++          note: values.note,
++          expected_manifest_digest: detail.manifest_digest,
++          expected_status: "pending" as const,
++        },
++      );
++    },
+     onSuccess: () => {
+-      toast.success(`${decision === "approve" ? text.approvedToast : text.rejectedToast} ${candidate.candidate_id}`);
++      toast.success(
++        `${decision === "approve" ? text.approvedToast : text.rejectedToast} ${candidate.candidate_id}`,
++      );
+       setOpen(false);
+       router.refresh();
+     },
+   });
+-  const error = mutation.error instanceof ApiClientError ? mutation.error.message : undefined;
++  const error =
++    mutation.error instanceof ApiClientError
++      ? mutation.error.message
++      : mutation.error instanceof Error
++        ? mutation.error.message
++        : detailQuery.error instanceof Error
++          ? detailQuery.error.message
++          : undefined;
+   const writeReview = form.handleSubmit((values) => mutation.mutate(values));
++  const controlsDisabled =
++    !isHydrated || !reviewReady || mutation.isPending || detailQuery.isLoading || detailQuery.isFetching;
+ 
+   return (
+     <>
+       <TerminalToolbarButton
+         className="h-9 flex-1"
+-        disabled={!isHydrated}
++        disabled={!isHydrated || candidate.approval_enabled === false}
+         onClick={() => setOpen(true)}
+         tone={decision === "approve" ? "info" : "danger"}
+       >
+         {decision === "approve" ? text.approve : text.reject}
+       </TerminalToolbarButton>
+       {open ? (
+         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4">
+-          <div className="w-full max-w-lg rounded-lg border border-warning/40 bg-bg-surface p-5" role="alertdialog" aria-modal="true">
++          <div
++            className="w-full max-w-lg rounded-lg border border-warning/40 bg-bg-surface p-5"
++            role="alertdialog"
++            aria-modal="true"
++          >
+             <h3 className="font-headline-lg text-text-primary">
+               {decision === "approve" ? text.approveTitle : text.rejectTitle}
+             </h3>
+             <p className="mt-2 truncate font-data-mono text-xs text-text-secondary">
+               {candidate.candidate_id}
+             </p>
+             {decision === "approve" ? (
+               <p className="mt-3 rounded-lg border border-warning/40 bg-warning/5 p-3 font-body-sm text-warning">
+                 {text.approveNote}
+               </p>
+             ) : (
+               <p className="mt-3 rounded-lg border border-border-subtle bg-bg-surface-muted p-3 font-body-sm text-text-secondary">
+                 {text.rejectNote}
+               </p>
+             )}
++            {detailQuery.isLoading || detailQuery.isFetching ? (
++              <p className="mt-3 font-body-sm text-text-secondary">{text.loadingDetail}</p>
++            ) : null}
++            {detail && !reviewReady ? (
++              <p className="mt-3 rounded-lg border border-danger/40 bg-danger/5 p-3 font-body-sm text-danger">
++                {detail.integrity_state === "migration_required"
++                  ? text.migrationEvidence
++                  : text.reviewDisabled}
++                {detail.observed_manifest_digest
++                  ? ` observed=${detail.observed_manifest_digest}`
++                  : ""}
++              </p>
++            ) : null}
++            {reviewReady ? (
++              <p className="mt-3 break-all font-data-mono text-[10px] text-text-secondary">
++                {text.digestLabel}: {detail.manifest_digest}
++              </p>
++            ) : null}
+             <form className="mt-4 flex flex-col gap-3" onSubmit={(event) => event.preventDefault()}>
+               <label className="flex flex-col gap-1 font-body-sm text-text-primary">
+                 {text.reviewNote}
+-                <textarea className={`min-h-24 ${fieldClass}`} {...form.register("note")} />
++                <textarea
++                  className={`min-h-24 ${fieldClass}`}
++                  disabled={!reviewReady}
++                  {...form.register("note")}
++                />
+               </label>
+               {error ? <p className="font-body-sm text-danger">{error}</p> : null}
+               <div className="flex justify-end gap-2">
+                 <TerminalToolbarButton onClick={() => setOpen(false)} tone="neutral">
+                   {text.cancel}
+                 </TerminalToolbarButton>
+-                <TerminalToolbarButton disabled={!isHydrated || mutation.isPending} onClick={() => void writeReview()} tone="warning">
++                <TerminalToolbarButton
++                  disabled={controlsDisabled}
++                  onClick={() => void writeReview()}
++                  tone="warning"
++                >
+                   {mutation.isPending ? text.writingLock : text.confirm}
+                 </TerminalToolbarButton>
+               </div>
+             </form>
+           </div>
+         </div>
+       ) : null}
+     </>
+   );
+ }
+@@ -221,22 +311,36 @@ export function AgentTaskForm({ candidates, locale = "en" }: { candidates: Candi
+         universe: splitSymbols(values.universe),
+         experiment_id: values.experiment_id || null,
+         factor_id: values.factor_id || null,
+       }),
+     onSuccess: (payload) => {
+       toast.success(`${text.candidateCreatedToast} ${payload.candidate_id}`);
+       router.refresh();
+     },
+   });
+   const error = mutation.error instanceof ApiClientError ? mutation.error.message : undefined;
+-  const firstPending = candidates.find((candidate) => candidate.status === "pending") ?? candidates[0];
++  // Prefer a verified pending candidate with approval enabled.
++  const firstPending =
++    candidates.find(
++      (candidate) =>
++        candidate.status === "pending" &&
++        candidate.approval_enabled !== false &&
++        (candidate.integrity_state == null || candidate.integrity_state === "verified"),
++    ) ??
++    candidates.find((candidate) => candidate.status === "pending") ??
++    candidates[0];
+   const runTask = form.handleSubmit((values) => mutation.mutate(values));
++  const reviewAllowed =
++    Boolean(firstPending) &&
++    firstPending.approval_enabled !== false &&
++    firstPending.status === "pending" &&
++    (firstPending.integrity_state == null || firstPending.integrity_state === "verified");
+ 
+   return (
+     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_320px]">
+       <Card padded={false}>
+         <form className="flex flex-col gap-4 p-4" onSubmit={(event) => event.preventDefault()}>
+           <SectionTitle title={text.runAgentTask} hint={text.runTaskHint} />
+           <label className="flex flex-col gap-1 font-body-sm text-text-primary">
+             {text.taskType}
+             <select className={fieldClass} {...form.register("task_type")}>
+               <option>propose-factor</option>
+@@ -277,31 +381,59 @@ export function AgentTaskForm({ candidates, locale = "en" }: { candidates: Candi
+ 
+       <Card tone="warning" padded={false} className="flex flex-col">
+         <div className="p-4">
+           <SectionTitle title={text.manualReview} hint={text.manualReviewNote} />
+           {firstPending ? (
+             <div className="space-y-3">
+               <div className="rounded-lg border border-border-subtle bg-bg-surface-muted p-3">
+                 <p className="truncate font-data-mono text-xs text-text-primary">
+                   {firstPending.candidate_id}
+                 </p>
+-                <div className="mt-2">
++                <div className="mt-2 flex flex-wrap gap-2">
+                   <StatusPill
+                     label={text.status}
+-                    value={firstPending.status}
++                    value={firstPending.status ?? "unknown"}
+                     tone={statusTone(firstPending.status)}
+                   />
++                  {firstPending.integrity_state ? (
++                    <StatusPill
++                      label="integrity"
++                      value={firstPending.integrity_state}
++                      tone={
++                        firstPending.integrity_state === "verified"
++                          ? "success"
++                          : firstPending.integrity_state === "migration_required"
++                            ? "warning"
++                            : "danger"
++                      }
++                    />
++                  ) : null}
+                 </div>
++                {firstPending.manifest_digest ? (
++                  <p className="mt-2 break-all font-data-mono text-[10px] text-text-secondary">
++                    {text.digestLabel}: {firstPending.manifest_digest}
++                  </p>
++                ) : null}
++                {firstPending.integrity_state === "migration_required" &&
++                firstPending.observed_manifest_digest ? (
++                  <p className="mt-2 break-all font-data-mono text-[10px] text-warning">
++                    {text.migrationEvidence}: {firstPending.observed_manifest_digest}
++                  </p>
++                ) : null}
+               </div>
+-              <div className="flex gap-2">
+-                <ApproveDialog candidate={firstPending} locale={locale} />
+-                <RejectDialog candidate={firstPending} locale={locale} />
+-              </div>
++              {reviewAllowed ? (
++                <div className="flex gap-2">
++                  <ApproveDialog candidate={firstPending} locale={locale} />
++                  <RejectDialog candidate={firstPending} locale={locale} />
++                </div>
++              ) : (
++                <p className="font-body-sm text-text-secondary">{text.reviewDisabled}</p>
++              )}
+             </div>
+           ) : (
+             <p className="font-body-sm text-text-secondary">{text.noCandidate}</p>
+           )}
+         </div>
+       </Card>
+     </div>
+   );
+ }
+diff --git a/src/frontend/lib/api.generated.ts b/src/frontend/lib/api.generated.ts
+index e080cc9..5f0b7d8 100644
+--- a/src/frontend/lib/api.generated.ts
++++ b/src/frontend/lib/api.generated.ts
+@@ -1812,32 +1812,46 @@ export interface components {
+         /** AccountResetRequest */
+         AccountResetRequest: {
+             /**
+              * Initial Cash
+              * @default 1000000
+              */
+             initial_cash: number;
+         };
+         /** AgentCandidateDetailResponse */
+         AgentCandidateDetailResponse: {
++            /** Approval Binding */
++            approval_binding?: string | null;
++            /** Approval Enabled */
++            approval_enabled?: boolean | null;
+             /** Audit */
+-            audit: string[];
++            audit?: string[];
+             /** Candidate Id */
+             candidate_id: string;
++            /** Integrity Error Code */
++            integrity_error_code?: string | null;
++            /** Integrity State */
++            integrity_state?: string | null;
++            /** Manifest Digest */
++            manifest_digest?: string | null;
+             /** Metadata */
+-            metadata: {
++            metadata?: {
+                 [key: string]: unknown;
+-            };
++            } | null;
++            /** Observed Manifest Digest */
++            observed_manifest_digest?: string | null;
+             /** Reviews */
+-            reviews: string[];
++            reviews?: string[];
+             /** Source Preview */
+-            source_preview: string;
++            source_preview?: string | null;
++            /** Status */
++            status?: string | null;
+         };
+         /** AgentCandidatesResponse */
+         AgentCandidatesResponse: {
+             /** Candidates */
+             candidates: components["schemas"]["CandidateSummary"][];
+         };
+         /** AgentLLMConfigResponse */
+         AgentLLMConfigResponse: {
+             /** Base Url */
+             base_url: string | null;
+@@ -1850,32 +1864,41 @@ export interface components {
+             /** Timeout */
+             timeout: number;
+         };
+         /** AgentReviewRequest */
+         AgentReviewRequest: {
+             /**
+              * Decision
+              * @enum {string}
+              */
+             decision: "approve" | "reject";
++            /** Expected Manifest Digest */
++            expected_manifest_digest: string;
++            /**
++             * Expected Status
++             * @constant
++             */
++            expected_status: "pending";
+             /** Note */
+             note: string;
+         };
+         /** AgentReviewResponse */
+         AgentReviewResponse: {
+             /** Candidate Id */
+             candidate_id: string;
+             /**
+              * Decision
+              * @enum {string}
+              */
+             decision: "approve" | "reject";
++            /** Manifest Digest */
++            manifest_digest?: string | null;
+             /**
+              * Registration
+              * @constant
+              */
+             registration: "manual_required";
+         };
+         /** AgentTaskRequest */
+         AgentTaskRequest: {
+             /** Experiment Id */
+             experiment_id?: string | null;
+@@ -1891,20 +1914,22 @@ export interface components {
+              * @enum {string}
+              */
+             task_type: "propose-factor" | "propose-experiment" | "summarize" | "audit-leakage";
+             /** Universe */
+             universe?: string[];
+         };
+         /** AgentTaskResponse */
+         AgentTaskResponse: {
+             /** Candidate Id */
+             candidate_id: string;
++            /** Manifest Digest */
++            manifest_digest?: string | null;
+             /** Metadata */
+             metadata: {
+                 [key: string]: unknown;
+             };
+             /** Path */
+             path: string;
+             /** Status */
+             status: string;
+         };
+         /** AiHotDailiesResponse */
+@@ -2811,28 +2836,40 @@ export interface components {
+         };
+         /** CLOBOrder */
+         CLOBOrder: {
+             /** Price */
+             price: number;
+             /** Size */
+             size: number;
+         };
+         /** CandidateSummary */
+         CandidateSummary: {
++            /** Approval Binding */
++            approval_binding?: string | null;
++            /** Approval Enabled */
++            approval_enabled?: boolean | null;
+             /** Artifact Type */
+-            artifact_type: string;
++            artifact_type?: string | null;
+             /** Candidate Id */
+             candidate_id: string;
+             /** Goal */
+             goal?: string | null;
++            /** Integrity Error Code */
++            integrity_error_code?: string | null;
++            /** Integrity State */
++            integrity_state?: string | null;
++            /** Manifest Digest */
++            manifest_digest?: string | null;
++            /** Observed Manifest Digest */
++            observed_manifest_digest?: string | null;
+             /** Status */
+-            status: string;
++            status?: string | null;
+         } & {
+             [key: string]: unknown;
+         };
+         /** ExperimentDetailResponse */
+         ExperimentDetailResponse: {
+             /** Agent Summary */
+             agent_summary?: {
+                 [key: string]: unknown;
+             } | null;
+             /** Experiment Config */
+diff --git a/src/frontend/lib/api.ts b/src/frontend/lib/api.ts
+index 873e75e..9328978 100644
+--- a/src/frontend/lib/api.ts
++++ b/src/frontend/lib/api.ts
+@@ -957,23 +957,29 @@ export type ExperimentDetailResponse = ApiEnvelope & {
+   path: string;
+   experiment_config?: Record<string, unknown>;
+   agent_summary?: Record<string, unknown>;
+   metadata?: Record<string, unknown>;
+   runs: PreviewRecord[];
+   folds: PreviewRecord[];
+ };
+ 
+ export type CandidateSummary = {
+   candidate_id: string;
+-  artifact_type: string;
+-  status: string;
+-  goal?: string;
++  artifact_type?: string | null;
++  status?: string | null;
++  goal?: string | null;
++  integrity_state?: string | null;
++  manifest_digest?: string | null;
++  observed_manifest_digest?: string | null;
++  approval_binding?: string | null;
++  approval_enabled?: boolean | null;
++  integrity_error_code?: string | null;
+ };
+ 
+ type HermesSchemas = GeneratedApiComponents["schemas"];
+ 
+ export type HermesArtifact = HermesSchemas["HermesArtifactItemResponse"];
+ export type HermesArtifactKind =
+   HermesSchemas["HermesArtifactSourceResponse"]["kind"];
+ export type HermesArtifactQuality = HermesArtifact["quality"];
+ export type HermesPortfolioRiskArtifactData =
+   HermesSchemas["HermesPortfolioRiskData"];
+@@ -994,37 +1000,53 @@ export type HermesArtifactWarning =
+   HermesSchemas["HermesArtifactWarningResponse"];
+ export type HermesArtifactShelfEnvelope = ApiEnvelope &
+   HermesSchemas["HermesArtifactFeedResponse"];
+ 
+ export type AgentCandidatesResponse = ApiEnvelope & {
+   candidates: CandidateSummary[];
+ };
+ 
+ export type AgentCandidateDetailResponse = ApiEnvelope & {
+   candidate_id: string;
+-  metadata: Record<string, unknown>;
+-  source_preview: string;
++  metadata: Record<string, unknown> | null;
++  source_preview: string | null;
+   audit: string[];
+   reviews: string[];
++  integrity_state?: string | null;
++  manifest_digest?: string | null;
++  observed_manifest_digest?: string | null;
++  approval_binding?: string | null;
++  approval_enabled?: boolean | null;
++  integrity_error_code?: string | null;
++  status?: string | null;
+ };
+ 
+ export type AgentTaskResponse = ApiEnvelope & {
+   candidate_id: string;
+   status: string;
+   path: string;
+   metadata: Record<string, unknown>;
++  manifest_digest?: string | null;
+ };
+ 
+ export type AgentReviewResponse = ApiEnvelope & {
+   candidate_id: string;
+   decision: "approve" | "reject";
+   registration: "manual_required";
++  manifest_digest?: string | null;
++};
++
++export type AgentReviewRequest = {
++  decision: "approve" | "reject";
++  note: string;
++  expected_manifest_digest: string;
++  expected_status: "pending";
+ };
+ 
+ export type AgentLLMConfigResponse = ApiEnvelope & {
+   provider: string;
+   model: string | null;
+   base_url: string | null;
+   timeout: number;
+   has_api_key: boolean;
+ };
+ 
+@@ -2498,20 +2520,27 @@ export function getHermesArtifacts(limit = 20) {
+   });
+ }
+ 
+ export function getAgentCandidateDetail(candidateId: string) {
+   return apiGet<AgentCandidateDetailResponse>(`/api/agent/candidates/${candidateId}`, {
+     candidate_id: candidateId,
+     metadata: {},
+     source_preview: "",
+     audit: [],
+     reviews: [],
++    integrity_state: null,
++    manifest_digest: null,
++    observed_manifest_digest: null,
++    approval_binding: null,
++    approval_enabled: false,
++    integrity_error_code: null,
++    status: null,
+     safety: FALLBACK_SAFETY,
+   });
+ }
+ 
+ export function getAgentLlmConfig() {
+   return apiGet<AgentLLMConfigResponse>("/api/agent/llm-config", {
+     provider: "stub",
+     model: null,
+     base_url: null,
+     timeout: 60,
+diff --git a/src/quant_system/api/routes/agent.py b/src/quant_system/api/routes/agent.py
+index 1d213f2..f46d1c6 100644
+--- a/src/quant_system/api/routes/agent.py
++++ b/src/quant_system/api/routes/agent.py
+@@ -23,26 +23,26 @@ from quant_system.api.schemas.agent import (
+     AgentLLMConfigResponse,
+     AgentReviewRequest,
+     AgentReviewResponse,
+     AgentTaskRequest,
+     AgentTaskResponse,
+ )
+ 
+ router = APIRouter()
+ 
+ 
+-def _conflict_409(*, code: str, message: str, candidate_id: str) -> HTTPException:
++def _candidate_conflict(candidate_id: str, code: str) -> HTTPException:
++    """Always HTTP 409 with stable CAS conflict codes (message-free contract)."""
+     return HTTPException(
+         status_code=409,
+         detail={
+             "code": code,
+-            "message": message,
+             "resource": "agent_candidate",
+             "id": candidate_id,
+         },
+     )
+ 
+ 
+ @router.get("/agent/candidates", response_model=AgentCandidatesResponse)
+ def list_candidates(
+     agent_output_dir: AgentOutputDirDep,
+     status: str | None = None,
+@@ -115,24 +115,27 @@ def candidate_detail(candidate_id: str, agent_output_dir: AgentOutputDirDep) ->
+             "integrity_state": "corrupt",
+             "manifest_digest": None,
+             "observed_manifest_digest": None,
+             "approval_binding": None,
+             "approval_enabled": False,
+             "integrity_error_code": item.integrity_error_code,
+             "status": None,
+         }
+ 
+     if item.integrity_state == "migration_required":
++        # Migration preview uses the same no-symlink exact-byte reader that
++        # produces observed_manifest_digest; it is diagnostic only.
++        source_preview = _migration_source_preview(pool, candidate_id)
+         return {
+             "candidate_id": candidate_id,
+             "metadata": None,
+-            "source_preview": None,
++            "source_preview": source_preview,
+             "audit": audits,
+             "reviews": [],
+             "integrity_state": "migration_required",
+             "manifest_digest": None,
+             "observed_manifest_digest": item.observed_manifest_digest,
+             "approval_binding": item.approval_binding,
+             "approval_enabled": False,
+             "integrity_error_code": None,
+             "status": item.status,
+             "artifact_type": item.artifact_type,
+@@ -198,20 +201,39 @@ def _audit_lines(agent_output_dir, candidate_id: str) -> list[str]:
+     if audit_dir.exists():
+         for path in sorted(audit_dir.glob("*.jsonl")):
+             audits.extend(
+                 line
+                 for line in path.read_text(encoding="utf-8").splitlines()
+                 if candidate_id in line
+             )
+     return audits
+ 
+ 
++def _migration_source_preview(pool: CandidatePool, candidate_id: str) -> str | None:
++    """Exact-byte first-artifact preview for migration_required items only."""
++    from quant_system.agent.candidate_manifest import (
++        CandidateIntegrityError as _CIE,
++        build_candidate_manifest,
++    )
++
++    try:
++        _manifest, _digest, artifact_bytes = build_candidate_manifest(
++            pool.candidates_dir / candidate_id
++        )
++    except (CandidateIntegrityError, OSError, _CIE):
++        return None
++    if not artifact_bytes:
++        return None
++    first = next(iter(artifact_bytes))
++    return artifact_bytes[first].decode("utf-8", errors="replace")
++
++
+ @router.post("/agent/tasks", response_model=AgentTaskResponse)
+ def run_agent_task(
+     request: AgentTaskRequest,
+     output_dir: OutputDirDep,
+     agent_output_dir: AgentOutputDirDep,
+     settings: SettingsDep,
+ ) -> dict:
+     try:
+         llm = build_llm_client(settings)
+     except RuntimeError as exc:
+@@ -263,54 +285,43 @@ def review_candidate(
+     try:
+         record = AgentRunner(agent_output_dir=agent_output_dir).review(
+             candidate_id=candidate_id,
+             decision=request.decision,
+             note=request.note,
+             expected_manifest_digest=request.expected_manifest_digest,
+             expected_status=request.expected_status,
+         )
+     except FileNotFoundError as exc:
+         raise not_found_404("agent_candidate", candidate_id) from exc
+-    except CandidateMigrationRequiredError as exc:
+-        raise _conflict_409(
+-            code="migration_required",
+-            message=str(exc),
+-            candidate_id=candidate_id,
+-        ) from exc
++    # Most-specific first so subclasses never collapse into a coarser code.
+     except CandidateReviewStateStaleError as exc:
+-        raise _conflict_409(
+-            code="review_state_stale",
+-            message=str(exc),
+-            candidate_id=candidate_id,
+-        ) from exc
+-    except CandidateStaleError as exc:
+-        raise _conflict_409(
+-            code="stale_digest",
+-            message=str(exc),
+-            candidate_id=candidate_id,
++        raise _candidate_conflict(
++            candidate_id, "candidate_review_state_stale"
+         ) from exc
+-    except CandidateConflictError as exc:
+-        raise _conflict_409(
+-            code="conflict",
+-            message=str(exc),
+-            candidate_id=candidate_id,
++    except CandidateMigrationRequiredError as exc:
++        raise _candidate_conflict(
++            candidate_id, "candidate_migration_required"
+         ) from exc
+     except CandidateIntegrityError as exc:
+-        # Missing/corrupt candidates surface as 404; CAS integrity as 409.
++        # Missing candidates surface as 404; corrupt/integrity CAS as 409.
+         message = str(exc).lower()
+         if "does not exist" in message or "not a directory" in message:
+             raise not_found_404("agent_candidate", candidate_id) from exc
+-        raise _conflict_409(
+-            code="integrity_error",
+-            message=str(exc),
+-            candidate_id=candidate_id,
++        raise _candidate_conflict(
++            candidate_id, "candidate_integrity_failed"
+         ) from exc
++    except CandidateStaleError as exc:
++        raise _candidate_conflict(
++            candidate_id, "candidate_revision_stale"
++        ) from exc
++    except CandidateConflictError as exc:
++        raise _candidate_conflict(candidate_id, "candidate_conflict") from exc
+     return {
+         "candidate_id": record.candidate_id,
+         "decision": record.decision,
+         "registration": "manual_required",
+         "manifest_digest": record.manifest_digest,
+     }
+ 
+ 
+ @router.get("/agent/llm-config", response_model=AgentLLMConfigResponse)
+ def llm_config(settings: SettingsDep) -> dict:
+diff --git a/src/quant_system/api/schemas/agent.py b/src/quant_system/api/schemas/agent.py
+index dc88ae1..4dc11d9 100644
+--- a/src/quant_system/api/schemas/agent.py
++++ b/src/quant_system/api/schemas/agent.py
+@@ -55,22 +55,22 @@ class AgentTaskRequest(BaseModel):
+ class AgentTaskResponse(BaseModel):
+     candidate_id: str
+     status: str
+     path: str
+     metadata: dict[str, Any]
+     manifest_digest: str | None = None
+ 
+ 
+ class AgentReviewRequest(BaseModel):
+     decision: Literal["approve", "reject"]
+-    note: str
+-    expected_manifest_digest: str
++    note: str = Field(min_length=1, max_length=2000)
++    expected_manifest_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+     expected_status: Literal["pending"]
+ 
+ 
+ class AgentReviewResponse(BaseModel):
+     candidate_id: str
+     decision: Literal["approve", "reject"]
+     registration: Literal["manual_required"]
+     manifest_digest: str | None = None
+ 
+ 
+diff --git a/src/quant_system/cli.py b/src/quant_system/cli.py
+index b19747e..b3924e4 100644
+--- a/src/quant_system/cli.py
++++ b/src/quant_system/cli.py
+@@ -1669,28 +1669,34 @@ def agent_propose_factor(
+     else:
+         llm = _build_agent_llm(llm_name)
+     artifact = AgentRunner(
+         agent_output_dir=resolve_agent_output_dir(agent_output_dir),
+         llm=llm,
+     ).propose_factor(
+         goal=goal,
+         universe=_parse_universe(universe),
+         metadata_extra=metadata_extra,
+     )
+-    _emit_agent_artifact(artifact.candidate_id, artifact.path, artifact.metadata_path)
++    _emit_agent_artifact(
++        artifact.candidate_id,
++        artifact.path,
++        artifact.metadata_path,
++        manifest_digest=artifact.manifest_digest,
++    )
+     if json_output:
+         _emit_json(
+             {
+                 "candidate_id": artifact.candidate_id,
+                 "status": "pending",
+                 "path": str(artifact.path),
+                 "metadata_path": str(artifact.metadata_path),
++                "manifest_digest": artifact.manifest_digest,
+             }
+         )
+ 
+ 
+ @agent_app.command("propose-experiment")
+ def agent_propose_experiment(
+     goal: Annotated[str, typer.Option("--goal", help="Research goal for the experiment.")],
+     universe: Annotated[
+         str,
+         typer.Option("--universe", help="Comma-separated symbols, for example SPY,QQQ."),
+@@ -1801,35 +1807,48 @@ def agent_list_candidates(
+     ] = None,
+ ) -> None:
+     """List candidate artifacts and their review status."""
+     active_agent_root = resolve_agent_output_dir(agent_output_dir)
+     candidates = AgentRunner(agent_output_dir=active_agent_root).list_candidates()
+     if not candidates:
+         typer.echo("no_candidates=true")
+         return
+     for candidate in candidates:
+         path = resolve_candidates_dir(active_agent_root) / candidate["candidate_id"]
+-        digest = candidate.get("manifest_digest") or candidate.get(
+-            "observed_manifest_digest"
+-        )
+-        typer.echo(
+-            " ".join(
+-                [
+-                    f"candidate_id={candidate['candidate_id']}",
+-                    f"type={candidate.get('artifact_type')}",
+-                    f"status={candidate.get('status')}",
+-                    f"integrity={candidate.get('integrity_state')}",
+-                    f"digest={digest}",
+-                    f"path={path}",
+-                ]
+-            )
+-        )
++        integrity = candidate.get("integrity_state")
++        parts = [
++            f"candidate_id={candidate['candidate_id']}",
++            f"type={candidate.get('artifact_type')}",
++            f"status={candidate.get('status')}",
++            f"integrity={integrity}",
++            f"approval_enabled={candidate.get('approval_enabled')}",
++        ]
++        # Never substitute observed digest for the authoritative approval digest.
++        if integrity == "verified" and candidate.get("manifest_digest"):
++            parts.append(f"manifest_digest={candidate['manifest_digest']}")
++            if candidate.get("status") == "pending" and candidate.get(
++                "approval_enabled"
++            ):
++                parts.append(
++                    "approve_cmd="
++                    f"agent review --candidate-id {candidate['candidate_id']} "
++                    f"--decision approve --expected-digest {candidate['manifest_digest']} "
++                    f"--expected-status pending --note \"<note>\""
++                )
++        elif integrity == "migration_required":
++            observed = candidate.get("observed_manifest_digest")
++            if observed:
++                parts.append(f"observed_manifest_digest={observed}")
++            parts.append("note=migration_evidence_approval_disabled")
++        # corrupt: intentionally no digest/source fields
++        parts.append(f"path={path}")
++        typer.echo(" ".join(parts))
+ 
+ 
+ @agent_app.command("review")
+ def agent_review(
+     candidate_id: Annotated[
+         str,
+         typer.Option("--candidate-id", help="Candidate id from list-candidates."),
+     ],
+     decision: Annotated[
+         Literal["approve", "reject"],
+@@ -2865,25 +2884,36 @@ def _emit_paper_summary(result: PaperTradingRunResult) -> None:
+                 f"orders_path={result.orders_path}",
+                 f"order_events={result.order_events_path}",
+                 f"trades_path={result.trades_path}",
+                 f"risk_breaches_path={result.risk_breaches_path}",
+                 f"paper_report={result.report_path}",
+             ]
+         )
+     )
+ 
+ 
+-def _emit_agent_artifact(candidate_id: str, path: Any, metadata_path: Any) -> None:
+-    typer.echo(
+-        " ".join(
+-            [
+-                f"candidate_id={candidate_id}",
+-                "status=pending",
+-                f"path={path}",
+-                f"metadata={metadata_path}",
+-            ]
++def _emit_agent_artifact(
++    candidate_id: str,
++    path: Any,
++    metadata_path: Any,
++    *,
++    manifest_digest: str | None = None,
++) -> None:
++    parts = [
++        f"candidate_id={candidate_id}",
++        "status=pending",
++        f"path={path}",
++        f"metadata={metadata_path}",
++    ]
++    if manifest_digest:
++        parts.append(f"manifest_digest={manifest_digest}")
++        parts.append(
++            "approve_cmd="
++            f"agent review --candidate-id {candidate_id} "
++            f"--decision approve --expected-digest {manifest_digest} "
++            f'--expected-status pending --note "<note>"'
+         )
+-    )
++    typer.echo(" ".join(parts))
+ 
+ 
+ if __name__ == "__main__":
+     app()
+diff --git a/tests/test_api_agent.py b/tests/test_api_agent.py
+index 22aee4e..da7a663 100644
+--- a/tests/test_api_agent.py
++++ b/tests/test_api_agent.py
+@@ -135,53 +135,64 @@ def test_agent_review_missing_expected_status_and_stale_second_decision(tmp_path
+     first = client.post(
+         f"/api/agent/candidates/{artifact.candidate_id}/review",
+         json={
+             "decision": "approve",
+             "note": "first",
+             "expected_manifest_digest": artifact.manifest_digest,
+             "expected_status": "pending",
+         },
+     )
+     assert first.status_code == 200
++    lock_path = Path(agent, "agent", "candidates", artifact.candidate_id, "approved.lock")
++    first_lock_bytes = lock_path.read_bytes()
+     second = client.post(
+         f"/api/agent/candidates/{artifact.candidate_id}/review",
+         json={
+             "decision": "reject",
+             "note": "second",
+             "expected_manifest_digest": artifact.manifest_digest,
+             "expected_status": "pending",
+         },
+     )
+     assert second.status_code == 409
+-    assert second.json()["detail"]["code"] == "review_state_stale"
++    detail = second.json()["detail"]
++    assert detail["code"] == "candidate_review_state_stale"
++    assert detail["resource"] == "agent_candidate"
++    assert detail["id"] == artifact.candidate_id
++    assert lock_path.read_bytes() == first_lock_bytes
++    assert not (
++        Path(agent, "agent", "candidates", artifact.candidate_id, "rejected.lock")
++    ).exists()
+ 
+ 
+-def test_agent_review_stale_digest_is_409(tmp_path) -> None:
+-    agent, client = _agent_app(tmp_path)
+-    artifact = CandidatePool(agent).write_candidate(
+-        task_id="task-stale",
++def test_candidate_review_returns_409_for_stale_digest(tmp_path) -> None:
++    pool = CandidatePool(tmp_path)
++    artifact = pool.write_candidate(
++        task_id="api-stale",
+         goal="stale",
+         artifact_type="factor",
+         filename="factor.py.candidate",
+-        content="# stale\n",
++        content="# candidate\n",
+     )
++    client = TestClient(create_app(agent_output_dir=tmp_path))
+     response = client.post(
+         f"/api/agent/candidates/{artifact.candidate_id}/review",
+         json={
+             "decision": "approve",
+-            "note": "wrong digest",
++            "note": "reviewed",
+             "expected_manifest_digest": "0" * 64,
+             "expected_status": "pending",
+         },
+     )
+     assert response.status_code == 409
+-    assert response.json()["detail"]["code"] == "stale_digest"
++    assert response.json()["detail"]["code"] == "candidate_revision_stale"
++    assert not (artifact.path.parent / "approved.lock").exists()
+ 
+ 
+ def test_agent_list_isolates_corrupt_and_migration_required(tmp_path) -> None:
+     agent, client = _agent_app(tmp_path)
+     pool = CandidatePool(agent)
+     good = pool.write_candidate(
+         task_id="task-good",
+         goal="good",
+         artifact_type="factor",
+         filename="factor.py.candidate",
+@@ -230,21 +241,37 @@ def test_agent_list_isolates_corrupt_and_migration_required(tmp_path) -> None:
+     mig = client.post(
+         "/api/agent/candidates/legacy-pending/review",
+         json={
+             "decision": "approve",
+             "note": "migrate?",
+             "expected_manifest_digest": by_id["legacy-pending"]["observed_manifest_digest"],
+             "expected_status": "pending",
+         },
+     )
+     assert mig.status_code == 409
+-    assert mig.json()["detail"]["code"] == "migration_required"
++    assert mig.json()["detail"]["code"] == "candidate_migration_required"
++
++    # Migration detail remains readable with observed digest + source preview;
++    # approval stays disabled. Corrupt has no source/digest.
++    legacy_detail = client.get("/api/agent/candidates/legacy-pending").json()
++    assert legacy_detail["integrity_state"] == "migration_required"
++    assert legacy_detail["manifest_digest"] is None
++    assert len(legacy_detail["observed_manifest_digest"]) == 64
++    assert legacy_detail["approval_enabled"] is False
++    assert "# legacy" in (legacy_detail.get("source_preview") or "")
++
++    broken_detail = client.get("/api/agent/candidates/broken").json()
++    assert broken_detail["integrity_state"] == "corrupt"
++    assert broken_detail["source_preview"] is None
++    assert broken_detail["manifest_digest"] is None
++    assert broken_detail["observed_manifest_digest"] is None
++    assert broken_detail["approval_enabled"] is False
+ 
+ 
+ def test_agent_tasks_propose_factor(tmp_path) -> None:
+     _, client = _agent_app(tmp_path)
+ 
+     response = client.post(
+         "/api/agent/tasks",
+         json={
+             "task_type": "propose-factor",
+             "goal": "low-vol momentum",
+@@ -290,20 +317,103 @@ def test_agent_candidate_review_404_uses_standard_detail(tmp_path) -> None:
+         },
+     )
+ 
+     assert response.status_code == 404
+     detail = response.json()["detail"]
+     assert detail["code"] == "not_found"
+     assert detail["resource"] == "agent_candidate"
+     assert detail["id"] == "missing-candidate"
+ 
+ 
++def test_unversioned_candidate_is_readable_but_review_is_disabled(tmp_path) -> None:
++    import json
++
++    candidates = tmp_path / "agent" / "candidates"
++    candidates.mkdir(parents=True)
++    legacy = candidates / "legacy-pending"
++    legacy.mkdir()
++    (legacy / "metadata.json").write_text(
++        json.dumps(
++            {
++                "candidate_id": "legacy-pending",
++                "task_id": "t",
++                "artifact_type": "factor",
++                "goal": "legacy",
++                "universe": ["SPY"],
++                "status": "pending",
++                "created_at": "2026-01-01T00:00:00Z",
++                "updated_at": "2026-01-01T00:00:00Z",
++                "files": ["factor.py.candidate"],
++                "safety": {
++                    "auto_promotion": False,
++                    "requires_human_review": True,
++                    "review_status": "pending",
++                },
++            },
++            indent=2,
++            sort_keys=True,
++        ),
++        encoding="utf-8",
++    )
++    (legacy / "factor.py.candidate").write_text("# candidate\n", encoding="utf-8")
++    client = TestClient(create_app(agent_output_dir=tmp_path))
++
++    item = client.get("/api/agent/candidates").json()["candidates"][0]
++
++    assert item["integrity_state"] == "migration_required"
++    assert item["manifest_digest"] is None
++    assert len(item["observed_manifest_digest"]) == 64
++    assert item["approval_enabled"] is False
++    response = client.post(
++        "/api/agent/candidates/legacy-pending/review",
++        json={
++            "decision": "approve",
++            "note": "must migrate first",
++            "expected_manifest_digest": item["observed_manifest_digest"],
++            "expected_status": "pending",
++        },
++    )
++    assert response.status_code == 409
++    assert response.json()["detail"]["code"] == "candidate_migration_required"
++
++
++def test_agent_review_corrupt_candidate_is_409_integrity_failed(tmp_path) -> None:
++    agent, client = _agent_app(tmp_path)
++    broken = Path(agent) / "agent" / "candidates" / "broken-id"
++    broken.mkdir(parents=True)
++    (broken / "metadata.json").write_text("{not-json", encoding="utf-8")
++    before = {
++        p: p.read_bytes()
++        for p in broken.rglob("*")
++        if p.is_file()
++    }
++
++    response = client.post(
++        "/api/agent/candidates/broken-id/review",
++        json={
++            "decision": "approve",
++            "note": "corrupt target",
++            "expected_manifest_digest": "0" * 64,
++            "expected_status": "pending",
++        },
++    )
++    assert response.status_code == 409
++    assert response.json()["detail"]["code"] == "candidate_integrity_failed"
++    after = {
++        p: p.read_bytes()
++        for p in broken.rglob("*")
++        if p.is_file()
++    }
++    assert after == before
++    assert not (broken / "approved.lock").exists()
++
++
+ def test_agent_candidates_list_returns_latest_first(tmp_path) -> None:
+     agent, client = _agent_app(tmp_path)
+     pool = CandidatePool(agent)
+     first = pool.write_candidate(
+         task_id="task-001",
+         goal="first",
+         artifact_type="factor",
+         filename="factor.py.candidate",
+         content="# first\n",
+     )
+diff --git a/tests/test_api_response_models.py b/tests/test_api_response_models.py
+index c6d9a03..501c730 100644
+--- a/tests/test_api_response_models.py
++++ b/tests/test_api_response_models.py
+@@ -230,20 +230,49 @@ def test_agent_post_routes_publish_response_models(tmp_path) -> None:
+     }
+     for path, model_name in expected.items():
+         response_schema = openapi["paths"][path]["post"]["responses"]["200"]["content"][
+             "application/json"
+         ]["schema"]
+         assert response_schema == {"$ref": f"#/components/schemas/{model_name}"}
+ 
+     components = openapi["components"]["schemas"]
+     assert "metadata" in components["AgentTaskResponse"]["properties"]
+     assert "registration" in components["AgentReviewResponse"]["properties"]
++    review_req = components["AgentReviewRequest"]["properties"]
++    assert "expected_manifest_digest" in review_req
++    assert "expected_status" in review_req
++    assert components["AgentReviewRequest"]["required"] == [
++        "decision",
++        "note",
++        "expected_manifest_digest",
++        "expected_status",
++    ]
++    candidate_summary = components["CandidateSummary"]["properties"]
++    for field in (
++        "integrity_state",
++        "manifest_digest",
++        "observed_manifest_digest",
++        "approval_binding",
++        "approval_enabled",
++        "integrity_error_code",
++    ):
++        assert field in candidate_summary
++    detail = components["AgentCandidateDetailResponse"]["properties"]
++    for field in (
++        "integrity_state",
++        "manifest_digest",
++        "observed_manifest_digest",
++        "approval_binding",
++        "approval_enabled",
++        "integrity_error_code",
++    ):
++        assert field in detail
+ 
+ 
+ def test_brief_archive_routes_publish_response_models(tmp_path) -> None:
+     client = TestClient(create_app(output_dir=tmp_path))
+ 
+     openapi = client.get("/openapi.json").json()
+ 
+     get_schema = openapi["paths"]["/api/brief/issues/{public_id}"]["get"]["responses"]["200"][
+         "content"
+     ]["application/json"]["schema"]
+diff --git a/tests/test_cli_json_output.py b/tests/test_cli_json_output.py
+index 60ed328..4468e28 100644
+--- a/tests/test_cli_json_output.py
++++ b/tests/test_cli_json_output.py
+@@ -84,53 +84,63 @@ def _patch_experiment(monkeypatch, tmp_path: Path) -> None:
+         agent_summary_path = tmp_path / "a.json"
+         report_path = tmp_path / "rep.md"
+ 
+     monkeypatch.setattr(cli_module, "run_experiment", lambda *a, **k: _Result())
+ 
+ 
+ # --- agent propose-factor ---------------------------------------------------
+ 
+ 
+ def test_propose_factor_legacy_line_byte_identical_without_json(tmp_path) -> None:
++    from quant_system.agent.candidate_pool import CandidatePool
++
+     result, output_dir = _propose_factor(tmp_path)
+ 
+     candidate_id = _candidate_id(result.output)
+     candidate_dir = Path(output_dir, "agent", "candidates", candidate_id)
+-    expected = " ".join(
+-        [
+-            f"candidate_id={candidate_id}",
+-            "status=pending",
+-            f"path={candidate_dir / 'factor.py.candidate'}",
+-            f"metadata={candidate_dir / 'metadata.json'}",
+-        ]
+-    )
+-    assert _last_line(result.output) == expected
++    digest = CandidatePool(output_dir).get(candidate_id).manifest_digest
++    line = _last_line(result.output)
++    assert f"candidate_id={candidate_id}" in line
++    assert "status=pending" in line
++    assert f"path={candidate_dir / 'factor.py.candidate'}" in line
++    assert f"metadata={candidate_dir / 'metadata.json'}" in line
++    assert f"manifest_digest={digest}" in line
++    assert f"--expected-digest {digest}" in line
++    assert "--expected-status pending" in line
+ 
+ 
+ def test_propose_factor_json_emits_contract_on_last_line(tmp_path) -> None:
+     result, output_dir = _propose_factor(tmp_path, "--json")
+ 
+     payload = json.loads(_last_line(result.output))
+-    assert set(payload) == {"candidate_id", "status", "path", "metadata_path"}
++    assert set(payload) == {
++        "candidate_id",
++        "status",
++        "path",
++        "metadata_path",
++        "manifest_digest",
++    }
+     assert payload["status"] == "pending"
+     assert payload["candidate_id"] == _candidate_id(result.output)
+     candidate_dir = Path(output_dir, "agent", "candidates", payload["candidate_id"])
+     assert payload["path"] == str(candidate_dir / "factor.py.candidate")
+     assert payload["metadata_path"] == str(candidate_dir / "metadata.json")
++    assert isinstance(payload["manifest_digest"], str)
++    assert len(payload["manifest_digest"]) == 64
+     # Legacy key=value line still precedes the JSON line (regex fallback safe).
+     assert "status=pending" in result.output
+ 
+ 
+ # --- agent review -----------------------------------------------------------
+ 
+ 
+-def test_agent_review_missing_expected_status_exits_nonzero(tmp_path) -> None:
++def test_agent_review_missing_expected_status_exits_2(tmp_path) -> None:
+     from quant_system.agent.candidate_pool import CandidatePool
+ 
+     propose_result, output_dir = _propose_factor(tmp_path)
+     candidate_id = _candidate_id(propose_result.output)
+     digest = CandidatePool(output_dir).get(candidate_id).manifest_digest
+ 
+     result = runner.invoke(
+         app,
+         [
+             "agent",
+@@ -140,26 +150,113 @@ def test_agent_review_missing_expected_status_exits_nonzero(tmp_path) -> None:
+             "--decision",
+             "approve",
+             "--note",
+             "missing status CAS field",
+             "--expected-digest",
+             digest,
+             "--agent-output-dir",
+             str(output_dir),
+         ],
+     )
+-    assert result.exit_code != 0
++    assert result.exit_code == 2
++    assert not (
++        Path(output_dir) / "agent" / "candidates" / candidate_id / "approved.lock"
++    ).exists()
++
++
++def test_agent_review_missing_expected_digest_exits_2(tmp_path) -> None:
++    propose_result, output_dir = _propose_factor(tmp_path)
++    candidate_id = _candidate_id(propose_result.output)
++
++    result = runner.invoke(
++        app,
++        [
++            "agent",
++            "review",
++            "--candidate-id",
++            candidate_id,
++            "--decision",
++            "approve",
++            "--note",
++            "missing digest CAS field",
++            "--expected-status",
++            "pending",
++            "--agent-output-dir",
++            str(output_dir),
++        ],
++    )
++    assert result.exit_code == 2
+     assert not (
+         Path(output_dir) / "agent" / "candidates" / candidate_id / "approved.lock"
+     ).exists()
+ 
+ 
++def test_agent_list_candidates_isolates_corrupt_and_verified(tmp_path) -> None:
++    import json
++
++    from quant_system.agent.candidate_pool import CandidatePool
++
++    propose_result, output_dir = _propose_factor(tmp_path)
++    good_id = _candidate_id(propose_result.output)
++    digest = CandidatePool(output_dir).get(good_id).manifest_digest
++
++    legacy = Path(output_dir) / "agent" / "candidates" / "legacy-pending"
++    legacy.mkdir(parents=True)
++    (legacy / "metadata.json").write_text(
++        json.dumps(
++            {
++                "candidate_id": "legacy-pending",
++                "task_id": "t",
++                "artifact_type": "factor",
++                "goal": "legacy",
++                "universe": ["SPY"],
++                "status": "pending",
++                "created_at": "2026-01-01T00:00:00Z",
++                "updated_at": "2026-01-01T00:00:00Z",
++                "files": ["factor.py.candidate"],
++                "safety": {
++                    "auto_promotion": False,
++                    "requires_human_review": True,
++                    "review_status": "pending",
++                },
++            },
++            indent=2,
++            sort_keys=True,
++        ),
++        encoding="utf-8",
++    )
++    (legacy / "factor.py.candidate").write_text("# legacy\n", encoding="utf-8")
++    broken = Path(output_dir) / "agent" / "candidates" / "broken"
++    broken.mkdir()
++    (broken / "metadata.json").write_text("{not-json", encoding="utf-8")
++
++    result = runner.invoke(
++        app,
++        ["agent", "list-candidates", "--agent-output-dir", str(output_dir)],
++    )
++    assert result.exit_code == 0, result.output
++    assert f"candidate_id={good_id}" in result.output
++    assert f"manifest_digest={digest}" in result.output
++    assert "integrity=migration_required" in result.output
++    assert "observed_manifest_digest=" in result.output
++    assert "migration_evidence_approval_disabled" in result.output
++    assert "integrity=corrupt" in result.output
++    # Authoritative approve digest never appears for migration/corrupt.
++    for line in result.output.splitlines():
++        if "integrity=migration_required" in line or "integrity=corrupt" in line:
++            assert " manifest_digest=" not in f" {line}"
++            # observed_manifest_digest is allowed for migration; reject bare key.
++            tokens = line.split()
++            assert not any(token.startswith("manifest_digest=") for token in tokens)
++            assert "approve_cmd=" not in line
++
++
+ def test_agent_review_legacy_line_byte_identical_without_json(tmp_path) -> None:
+     from quant_system.agent.candidate_pool import CandidatePool
+ 
+     propose_result, output_dir = _propose_factor(tmp_path)
+     candidate_id = _candidate_id(propose_result.output)
+     digest = CandidatePool(output_dir).get(candidate_id).manifest_digest
+ 
+     result = runner.invoke(
+         app,
+         [

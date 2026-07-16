@@ -1,11 +1,12 @@
 # Hermes-quant-agent
 
-Hermes orchestration layer for the local `ai-quant-platform`. Current Phase
-0/1a work ships read-only / proposal-only digital employees that never touch the
-trading chain:
+Hermes orchestration layer for the local `ai-quant-platform`. Phase 1a-4/9H is
+complete; current D-32 work targets a real Agent v0.2 with complete `/hermes`
+Web Chat while preserving read-only / proposal-only and never touching the trading
+chain:
 
 Start with [`docs/README.md`](docs/README.md): it separates the long-term HQA
-roadmap from delivered records and the remaining D-31 gates. The
+roadmap, the current D-32 Agent v0.2 plan, and predecessor delivery records. The
 `docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md` delivery record covers Slice 9A's paper-strategy
 read model and explicit crash recovery, Slice 9B's unified paper snapshot,
 Slice 9C's current-snapshot portfolio risk v1, Slice 9D's strict historical
@@ -19,17 +20,24 @@ command/event/outbox/run-link ledger with claim/lease/heartbeat primitives (3B),
 and a deterministic connector notify/scan/expired-lease reconcile runtime (3C).
 The runtime does not claim queued commands and remains reconcile-only: real Hermes
 chat/provider Run submission and approval mutations
-are still blocked. Slice 3C.1 now has a code-accepted append-only Task/Attempt
+are still blocked. Slice 3C.1 has a code-accepted append-only Task/Attempt
 authority, immutable content-addressed payloads, exact cross-authority bindings,
-and reverse audit; platform migration 006 has not been applied to the live database,
-so this foundation is not yet an activated write path. The read-only Unified Results catalog and details are
+and reverse audit. Platform migration 006 has not been applied to the live database;
+a later v0.2 review found its `UNIQUE(task_id)` incompatible with multi-Attempt
+research. Because the current runner replays old SQL, the selected fix is to revise
+the never-live 006 and redo its full evidence—not assume a later 007 can repair it—
+before any live authorization.
+This foundation is not yet an activated write path. The read-only Unified Results catalog and details are
 delivered and locally accepted as 3E-A, while independent Hermes Run results and
 full results cutover are not. Agent Studio has only a reversible page-scoped
 redirect mechanism that defaults off; exact-bound audit parity, user cutover
-approval, and retirement of all four legacy research pages remain open. Read the
-current [Wave 3 plan](docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md)
-and the accepted [local Hermes integration decision](docs/design/2026-07-15-local-hermes-integration-decision.md)
-before changing the bridge. The platform frontend plan is the Slice 0-8 delivery
+approval, and retirement of all four legacy research pages remain open. The only
+active implementation plan is [Agent v0.2 full `/hermes` Web Chat](docs/superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md);
+the [Wave 3 plan](docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md)
+is a predecessor delivery record. Read both it and the accepted
+[local Hermes integration decision](docs/design/2026-07-15-local-hermes-integration-decision.md)
+for evidence before changing the bridge. Discord stays usable, but no temporary
+web chat or fallback path is planned. The platform frontend plan is the Slice 0-8 delivery
 record, not an executable queue. Platform Phase 15 is reference only.
 
 - **Safety watchdog** (`hqa.doctor_watchdog`) — `[SILENT]`; JSON-first safety

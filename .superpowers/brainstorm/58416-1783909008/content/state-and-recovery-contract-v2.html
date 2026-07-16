@@ -1,0 +1,96 @@
+<h2>设计第 5 部分：谁保存什么，失败后怎么恢复</h2>
+<p class="subtitle">复核后的核心原则：Hermes、HQA、平台各自只拥有自己的真相；BFF 和前端只缓存、映射和展示，不能成为第四套业务事实。</p>
+
+<div class="mockup" style="margin-top:26px">
+  <div class="mockup-header">A. 三个真相源 + 一个明确标记的只读投影</div>
+  <div class="mockup-body" style="padding:24px;background:#121116">
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px">
+      <div style="padding:18px;border:1px solid #67528d;border-radius:12px;background:rgba(139,92,246,.08)">
+        <div class="label">对话真相</div><h3 style="margin-top:8px;color:#efe8fb">Hermes Session</h3>
+        <p style="color:#b9b1c2">消息上下文、Hermes Run、原始事件、实际 provider / model。</p>
+        <div style="margin-top:13px;padding:10px;border-radius:8px;background:#19161f;color:#b9a5dc">平台不改写 Hermes 历史，也不伪造配额或 provider。</div>
+      </div>
+      <div style="padding:18px;border:1px solid #405b81;border-radius:12px;background:rgba(59,130,246,.07)">
+        <div class="label">编排真相</div><h3 style="margin-top:8px;color:#e7eefb">HQA Research Task Ledger</h3>
+        <p style="color:#b9b1c2">结构化研究计划、plan hash、步骤、Run attempts、Gate refs、结果 refs 与派生阶段。</p>
+        <div style="margin-top:13px;padding:10px;border-radius:8px;background:#151923;color:#9eb4eb">聊天消息不是任务状态；一个任务可跨多轮、多个 Run 和数日审批。</div>
+      </div>
+      <div style="padding:18px;border:1px solid #356044;border-radius:12px;background:rgba(34,197,94,.07)">
+        <div class="label">领域真相</div><h3 style="margin-top:8px;color:#e8f7ed">Platform Repositories</h3>
+        <p style="color:#b9b1c2">因子、回测、实验、日报、候选源码、review locks 与 promotion diff。</p>
+        <div style="margin-top:13px;padding:10px;border-radius:8px;background:#151c17;color:#7ed99c">结果页按 stable ID 读取原产物；Hermes 总结不等于成功结果。</div>
+      </div>
+    </div>
+    <div style="margin-top:14px;padding:14px;border:1px dashed #5b5362;border-radius:10px;color:#aaa3ae"><b style="color:#d8d0dc">BFF / PostgreSQL / UI 投影：</b>只保存 session 映射、幂等键、白名单事件、最后同步时间与离线 transcript 快照；所有缓存必须带 <code>last_synced_at</code> / <code>stale</code>，可删除重建，绝不能用于通过审批或判断研究成功。</div>
+  </div>
+</div>
+
+<div class="split" style="margin-top:28px;align-items:stretch">
+  <div class="mockup">
+    <div class="mockup-header">B. 研究 Task 与短生命周期 Run 分开</div>
+    <div class="mockup-body" style="padding:22px;background:#121116">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <span style="padding:9px 11px;border:1px solid #405b81;border-radius:8px;color:#a9c4ef">draft</span><b style="color:#81798a">→</b>
+        <span style="padding:9px 11px;border:1px solid #6b4f24;border-radius:8px;color:#f2c874">待计划确认</span><b style="color:#81798a">→</b>
+        <span style="padding:9px 11px;border:1px solid #405b81;border-radius:8px;color:#a9c4ef">ready</span><b style="color:#81798a">→</b>
+        <span style="padding:9px 11px;border:1px solid #405b81;border-radius:8px;color:#a9c4ef">running</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:11px">
+        <span style="padding:9px 11px;border:1px solid #6b4f24;border-radius:8px;color:#f2c874">待领域 Gate</span><b style="color:#81798a">→ 新 attempt →</b>
+        <span style="padding:9px 11px;border:1px solid #405b81;border-radius:8px;color:#a9c4ef">running</span><b style="color:#81798a">→</b>
+        <span style="padding:9px 11px;border:1px solid #356044;border-radius:8px;color:#7ed99c">completed</span>
+      </div>
+      <div style="margin-top:18px;padding:14px;border:1px solid #302d35;border-radius:10px;color:#aaa3ae"><b style="color:#e6ddef">关键：</b>Gate 1/2/3 可能等待数小时或数日。当前 Hermes Run 在阶段结束时终止，Task 保持“待领域 Gate”；批准后创建新 attempt，不让一个 Run 跨夜悬挂。</div>
+      <div style="margin-top:12px;padding:14px;border:1px solid #302d35;border-radius:10px;color:#aaa3ae">重试不改写旧 Run。失败 attempt 永久保留；新 attempt 使用相同 task_id、递增 attempt，并重新校验 plan / target digest。</div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">C. Hermes Run 的可恢复状态机</div>
+    <div class="mockup-body" style="padding:22px;background:#121116">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+        <span style="padding:10px 12px;border:1px solid #405b81;border-radius:9px;color:#a9c4ef">queued</span><b style="color:#81798a">→</b>
+        <span style="padding:10px 12px;border:1px solid #405b81;border-radius:9px;color:#a9c4ef">running</span><b style="color:#81798a">↔</b>
+        <span style="padding:10px 12px;border:1px solid #6b4f24;border-radius:9px;color:#f2c874">命令审批</span><b style="color:#81798a">→</b>
+        <span style="padding:10px 12px;border:1px solid #405b81;border-radius:9px;color:#a9c4ef">stopping</span>
+      </div>
+      <div style="height:1px;background:#302d35;margin:18px 0"></div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">
+        <div style="padding:13px;border:1px solid #356044;border-radius:9px;color:#7ed99c">succeeded<br><span style="color:#8d858f;font-size:13px">阶段成功，不等于整个 Task 完成</span></div>
+        <div style="padding:13px;border:1px solid #6d3c43;border-radius:9px;color:#ef9aa5">failed<br><span style="color:#8d858f;font-size:13px">错误与 retryable 明示</span></div>
+        <div style="padding:13px;border:1px solid #6d3c43;border-radius:9px;color:#ef9aa5">stopped<br><span style="color:#8d858f;font-size:13px">保留已发布的部分产物</span></div>
+      </div>
+      <div style="margin-top:16px;padding:13px;border:1px solid #302d35;border-radius:9px;color:#a9a1ad"><b style="color:#e6ddef">幂等：</b><code>(session_id, client_request_id)</code> 唯一；工具步骤使用 <code>operation_id = hash(task, plan, step, inputs)</code>。超时先对账，禁止盲目重发。</div>
+      <div style="margin-top:11px;padding:13px;border:1px solid #302d35;border-radius:9px;color:#a9a1ad"><b style="color:#e6ddef">断线：</b>每个白名单事件有稳定 event_id + cursor；重连后先取 Hermes Run snapshot，再补齐事件。SSE 断开绝不等于失败。</div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:28px">
+  <div class="mockup-header">D. 两类审批绝不混在一起；全部绑定内容摘要</div>
+  <div class="mockup-body" style="padding:24px;background:#121116">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:13px">
+      <div style="padding:17px;border:1px solid #67528d;border-radius:10px"><b style="color:#d8c2f5">Hermes 命令审批</b><p style="margin-top:8px;color:#aaa3ae">绑定规范化 command + args + working_dir hash，短 TTL、一次性；只允许这次工具调用，不能替代 Gate 1/2/3。</p></div>
+      <div style="padding:17px;border:1px solid #6b4f24;border-radius:10px"><b style="color:#f2c874">研究领域 Gate</b><p style="margin-top:8px;color:#aaa3ae">Gate 1 绑定 formula / plan hash；Gate 2 绑定 candidate metadata + source digest；Gate 3 绑定 base commit + promotion diff digest。</p></div>
+    </div>
+    <div style="margin-top:14px;padding:16px;border:1px solid #6d3c43;border-radius:10px;background:#1d1517"><b style="color:#ef9aa5">已确认的现有风险：</b><p style="margin-top:8px;color:#c9adb1">当前 candidate approval 只证明某个 ID 被批准；同一 ID 的源码仍可被重写，promotion 又读取当下源码。新工作台上线前必须让 review lock 记录源码摘要，并在一次性回测和 promotion 时重新校验；摘要不同返回 stale，要求重新审批。</p></div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:28px">
+  <div class="mockup-header">E. 用户看到的是可行动的降级，而不是假成功</div>
+  <div class="mockup-body" style="padding:24px;background:#121116">
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+      <div style="padding:15px;border:1px solid #6d3c43;border-radius:10px"><b style="color:#ef9aa5">Hermes 离线</b><p style="margin-top:7px;color:#aaa3ae">平台结果、HQA Task 与带“上次同步”标记的 transcript 缓存可读；禁用新消息、新研究和命令审批；不回退旧 AgentRunner。</p></div>
+      <div style="padding:15px;border:1px solid #6b4f24;border-radius:10px"><b style="color:#f2c874">SSE 断线 / 调用超时</b><p style="margin-top:7px;color:#aaa3ae">显示“重连/对账中”；outcome unknown 时按幂等键查询，不能自动重复执行。</p></div>
+      <div style="padding:15px;border:1px solid #6d3c43;border-radius:10px"><b style="color:#ef9aa5">Provider 配额或模型失败</b><p style="margin-top:7px;color:#aaa3ae">展示 requested / actual provider、失败原因和显式 fallback；用户没预先接受的 provider 不得静默启用。</p></div>
+      <div style="padding:15px;border:1px solid #6d3c43;border-radius:10px"><b style="color:#ef9aa5">审批过期 / 目标变化</b><p style="margin-top:7px;color:#aaa3ae">服务端重新读取 canonical target 并比较 digest；过期、已决或摘要不同一律 stale，刷新后重审。</p></div>
+      <div style="padding:15px;border:1px solid #6b4f24;border-radius:10px"><b style="color:#f2c874">只有部分产物</b><p style="margin-top:7px;color:#aaa3ae">有合法 artifact + limitations 才可 completed_degraded；无可验证产物就是 failed，不能用聊天总结补成功。</p></div>
+      <div style="padding:15px;border:1px solid #6d3c43;border-radius:10px"><b style="color:#ef9aa5">账本或缓存不可写</b><p style="margin-top:7px;color:#aaa3ae">会创建产物或审批的操作 fail closed；既有领域产物仍按原仓库策略只读。</p></div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:26px;padding:17px;border:1px solid #356044;border-radius:12px;background:rgba(34,197,94,.06)">
+  <strong>首版落点：</strong>新增 HQA append-only research task ledger；平台 PostgreSQL 仅做可重建的 bridge/session 投影和离线缓存，不新建一套因子、回测、实验或审批真相。
+</div>

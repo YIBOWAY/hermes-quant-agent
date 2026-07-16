@@ -1,0 +1,62 @@
+<h2>设计第 3 部分：信息层级与“看一眼就懂”</h2>
+<p class="subtitle">首页只展示结论、异常和需要你决定的事；完整指标、cron、run ID、原始时间戳全部进入详情。</p>
+
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:24px">
+  <div style="padding:18px;border:2px solid #8b5cf6;border-radius:14px;background:rgba(139,92,246,.08)"><div class="label">第 1 层</div><h3 style="margin-top:7px">现在需要我做什么？</h3><p style="margin-top:8px;color:var(--muted)">审批、失败、风险异常永远置顶。</p></div>
+  <div style="padding:18px;border:1px solid #3f526f;border-radius:14px;background:rgba(59,130,246,.07)"><div class="label">第 2 层</div><h3 style="margin-top:7px">Hermes 做了什么？</h3><p style="margin-top:8px;color:var(--muted)">最近任务与结果，每项只有一句结论。</p></div>
+  <div style="padding:18px;border:1px solid #3a4f41;border-radius:14px;background:rgba(34,197,94,.06)"><div class="label">第 3 层</div><h3 style="margin-top:7px">证据和技术细节</h3><p style="margin-top:8px;color:var(--muted)">需要时下钻；默认不抢注意力。</p></div>
+</div>
+
+<div class="mockup" style="margin-top:28px">
+  <div class="mockup-header">A. 今日首页：异常优先，正常状态压缩</div>
+  <div class="mockup-body" style="padding:0;background:#111014;overflow:hidden">
+    <div style="height:40px;display:flex;align-items:center;justify-content:center;background:#211708;color:#f5a623;font-size:13px;font-weight:700">仅模拟　·　实盘交易已禁用　·　熔断开关 开　·　接口 OK</div>
+    <div style="display:grid;grid-template-columns:180px minmax(0,1fr);min-height:520px">
+      <aside style="padding:22px 16px;border-right:1px solid #302d35;background:#151419;color:#9a949f"><strong style="font-size:22px;color:#f3efe8">HERMES</strong><div style="margin-top:28px;display:grid;gap:16px;font-size:14px"><strong style="color:#c2a7ff">今日</strong><span>对话</span><span>任务</span><span>待我确认　<b style="color:#f6bd60">1</b></span><span>结果</span></div></aside>
+      <main style="padding:28px 32px;min-width:0">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:13px;color:#938d99">今日</div><h3 style="font-size:29px;color:#f5f1e9;margin:8px 0 0">系统正常，1 件事等你确认</h3></div><button style="padding:9px 13px;border:1px solid #35503d;border-radius:999px;background:#173323;color:#75db9c">● 自动化 4 / 4 正常　›</button></div>
+        <section style="margin-top:22px;padding:18px 20px;border:1px solid #654d29;border-radius:12px;background:#1d1914;display:flex;justify-content:space-between;align-items:center;gap:20px"><div><div style="font-size:13px;color:#a99472">需要你决定</div><strong style="display:block;font-size:18px;color:#f2d49a;margin-top:7px">审查“动量反转因子”候选源码</strong><div style="font-size:13px;color:#bdb09c;margin-top:7px">Gate 2 · pending · 由 Hermes 论文复现会话生成</div></div><button style="padding:10px 16px;border:1px solid #886b39;border-radius:8px;background:#2a2113;color:#f4ce86">打开审批</button></section>
+        <div style="display:grid;grid-template-columns:1.1fr .9fr;gap:14px;margin-top:15px">
+          <section style="padding:18px;border:1px solid #302d35;border-radius:12px;background:#18161c"><div style="display:flex;justify-content:space-between"><strong style="font-size:17px;color:#eee9f2">Hermes 最近完成</strong><span style="font-size:13px;color:#948d9a">任务记录</span></div><div style="margin-top:14px;display:grid;gap:13px;font-size:14px;color:#cbc5cf"><div><b style="color:#75db9c">✓</b> 周报已生成：59 个机会，0 个错过 <span style="float:right;color:#85808a">09:00</span></div><div><b style="color:#75db9c">✓</b> 组合风险已刷新：最大持仓 AAPL <span style="float:right;color:#85808a">08:25</span></div><div><b style="color:#b498ff">●</b> 市场预测提案：等待你确认 <span style="float:right;color:#85808a">昨天</span></div></div></section>
+          <section style="padding:18px;border:1px solid #302d35;border-radius:12px;background:#18161c"><div style="display:flex;justify-content:space-between"><strong style="font-size:17px;color:#eee9f2">研究结果</strong><span style="font-size:13px;color:#948d9a">查看全部</span></div><div style="margin-top:14px;display:grid;gap:12px;font-size:14px"><div style="color:#d2ccd6">组合风险日报 <span style="float:right;color:#75db9c">正常</span></div><div style="color:#d2ccd6">2026-W28 周报 <span style="float:right;color:#8ea8ff">打开</span></div><div style="color:#d2ccd6">AAPL 预测提案 <span style="float:right;color:#b498ff">待确认</span></div></div></section>
+        </div>
+        <div style="margin-top:15px;padding:15px 17px;border:1px solid #67528d;border-radius:13px;background:#17131f;color:#cfc0e8;font-size:15px">和 Hermes 讨论研究计划… <span style="float:right;color:#bca0ff;font-weight:700">发送 ↑</span></div>
+      </main>
+    </div>
+  </div>
+</div>
+
+<div class="split" style="margin-top:28px;align-items:stretch">
+  <div class="mockup">
+    <div class="mockup-header">B. 点击“自动化 4/4 正常”后的详情</div>
+    <div class="mockup-body" style="background:#121116;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center"><div><div class="label">自动化运行</div><h3 style="font-size:23px;color:#f3efe8;margin-top:7px">全部任务正常</h3></div><span style="padding:8px 12px;border-radius:999px;background:#173323;color:#75db9c">4 / 4 正常</span></div>
+      <div style="margin-top:20px;display:grid;gap:10px">
+        <div style="display:grid;grid-template-columns:1.4fr .7fr 1fr;gap:12px;padding:14px;border:1px solid #304838;border-radius:10px"><strong>每日收盘研究</strong><span style="color:#75db9c">正常</span><span style="color:#9c96a1">今天 08:25 成功</span></div>
+        <div style="display:grid;grid-template-columns:1.4fr .7fr 1fr;gap:12px;padding:14px;border:1px solid #304838;border-radius:10px"><strong>时效巡检</strong><span style="color:#75db9c">正常</span><span style="color:#9c96a1">今天 10:17 成功</span></div>
+        <div style="display:grid;grid-template-columns:1.4fr .7fr 1fr;gap:12px;padding:14px;border:1px solid #304838;border-radius:10px"><strong>每周复盘</strong><span style="color:#75db9c">正常</span><span style="color:#9c96a1">周日 09:00 成功</span></div>
+        <div style="display:grid;grid-template-columns:1.4fr .7fr 1fr;gap:12px;padding:14px;border:1px solid #304838;border-radius:10px"><strong>通知投递</strong><span style="color:#75db9c">正常</span><span style="color:#9c96a1">今天 10:22 成功</span></div>
+      </div>
+      <details style="margin-top:16px;padding:14px;border:1px solid #302d35;border-radius:10px;color:#a19aa6"><summary>技术详情：cron、run ID、fresh-until、通知 receipt</summary><p style="margin-top:10px">默认折叠，仅用于排障和审计。</p></details>
+      <div style="margin-top:16px;padding:13px;border-left:3px solid #75db9c;background:#171b18;color:#b7c9bd">正常任务不在首页逐项占空间；只有 stale / failed / delivery_unknown 会自动升到“需要你关注”。</div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">C. “待我确认”取代模糊的候选侧栏</div>
+    <div class="mockup-body" style="background:#121116;padding:24px">
+      <div class="label">审批中心</div><h3 style="font-size:23px;color:#f3efe8;margin-top:7px">动量反转因子 · Gate 2</h3>
+      <div style="display:flex;gap:8px;margin-top:12px"><span style="padding:6px 9px;border-radius:999px;background:#342716;color:#f2c874">待审源码</span><span style="padding:6px 9px;border-radius:999px;background:#1c2331;color:#9eb4eb">来自 Hermes 会话</span></div>
+      <div style="margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:12px"><div style="padding:14px;border:1px solid #302d35;border-radius:10px"><div class="label">研究目标</div><p style="margin-top:8px">验证 20 日动量反转与流动性过滤组合。</p></div><div style="padding:14px;border:1px solid #302d35;border-radius:10px"><div class="label">安全边界</div><p style="margin-top:8px">批准后只允许一次性研究回测，不进入 paper/live。</p></div></div>
+      <div style="margin-top:14px;padding:15px;border:1px solid #302d35;border-radius:10px;background:#17161b"><div style="display:flex;justify-content:space-between"><strong>源码预览</strong><span style="color:#928b97">完整 diff / audit ›</span></div><pre style="margin-top:12px;color:#b9c7e7;white-space:pre-wrap">class MomentumReversalFactor:
+    lookback = 20
+    # proposal-only candidate...</pre></div>
+      <label style="display:block;margin-top:14px;color:#aba4af">审批备注（必填）<textarea style="display:block;width:100%;min-height:62px;margin-top:7px;border:1px solid #403a46;border-radius:9px;background:#17161b;color:#eee;padding:10px" placeholder="说明批准或拒绝的依据"></textarea></label>
+      <div style="display:flex;gap:10px;margin-top:14px"><button style="padding:10px 16px;border:1px solid #38614a;border-radius:8px;background:#183023;color:#7ee0a4">批准候选</button><button style="padding:10px 16px;border:1px solid #6d3c43;border-radius:8px;background:#301a1d;color:#ef9aa5">拒绝</button></div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:26px;padding:17px;border:1px solid #5c4b83;border-radius:12px;background:rgba(139,92,246,.07)">
+  <strong>命名也会纠正：</strong>平台代码/实验候选统一称“研究审批项”；9F market-foresight candidates 统一称“市场预测提案”，不再都叫“候选”。
+</div>

@@ -1,0 +1,577 @@
+# Review package: 2939c0487268acc0546e999b26b55d49dbebdae8..HEAD
+
+## Commits
+1b461ef feat(hqa): add fail-closed Hermes gateway capability contract
+
+## Files changed
+ config/hermes-gateway-capabilities.v1.json |  39 +++++
+ hqa/config.py                              |  18 +++
+ hqa/hermes_capabilities.py                 | 230 ++++++++++++++++++++++++++++
+ tests/test_hermes_capabilities.py          | 234 +++++++++++++++++++++++++++++
+ 4 files changed, 521 insertions(+)
+
+## Diff
+diff --git a/config/hermes-gateway-capabilities.v1.json b/config/hermes-gateway-capabilities.v1.json
+new file mode 100644
+index 0000000..4571a23
+--- /dev/null
++++ b/config/hermes-gateway-capabilities.v1.json
+@@ -0,0 +1,39 @@
++{
++  "schema_version": "1.0",
++  "observed_at": "2026-07-13T09:13:45Z",
++  "hermes_version": "0.18.2",
++  "upstream_commit": "b03c94db",
++  "source_checkout_commit": "4281151ae859241351ba14d8c7682dc67ff4c126",
++  "server_source_sha256": "2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17",
++  "transport": "websocket_jsonrpc",
++  "endpoint": "ws://127.0.0.1:9119/api/ws",
++  "loopback_only": true,
++  "relevant_methods_observed": [
++    "approval.respond",
++    "config.set",
++    "prompt.submit",
++    "session.create",
++    "session.history",
++    "session.interrupt",
++    "session.list",
++    "session.resume",
++    "session.status"
++  ],
++  "evidence": {
++    "session_provider_override": true,
++    "session_primary_provider_policy_immutable": false,
++    "session_provider_fallback_policy_immutable": false,
++    "client_idempotency_key": false,
++    "request_correlation_metadata": false,
++    "request_lookup_by_client_id": false,
++    "run_id": false,
++    "event_id": false,
++    "event_cursor": false,
++    "run_provider_evidence": false,
++    "approval_command_digest_binding": false,
++    "approval_ttl": false,
++    "approval_single_use": false,
++    "stop_idempotent": false,
++    "stop_reconcilable": false
++  }
++}
+diff --git a/hqa/config.py b/hqa/config.py
+index e5390c8..d26a109 100644
+--- a/hqa/config.py
++++ b/hqa/config.py
+@@ -61,20 +61,38 @@ FULL9H_NOTIFY_TARGET = os.environ.get("HQA_FULL9H_NOTIFY_TARGET", "local")
+ OPTIONS_SCAN_DIR = Path(
+     os.environ.get("HQA_OPTIONS_SCAN_DIR", str(AIQP_DIR / "data" / "options_scans"))
+ )
+ RUNTIME_DIR = Path(
+     os.environ.get("HQA_RUNTIME_DIR", str(REPO_DIR / "data" / "_runtime"))
+ )
+ SIGNAL_THRESHOLDS_PATH = Path(
+     os.environ.get("HQA_SIGNAL_THRESHOLDS", str(RUNTIME_DIR / "signal_thresholds.json"))
+ )
+ 
++# These two admission anchors are intentionally not environment-overridable.
++# Tests monkeypatch the module constants directly.
++HERMES_GATEWAY_CAPABILITIES_PATH = (
++    REPO_DIR / "config" / "hermes-gateway-capabilities.v1.json"
++)
++HERMES_GATEWAY_REVIEW_PATH = (
++    REPO_DIR / "config" / "hermes-gateway-capabilities.v1.review.json"
++)
++HERMES_BIN_PATH = Path(
++    os.environ.get("HQA_HERMES_BIN_PATH", "/Users/sunyibo/.local/bin/hermes")
++)
++HERMES_SOURCE_DIR = Path(
++    os.environ.get(
++        "HQA_HERMES_SOURCE_DIR",
++        "/Users/sunyibo/.hermes/hermes-agent",
++    )
++)
++
+ # Nominal safety baseline. Any deviation from these values is an alert.
+ EXPECTED_SAFETY = {
+     "dry_run": "true",
+     "paper_trading": "true",
+     "live_trading_enabled": "false",
+     "kill_switch": "true",
+ }
+ 
+ # Default Scene-B / research data provider. Matches platform default_data_provider
+ # (futu). Tiingo requires an explicit opt-in when a token is configured.
+diff --git a/hqa/hermes_capabilities.py b/hqa/hermes_capabilities.py
+new file mode 100644
+index 0000000..4f030d6
+--- /dev/null
++++ b/hqa/hermes_capabilities.py
+@@ -0,0 +1,230 @@
++from __future__ import annotations
++
++import json
++from dataclasses import asdict, dataclass
++from pathlib import Path
++from urllib.parse import urlparse
++
++
++class CapabilityContractError(ValueError):
++    pass
++
++
++@dataclass(frozen=True)
++class HermesGatewayCapabilities:
++    schema_version: str
++    observed_at: str
++    hermes_version: str
++    upstream_commit: str
++    source_checkout_commit: str
++    server_source_sha256: str
++    transport: str
++    endpoint: str
++    loopback_only: bool
++    relevant_methods_observed: frozenset[str]
++    session_provider_override: bool
++    session_primary_provider_policy_immutable: bool
++    session_provider_fallback_policy_immutable: bool
++    client_idempotency_key: bool
++    request_correlation_metadata: bool
++    request_lookup_by_client_id: bool
++    run_id: bool
++    event_id: bool
++    event_cursor: bool
++    run_provider_evidence: bool
++    approval_command_digest_binding: bool
++    approval_ttl: bool
++    approval_single_use: bool
++    stop_idempotent: bool
++    stop_reconcilable: bool
++
++
++@dataclass(frozen=True)
++class HermesChatGate:
++    chat_read_enabled: bool
++    chat_write_enabled: bool
++    stream_enabled: bool
++    resume_enabled: bool
++    approval_enabled: bool
++    stop_enabled: bool
++    blockers: tuple[str, ...]
++    resume_blockers: tuple[str, ...]
++    approval_blockers: tuple[str, ...]
++    stop_blockers: tuple[str, ...]
++
++    def to_dict(self) -> dict:
++        return asdict(self)
++
++
++_READ_METHODS = frozenset({"session.list", "session.status", "session.history"})
++_CHAT_METHODS = frozenset({"session.create", "prompt.submit"})
++_EVIDENCE_KEYS = (
++    "session_provider_override",
++    "session_primary_provider_policy_immutable",
++    "session_provider_fallback_policy_immutable",
++    "client_idempotency_key",
++    "request_correlation_metadata",
++    "request_lookup_by_client_id",
++    "run_id",
++    "event_id",
++    "event_cursor",
++    "run_provider_evidence",
++    "approval_command_digest_binding",
++    "approval_ttl",
++    "approval_single_use",
++    "stop_idempotent",
++    "stop_reconcilable",
++)
++
++
++def load_capabilities(path: Path) -> HermesGatewayCapabilities:
++    try:
++        raw = json.loads(path.read_text(encoding="utf-8"))
++    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
++        raise CapabilityContractError("capability contract is unreadable") from exc
++    if not isinstance(raw, dict) or set(raw) != {
++        "schema_version",
++        "observed_at",
++        "hermes_version",
++        "upstream_commit",
++        "source_checkout_commit",
++        "server_source_sha256",
++        "transport",
++        "endpoint",
++        "loopback_only",
++        "relevant_methods_observed",
++        "evidence",
++    }:
++        raise CapabilityContractError("capability contract has unknown or missing fields")
++    evidence = raw["evidence"]
++    if not isinstance(evidence, dict) or set(evidence) != set(_EVIDENCE_KEYS):
++        raise CapabilityContractError("capability evidence has unknown or missing fields")
++    if raw["schema_version"] != "1.0" or raw["transport"] != "websocket_jsonrpc":
++        raise CapabilityContractError("unsupported capability schema or transport")
++    string_fields = (
++        "observed_at",
++        "hermes_version",
++        "upstream_commit",
++        "source_checkout_commit",
++        "server_source_sha256",
++    )
++    if any(not isinstance(raw[field], str) or not raw[field] for field in string_fields):
++        raise CapabilityContractError("capability identity fields must be non-empty strings")
++    if not isinstance(raw["relevant_methods_observed"], list) or any(
++        not isinstance(item, str) or not item
++        for item in raw["relevant_methods_observed"]
++    ):
++        raise CapabilityContractError(
++            "relevant capability methods must be non-empty strings"
++        )
++    if any(type(evidence[key]) is not bool for key in _EVIDENCE_KEYS):
++        raise CapabilityContractError("capability evidence values must be booleans")
++    if not isinstance(raw["endpoint"], str):
++        raise CapabilityContractError("Hermes endpoint must be loopback WebSocket")
++    try:
++        endpoint = urlparse(raw["endpoint"])
++        endpoint_port = endpoint.port
++    except ValueError as exc:
++        raise CapabilityContractError(
++            "Hermes endpoint must be loopback WebSocket"
++        ) from exc
++    if (
++        endpoint.scheme not in {"ws", "wss"}
++        or endpoint.hostname not in {"127.0.0.1", "::1"}
++        or endpoint_port is None
++        or not 1 <= endpoint_port <= 65535
++        or endpoint.path != "/api/ws"
++        or endpoint.username is not None
++        or endpoint.password is not None
++        or endpoint.params
++        or endpoint.query
++        or endpoint.fragment
++    ):
++        raise CapabilityContractError("Hermes endpoint must be loopback WebSocket")
++    if raw["loopback_only"] is not True:
++        raise CapabilityContractError("Hermes contract is not loopback-only")
++    relevant_methods = frozenset(
++        str(item) for item in raw["relevant_methods_observed"]
++    )
++    return HermesGatewayCapabilities(
++        schema_version="1.0",
++        observed_at=str(raw["observed_at"]),
++        hermes_version=str(raw["hermes_version"]),
++        upstream_commit=str(raw["upstream_commit"]),
++        source_checkout_commit=str(raw["source_checkout_commit"]),
++        server_source_sha256=str(raw["server_source_sha256"]),
++        transport="websocket_jsonrpc",
++        endpoint=str(raw["endpoint"]),
++        loopback_only=True,
++        relevant_methods_observed=relevant_methods,
++        **{key: evidence[key] is True for key in _EVIDENCE_KEYS},
++    )
++
++
++def evaluate_chat_gate(capabilities: HermesGatewayCapabilities) -> HermesChatGate:
++    chat_methods_present = _CHAT_METHODS.issubset(
++        capabilities.relevant_methods_observed
++    )
++    request_recovery = any(
++        (
++            capabilities.client_idempotency_key,
++            capabilities.request_correlation_metadata,
++            capabilities.request_lookup_by_client_id,
++        )
++    )
++    event_replay = capabilities.event_id and capabilities.event_cursor
++    provider_policy_locked = (
++        capabilities.session_provider_override
++        and capabilities.session_primary_provider_policy_immutable
++        and capabilities.session_provider_fallback_policy_immutable
++    )
++    chat_blockers: list[str] = []
++    if not chat_methods_present:
++        chat_blockers.append("missing_chat_methods")
++    if not request_recovery:
++        chat_blockers.append("missing_request_recovery")
++    if not capabilities.run_id:
++        chat_blockers.append("missing_run_identity")
++    if not provider_policy_locked:
++        chat_blockers.append("missing_provider_policy_lock")
++    if not capabilities.run_provider_evidence:
++        chat_blockers.append("missing_actual_provider_evidence")
++    write_enabled = not chat_blockers
++    stream_blockers = list(chat_blockers)
++    if not event_replay:
++        stream_blockers.append("missing_event_replay")
++    resume_blockers = list(stream_blockers)
++    if "session.resume" not in capabilities.relevant_methods_observed:
++        resume_blockers.append("missing_resume_method")
++    approval_blockers: list[str] = []
++    if chat_blockers:
++        approval_blockers.append("missing_chat_contract")
++    if "approval.respond" not in capabilities.relevant_methods_observed or not all(
++        (
++            capabilities.approval_command_digest_binding,
++            capabilities.approval_ttl,
++            capabilities.approval_single_use,
++        )
++    ):
++        approval_blockers.append("missing_approval_binding")
++    stop_blockers: list[str] = []
++    if not capabilities.run_id:
++        stop_blockers.append("missing_run_identity")
++    if "session.interrupt" not in capabilities.relevant_methods_observed or not all(
++        (capabilities.stop_idempotent, capabilities.stop_reconcilable)
++    ):
++        stop_blockers.append("missing_stop_contract")
++    return HermesChatGate(
++        chat_read_enabled=_READ_METHODS.issubset(
++            capabilities.relevant_methods_observed
++        ),
++        chat_write_enabled=write_enabled,
++        stream_enabled=not stream_blockers,
++        resume_enabled=not resume_blockers,
++        approval_enabled=not approval_blockers,
++        stop_enabled=not stop_blockers,
++        blockers=tuple(stream_blockers),
++        resume_blockers=tuple(resume_blockers),
++        approval_blockers=tuple(approval_blockers),
++        stop_blockers=tuple(stop_blockers),
++    )
+diff --git a/tests/test_hermes_capabilities.py b/tests/test_hermes_capabilities.py
+new file mode 100644
+index 0000000..6161384
+--- /dev/null
++++ b/tests/test_hermes_capabilities.py
+@@ -0,0 +1,234 @@
++from __future__ import annotations
++
++import json
++
++import pytest
++
++from hqa.hermes_capabilities import (
++    CapabilityContractError,
++    evaluate_chat_gate,
++    load_capabilities,
++)
++
++
++def _document() -> dict:
++    return {
++        "schema_version": "1.0",
++        "observed_at": "2026-07-13T09:13:45Z",
++        "hermes_version": "0.18.2",
++        "upstream_commit": "b03c94db",
++        "source_checkout_commit": "4281151ae859241351ba14d8c7682dc67ff4c126",
++        "server_source_sha256": "2a05d8979ee3e4edb0e534f4db1c421d2064f36c8290234c3cf1496365ba7d17",
++        "transport": "websocket_jsonrpc",
++        "endpoint": "ws://127.0.0.1:9119/api/ws",
++        "loopback_only": True,
++        "relevant_methods_observed": [
++            "approval.respond",
++            "config.set",
++            "prompt.submit",
++            "session.create",
++            "session.history",
++            "session.interrupt",
++            "session.list",
++            "session.resume",
++            "session.status",
++        ],
++        "evidence": {
++            "session_provider_override": True,
++            "session_primary_provider_policy_immutable": False,
++            "session_provider_fallback_policy_immutable": False,
++            "client_idempotency_key": False,
++            "request_correlation_metadata": False,
++            "request_lookup_by_client_id": False,
++            "run_id": False,
++            "event_id": False,
++            "event_cursor": False,
++            "run_provider_evidence": False,
++            "approval_command_digest_binding": False,
++            "approval_ttl": False,
++            "approval_single_use": False,
++            "stop_idempotent": False,
++            "stop_reconcilable": False,
++        },
++    }
++
++
++def test_known_gateway_is_readable_but_all_chat_mutations_fail_closed(tmp_path) -> None:
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(_document()), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_read_enabled is True
++    assert gate.chat_write_enabled is False
++    assert gate.stream_enabled is False
++    assert gate.resume_enabled is False
++    assert gate.approval_enabled is False
++    assert gate.approval_blockers == (
++        "missing_chat_contract",
++        "missing_approval_binding",
++    )
++    assert gate.stop_enabled is False
++    assert gate.stop_blockers == (
++        "missing_run_identity",
++        "missing_stop_contract",
++    )
++    assert gate.blockers == (
++        "missing_request_recovery",
++        "missing_run_identity",
++        "missing_provider_policy_lock",
++        "missing_actual_provider_evidence",
++        "missing_event_replay",
++    )
++
++
++def test_complete_contract_opens_each_capability_independently(tmp_path) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_write_enabled is True
++    assert gate.stream_enabled is True
++    assert gate.resume_enabled is True
++    assert gate.approval_enabled is True
++    assert gate.stop_enabled is True
++    assert gate.blockers == ()
++
++
++def test_resume_is_never_classified_as_a_read(tmp_path) -> None:
++    document = _document()
++    document["relevant_methods_observed"].remove("session.resume")
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_read_enabled is True
++    assert gate.resume_enabled is False
++    assert "missing_resume_method" in gate.resume_blockers
++
++
++def test_event_replay_is_required_for_stream_and_resume(tmp_path) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    document["evidence"]["event_cursor"] = False
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_write_enabled is True
++    assert gate.stream_enabled is False
++    assert gate.resume_enabled is False
++    assert gate.blockers == ("missing_event_replay",)
++
++
++def test_primary_and_fallback_provider_policies_must_both_be_immutable(
++    tmp_path,
++) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    document["evidence"]["session_primary_provider_policy_immutable"] = False
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_write_enabled is False
++    assert "missing_provider_policy_lock" in gate.blockers
++
++
++def test_missing_chat_method_is_an_explicit_fail_closed_blocker(tmp_path) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    document["relevant_methods_observed"].remove("prompt.submit")
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_write_enabled is False
++    assert gate.blockers == ("missing_chat_methods",)
++
++
++def test_safe_chat_does_not_open_approval_or_stop_from_method_names(tmp_path) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    for key in (
++        "approval_command_digest_binding",
++        "approval_ttl",
++        "approval_single_use",
++        "stop_idempotent",
++        "stop_reconcilable",
++    ):
++        document["evidence"][key] = False
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    gate = evaluate_chat_gate(load_capabilities(path))
++
++    assert gate.chat_write_enabled is True
++    assert gate.stream_enabled is True
++    assert gate.approval_enabled is False
++    assert gate.approval_blockers == ("missing_approval_binding",)
++    assert gate.stop_enabled is False
++    assert gate.stop_blockers == ("missing_stop_contract",)
++
++
++@pytest.mark.parametrize(
++    "recovery_field",
++    [
++        "client_idempotency_key",
++        "request_correlation_metadata",
++        "request_lookup_by_client_id",
++    ],
++)
++def test_any_one_deterministic_recovery_contract_is_sufficient(
++    tmp_path, recovery_field
++) -> None:
++    document = _document()
++    document["evidence"] = {key: True for key in document["evidence"]}
++    for key in (
++        "client_idempotency_key",
++        "request_correlation_metadata",
++        "request_lookup_by_client_id",
++    ):
++        document["evidence"][key] = key == recovery_field
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    assert evaluate_chat_gate(load_capabilities(path)).chat_write_enabled is True
++
++
++@pytest.mark.parametrize(
++    ("field", "value"),
++    [
++        ("schema_version", "2.0"),
++        ("transport", "rest"),
++        ("endpoint", "ws://0.0.0.0:9119/api/ws"),
++        ("endpoint", "ws://localhost:9119/api/ws"),
++        ("endpoint", "ws://127.0.0.1:9119/other"),
++        ("endpoint", "ws://127.0.0.1:9119/api/ws?token=secret#fragment"),
++        ("endpoint", "ws://user:pass@127.0.0.1:9119/api/ws"),
++        ("endpoint", "ws://127.0.0.1:99999/api/ws"),
++        ("loopback_only", False),
++    ],
++)
++def test_unsafe_or_unknown_contract_is_rejected(tmp_path, field, value) -> None:
++    document = _document()
++    document[field] = value
++    path = tmp_path / "capabilities.json"
++    path.write_text(json.dumps(document), encoding="utf-8")
++
++    with pytest.raises(CapabilityContractError):
++        load_capabilities(path)
++
++    # Error text must never reflect an endpoint that may contain credentials.
++    try:
++        load_capabilities(path)
++    except CapabilityContractError as exc:
++        assert "secret" not in str(exc)
++        assert "pass" not in str(exc)

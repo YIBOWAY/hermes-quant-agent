@@ -1,0 +1,950 @@
+# Review package: ed3b9bbc5f6c116dbe3b75bed1c4b6de625633d7..HEAD
+
+## Commits
+8aaa278 fix(agent): recheck candidate digest before research or promotion
+
+## Files changed
+ src/quant_system/agent/promote.py     |  94 ++++++++++++++---------
+ src/quant_system/agent/promotion.py   |  51 +++++++++----
+ src/quant_system/cli.py               |  18 ++++-
+ src/quant_system/factors/registry.py  |   7 +-
+ tests/test_agent_promote.py           | 138 ++++++++++++++++++++++++++++++++--
+ tests/test_agent_promotion.py         |  82 ++++++++++++++++++++
+ tests/test_factor_registry_factory.py |  31 ++++++++
+ 7 files changed, 359 insertions(+), 62 deletions(-)
+
+## Diff
+diff --git a/src/quant_system/agent/promote.py b/src/quant_system/agent/promote.py
+index 8140303..4128e26 100644
+--- a/src/quant_system/agent/promote.py
++++ b/src/quant_system/agent/promote.py
+@@ -1,46 +1,49 @@
+ """Deterministic Gate-3 promotion: approved candidate -> working-tree diff (D-20).
+ 
+ ``promote_candidate`` turns a human-approved candidate factor into reviewable
+ source files under the promoted library. It is deliberately boring:
+ 
+ * **No LLM, no network, no git.** The output is plain files in the working
+   tree; the human ``git diff`` review + commit IS Gate 3. This module must
+   never spawn a process or import process/interpreter modules, and never
+   touches ``.git`` (enforced by a static test).
+-* **Refuses loudly** unless every precondition holds: ``approved.lock`` present
+-  and no ``rejected.lock`` (:class:`~quant_system.agent.safety.SafetyGate`),
+-  the AST safety allowlist passes (:func:`~quant_system.agent.promotion._check_source`),
+-  the source defines exactly one ``BaseFactor`` subclass with a literal string
+-  ``factor_id``, and no promoted module of that name exists yet.
++* **No candidate filesystem I/O.** Callers re-verify immediately before
++  invoking this materializer and pass a :class:`VerifiedCandidateSnapshot`
++  plus the expected manifest digest. Only ``snapshot.artifact_bytes`` is used.
++* **Refuses loudly** unless every precondition holds: digest match,
++  ``approval_binding == "approved"``, the AST safety allowlist passes
++  (:func:`~quant_system.agent.promotion._check_source`), the source defines
++  exactly one ``BaseFactor`` subclass with a literal string ``factor_id``,
++  and no promoted module of that name exists yet.
+ * **Never executes candidate code.** Discovery of the factor class and its
+   ``factor_id`` is a static AST read.
+ """
+ 
+ from __future__ import annotations
+ 
+ import ast
+ import keyword
+ import re
+-from datetime import UTC, datetime
+ from pathlib import Path
+ 
+ from pydantic import BaseModel
+ 
+-from quant_system.agent.candidate_pool import CandidatePool
++from quant_system.agent.candidate_manifest import VerifiedCandidateSnapshot
++from quant_system.agent.models import ReviewRecord
+ from quant_system.agent.promotion import CandidateLoadError, _check_source
+-from quant_system.agent.safety import SafetyGate
+ 
+ _PROMOTED_PACKAGE = "quant_system.factors.library.promoted"
+ # Must start with a letter: `_regenerate_init` skips `_*.py` modules, so a
+ # leading-underscore factor_id would be written but never registered (F5).
+ _SAFE_FACTOR_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
++_ISO_DATE_PREFIX = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+ 
+ _INIT_DOCSTRING = '''"""Code-reviewed, promoted factor library (Gate-3 output of D-20).
+ 
+ Each module under this package holds exactly one human-reviewed, git-committed
+ factor promoted from an approved candidate. This file is REGENERATED
+ deterministically by ``agent promote-candidate`` (sorted imports) -- do not
+ edit by hand. ``PROMOTED_FACTORS`` is the single source the registry factory
+ reads. It starts empty; promotions append.
+ """'''
+ 
+@@ -50,57 +53,60 @@ class PromotionError(RuntimeError):
+ 
+ 
+ class PromotionResult(BaseModel):
+     factor_id: str
+     module_path: Path
+     test_path: Path
+     init_path: Path
+ 
+ 
+ def promote_candidate(
+-    candidate_id: str,
++    snapshot: VerifiedCandidateSnapshot,
+     *,
+-    agent_output_dir: Path,
++    expected_candidate_digest: str,
+     library_dir: Path,
+     tests_dir: Path,
+-    promotion_date: str | None = None,
+ ) -> PromotionResult:
+-    """Write the promotion diff for one approved candidate; never touch git.
++    """Write the promotion diff from a verified snapshot; never touch git.
+ 
+-    All preconditions are checked before the first write, so a refusal leaves
+-    the working tree untouched. ``promotion_date`` is injectable so tests stay
+-    deterministic; it defaults to today (UTC).
++    Candidate filesystem verification belongs to the caller immediately before
++    this internal materializer. All preconditions are checked before the first
++    write, so a refusal leaves the working tree untouched.
+ 
+-    Callers pass the agent-output root only (never a pre-derived candidates dir).
++    Provenance is path-free and clock-free: stable candidate ID, manifest
++    schema/digest, and the UTC approval date from ``snapshot.review_record``.
+     """
+-    agent_output_dir = Path(agent_output_dir)
+     library_dir = Path(library_dir)
+     tests_dir = Path(tests_dir)
++    candidate_id = snapshot.candidate_id
+ 
+-    # 1. Human approval gate (digest-bound structured approved.lock).
+-    if not SafetyGate(agent_output_dir).allow_promotion(candidate_id):
++    # 1. Expected-digest CAS and digest-bound approval (no FS re-open).
++    if snapshot.manifest_digest != expected_candidate_digest:
++        raise PromotionError(
++            f"candidate {candidate_id!r} manifest digest mismatch: "
++            f"expected {expected_candidate_digest}, got {snapshot.manifest_digest}"
++        )
++    if snapshot.approval_binding != "approved":
+         raise PromotionError(
+             f"candidate {candidate_id!r} is not approved for promotion "
+-            "(digest-bound approval missing or not authorized); "
++            f"(approval_binding={snapshot.approval_binding!r}); "
+             "run `agent review --decision approve` first"
+         )
+-
+-    try:
+-        snapshot = CandidatePool(agent_output_dir).get(candidate_id)
+-    except Exception as exc:
++    if snapshot.review_record is None:
+         raise PromotionError(
+-            f"candidate {candidate_id!r} cannot be verified for promotion: {exc}"
+-        ) from exc
++            f"candidate {candidate_id!r} is approved but has no structured review record"
++        )
++
+     source_bytes = snapshot.artifact_bytes.get("factor.py.candidate")
+     if source_bytes is None:
+         raise PromotionError(f"candidate {candidate_id!r} has no factor.py.candidate")
+-    source = source_bytes.decode("utf-8")
++    source = source_bytes.decode("utf-8", errors="strict")
+ 
+     # 2. Static AST safety allowlist (same check as the research-time loader).
+     try:
+         _check_source(source, candidate_id)
+     except CandidateLoadError as exc:
+         raise PromotionError(str(exc)) from exc
+ 
+     # 3. Static discovery of the single factor class -- no exec.
+     class_name, factor_id = _extract_factor_class(source, candidate_id)
+ 
+@@ -118,22 +124,21 @@ def promote_candidate(
+     existing_ids |= {factor_cls().factor_id for factor_cls in ALPHA101_FACTORS}
+     if factor_id in existing_ids:
+         raise PromotionError(
+             f"factor_id {factor_id!r} already exists in the registry "
+             "(builtin, promoted, or a registrable library); choose a distinct factor_id"
+         )
+ 
+     module_path = library_dir / f"{factor_id}.py"
+     test_path = tests_dir / f"test_{factor_id}.py"
+ 
+-    promoted_on = promotion_date or datetime.now(UTC).date().isoformat()
+-    approval_note = snapshot.candidate_dir / "approved.lock"
++    approved_on = _approval_date_utc(snapshot.review_record)
+ 
+     # 5. Serialize the check -> write -> regenerate-init critical section with an
+     # advisory lock (review findings F2/F3). Two concurrent promotions must not
+     # both pass the module-exists check and then interleave their
+     # `_regenerate_init` glob+rewrite, which would drop a factor from
+     # PROMOTED_FACTORS. `touch(exist_ok=False)` is an atomic exclusive create;
+     # the finally clause releases only the lock this call created.
+     library_dir.mkdir(parents=True, exist_ok=True)
+     lock_path = library_dir / ".promote.lock"
+     try:
+@@ -155,22 +160,23 @@ def promote_candidate(
+ 
+         # All checks passed -- write the three files (Gate-3 diff). Exclusive
+         # create ("x") is a hard backstop against writing over an existing file
+         # even if a check above were bypassed. If any step after the module write
+         # fails, roll the module back so a refusal leaves the working tree
+         # untouched (docstring contract) and a re-run is not falsely blocked.
+         _write_new(
+             module_path,
+             _provenance_header(
+                 candidate_id=candidate_id,
+-                approval_note=approval_note,
+-                promoted_on=promoted_on,
++                manifest_schema=snapshot.manifest.schema_version,
++                manifest_digest=snapshot.manifest_digest,
++                approved_on=approved_on,
+             )
+             + source,
+         )
+         try:
+             init_path = _regenerate_init(library_dir)
+ 
+             tests_dir.mkdir(parents=True, exist_ok=True)
+             _write_new(
+                 test_path,
+                 _test_scaffold(class_name=class_name, factor_id=factor_id),
+@@ -182,20 +188,33 @@ def promote_candidate(
+         lock_path.unlink(missing_ok=True)
+ 
+     return PromotionResult(
+         factor_id=factor_id,
+         module_path=module_path,
+         test_path=test_path,
+         init_path=init_path,
+     )
+ 
+ 
++def _approval_date_utc(review_record: ReviewRecord) -> str:
++    """Return YYYY-MM-DD from the structured approval timestamp (never wall clock)."""
++    raw = review_record.created_at
++    if not isinstance(raw, str) or not raw:
++        raise PromotionError("approval record missing created_at")
++    match = _ISO_DATE_PREFIX.match(raw)
++    if match is None:
++        raise PromotionError(
++            f"approval record created_at is not a valid ISO timestamp: {raw!r}"
++        )
++    return match.group(1)
++
++
+ def _write_new(path: Path, content: str) -> None:
+     """Write ``content`` to ``path``, refusing to overwrite an existing file."""
+     with path.open("x", encoding="utf-8") as handle:
+         handle.write(content)
+ 
+ 
+ def _extract_factor_class(source: str, context: str) -> tuple[str, str]:
+     """Statically find the single ``BaseFactor`` subclass and its ``factor_id``."""
+     tree = ast.parse(source)
+     factor_classes = [
+@@ -249,26 +268,33 @@ def _extract_factor_id(class_def: ast.ClassDef) -> str | None:
+         elif isinstance(stmt, ast.AnnAssign):
+             targets, value = [stmt.target], stmt.value
+         for target in targets:
+             if isinstance(target, ast.Name) and target.id == "factor_id":
+                 if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                     return value.value
+                 return None
+     return None
+ 
+ 
+-def _provenance_header(*, candidate_id: str, approval_note: Path, promoted_on: str) -> str:
++def _provenance_header(
++    *,
++    candidate_id: str,
++    manifest_schema: str,
++    manifest_digest: str,
++    approved_on: str,
++) -> str:
+     return (
+         "# Promoted factor -- generated by `agent promote-candidate` (Gate 3, D-20).\n"
+         f"# candidate_id: {candidate_id}\n"
+-        f"# approval_note: {approval_note}\n"
+-        f"# promoted_on: {promoted_on}\n"
++        f"# manifest_schema: {manifest_schema}\n"
++        f"# manifest_digest: {manifest_digest}\n"
++        f"# approved_on: {approved_on}\n"
+         "# source: verbatim copy of factor.py.candidate at promotion time.\n"
+     )
+ 
+ 
+ def _regenerate_init(library_dir: Path) -> Path:
+     """Rewrite ``__init__.py`` from the on-disk promoted modules, sorted."""
+     entries: list[tuple[str, str]] = []  # (module_name, class_name)
+     for path in sorted(library_dir.glob("*.py")):
+         if path.name.startswith("_"):
+             continue
+diff --git a/src/quant_system/agent/promotion.py b/src/quant_system/agent/promotion.py
+index 4f2041a..c8b20c1 100644
+--- a/src/quant_system/agent/promotion.py
++++ b/src/quant_system/agent/promotion.py
+@@ -23,21 +23,20 @@ escapes noisy and to stop the trivial bypasses, not to contain a hostile
+ cryptographic adversary who has already cleared human review.
+ """
+ 
+ from __future__ import annotations
+ 
+ import ast
+ import builtins as _builtins
+ import re
+ from pathlib import Path
+ 
+-from quant_system.agent.safety import SafetyGate
+ from quant_system.factors.base import BaseFactor
+ from quant_system.factors.registry import FactorRegistry
+ 
+ # External module roots a candidate factor may import. Numeric/data plumbing and
+ # Python type helpers are allowed by root so submodules such as collections.abc
+ # or numpy.linalg can work without opening unrelated platform modules.
+ _ALLOWED_IMPORT_ROOTS: frozenset[str] = frozenset(
+     {
+         "math",
+         "statistics",
+@@ -319,62 +318,82 @@ def _attribute_chain(node: ast.Attribute) -> list[str]:
+ 
+ 
+ def load_approved_factor_candidates(
+     registry: FactorRegistry,
+     *,
+     agent_output_dir: str | Path,
+ ) -> list[str]:
+     """Load factors from verified, digest-bound approved candidates under agent root.
+ 
+     Callers pass the agent-output root only; candidates live under
+-    ``agent/candidates`` via :func:`resolve_candidates_dir`. Task 4 will pass
+-    verified snapshots/bytes instead of reopening artifact paths after the gate.
++    ``agent/candidates`` via :func:`resolve_candidates_dir`. Each candidate is
++    re-verified immediately before compile: only
++    ``VerifiedCandidateSnapshot.artifact_bytes`` is executed. Tampered or
++    integrity-broken candidates raise :class:`CandidateIntegrityError` (fail
++    closed). Legacy unbound locks never authorize. Resident paper/live paths
++    must not call this (one-shot research only).
+     """
++    from quant_system.agent.candidate_manifest import (
++        CandidateIntegrityError,
++        CandidateMigrationRequiredError,
++        load_verified_candidate_snapshot,
++    )
+     from quant_system.agent.candidate_pool import CandidatePool
+     from quant_system.agent.paths import resolve_candidates_dir
+ 
+     agent_root = Path(agent_output_dir)
+     root = resolve_candidates_dir(agent_root)
+     if not root.exists():
+         return []
+-    gate = SafetyGate(agent_root)
+     pool = CandidatePool(agent_root)
+     loaded: list[str] = []
+     for item in pool.list_for_read():
+-        if item.integrity_state != "verified":
+-            continue
+-        if item.artifact_type != "factor":
++        # Skip junk names and migration-only objects without attempting compile.
++        if item.integrity_error_code == "invalid_id":
+             continue
+-        if not gate.allow_promotion(item.candidate_id):
++        if item.integrity_state == "migration_required":
+             continue
+         try:
+-            snapshot = pool.get(item.candidate_id)
+-        except Exception:
++            # Last-responsible-moment re-verify: never trust list_for_read alone
++            # and never reopen artifact paths after this snapshot is built.
++            snapshot = load_verified_candidate_snapshot(
++                agent_output_dir=agent_root,
++                candidate_id=item.candidate_id,
++            )
++        except CandidateMigrationRequiredError:
++            continue
++        except CandidateIntegrityError:
++            # Fail closed: an approved-then-tampered candidate must not be
++            # silently skipped while other candidates still compile.
++            raise
++        if snapshot.approval_binding != "approved":
++            continue
++        if snapshot.manifest.artifact_type != "factor":
+             continue
+         source_name = "factor.py.candidate"
+         source_bytes = snapshot.artifact_bytes.get(source_name)
+         if source_bytes is None:
+             continue
+-        source = source_bytes.decode("utf-8")
+-        _check_source(source, item.candidate_id)
++        source = source_bytes.decode("utf-8", errors="strict")
++        _check_source(source, snapshot.candidate_id)
+         # Restricted namespace: pass an explicit __builtins__ so CPython does not
+         # inject the full builtins dict (which would expose __import__/eval/exec).
+         # The guarded __import__ enforces the module allowlist at runtime too.
+         # __name__ is seeded so `class` statements (and any module-introspection)
+         # see a conventional module name rather than NameError.
+         namespace: dict[str, object] = {
+             "__builtins__": _make_safe_builtins(),
+-            "__name__": item.candidate_id,
++            "__name__": snapshot.candidate_id,
+         }
+-        # Human-approved candidate (digest-bound approval verified above).
+-        source_path = snapshot.candidate_dir / source_name
+-        exec(compile(source, str(source_path), "exec"), namespace)  # noqa: S102
++        # Synthetic compile filename: never absolute candidate/worktree path.
++        compile_name = f"<{snapshot.candidate_id}/{source_name}>"
++        exec(compile(source, compile_name, "exec"), namespace)  # noqa: S102
+         for value in namespace.values():
+             if (
+                 isinstance(value, type)
+                 and issubclass(value, BaseFactor)
+                 and value is not BaseFactor
+             ):
+                 try:
+                     registry.register(value)
+                 except ValueError:
+                     continue  # already registered -- idempotent reload
+diff --git a/src/quant_system/cli.py b/src/quant_system/cli.py
+index 78b1341..b19747e 100644
+--- a/src/quant_system/cli.py
++++ b/src/quant_system/cli.py
+@@ -1931,28 +1931,40 @@ def agent_promote_candidate(
+     library_dir: Annotated[
+         str,
+         typer.Option("--library-dir", help="Promoted factor library package directory."),
+     ] = "src/quant_system/factors/library/promoted",
+     tests_dir: Annotated[
+         str,
+         typer.Option("--tests-dir", help="Directory for generated factor test scaffolds."),
+     ] = "tests/factors",
+ ) -> None:
+     """Write the deterministic Gate-3 promotion diff; NEVER commits (D-20)."""
++    from quant_system.agent.candidate_manifest import (
++        CandidateIntegrityError,
++        load_verified_candidate_snapshot,
++    )
++
+     try:
++        # Re-verify at the last responsible moment; materializer uses only
++        # snapshot bytes and never reopens the candidate path.
++        agent_root = resolve_agent_output_dir(agent_output_dir)
++        snapshot = load_verified_candidate_snapshot(
++            agent_output_dir=agent_root,
++            candidate_id=candidate_id,
++        )
+         result = promote_candidate(
+-            candidate_id,
+-            agent_output_dir=resolve_agent_output_dir(agent_output_dir),
++            snapshot,
++            expected_candidate_digest=snapshot.manifest_digest,
+             library_dir=Path(library_dir),
+             tests_dir=Path(tests_dir),
+         )
+-    except PromotionError as exc:
++    except (PromotionError, CandidateIntegrityError) as exc:
+         typer.echo(f"promotion_refused reason={exc}")
+         raise typer.Exit(code=1) from exc
+     typer.echo(f"factor_id={result.factor_id}")
+     typer.echo(f"module={result.module_path}")
+     typer.echo(f"init={result.init_path}")
+     typer.echo(f"test={result.test_path}")
+     typer.echo(
+         "GATE 3 — review the diff and commit yourself: "
+         f"git diff -- {result.module_path} {result.init_path} {result.test_path}"
+     )
+diff --git a/src/quant_system/factors/registry.py b/src/quant_system/factors/registry.py
+index 36f5d9a..6bd829e 100644
+--- a/src/quant_system/factors/registry.py
++++ b/src/quant_system/factors/registry.py
+@@ -86,22 +86,25 @@ def build_factor_registry(
+ 
+     if include_promoted:
+         # Import the package (not the tuple by value) so promotions and test
+         # monkeypatches of PROMOTED_FACTORS are observed at call time.
+         from quant_system.factors.library import promoted
+ 
+         for factor_cls in promoted.PROMOTED_FACTORS:
+             registry.register(factor_cls, origin="promoted")
+ 
+     if include_approved_candidates and agent_output_dir is not None:
+-        # Reuse the single approved-candidate loader (SafetyGate + AST check).
+-        # Lazy import avoids a circular import: promotion imports FactorRegistry.
++        # One-shot research only: re-verifies digest-bound approved candidates
++        # immediately before compile (never a default/CWD candidates path).
++        # Resident paper/live construction must keep include_approved_candidates
++        # False. Lazy import avoids a circular import: promotion imports
++        # FactorRegistry.
+         from quant_system.agent.promotion import load_approved_factor_candidates
+ 
+         loaded = load_approved_factor_candidates(
+             registry, agent_output_dir=agent_output_dir
+         )
+         # Origin is tracked from which pass registered the id, not by re-parsing:
+         # the loader reports exactly the ids it added, so retag them as candidate.
+         for factor_id in loaded:
+             registry.set_origin(factor_id, "candidate")
+ 
+diff --git a/tests/test_agent_promote.py b/tests/test_agent_promote.py
+index f76b6fe..b1ede10 100644
+--- a/tests/test_agent_promote.py
++++ b/tests/test_agent_promote.py
+@@ -1,24 +1,28 @@
+ from __future__ import annotations
+ 
+ import ast
+ import json
++import shutil
+ from pathlib import Path
+ 
+ import pytest
+ from typer.testing import CliRunner
+ 
+ import quant_system.agent.promote as promote_module
+ from quant_system.agent.candidate_manifest import (
++    CandidateIntegrityError,
+     build_candidate_manifest,
+     canonical_json_bytes,
++    load_verified_candidate_snapshot,
+ )
++from quant_system.agent.candidate_pool import CandidatePool
+ from quant_system.agent.promote import PromotionError, promote_candidate
+ from quant_system.cli import app
+ 
+ runner = CliRunner()
+ 
+ _FACTOR_SRC = '''
+ from quant_system.factors.base import BaseFactor
+ 
+ 
+ class WiringTestFactor(BaseFactor):
+@@ -26,20 +30,36 @@ class WiringTestFactor(BaseFactor):
+     factor_name = "Wiring Test Factor"
+     factor_version = "0.1.0-candidate"
+     default_lookback = 20
+     direction = "higher_is_better"
+     description = "test candidate"
+ 
+     def _compute_values(self, frame):
+         return frame["close"] * 0.0
+ '''
+ 
++_VALID_FACTOR_SOURCE = '''
++from quant_system.factors.base import BaseFactor
++
++
++class SafeFactor(BaseFactor):
++    factor_id = "safe_factor"
++    factor_name = "Safe Factor"
++    factor_version = "0.1.0-candidate"
++    default_lookback = 20
++    direction = "higher_is_better"
++    description = "tamper test candidate"
++
++    def _compute_values(self, frame):
++        return frame["close"] * 0.0
++'''
++
+ _SECOND_FACTOR_SRC = '''
+ from quant_system.factors.base import BaseFactor
+ 
+ 
+ class AlphaScaffoldFactor(BaseFactor):
+     factor_id = "alpha_scaffold_factor"
+     factor_name = "Alpha Scaffold Factor"
+     factor_version = "0.1.0-candidate"
+     default_lookback = 10
+     direction = "lower_is_better"
+@@ -150,44 +170,56 @@ def _write_candidate(root: Path, candidate_id: str, source: str, *, approved: bo
+ @pytest.fixture()
+ def dirs(tmp_path: Path) -> dict[str, Path]:
+     return {
+         "agent": tmp_path / "agent-output",
+         "library": tmp_path / "library" / "promoted",
+         "tests": tmp_path / "tests" / "factors",
+     }
+ 
+ 
+ def _promote(candidate_id: str, dirs: dict[str, Path], **kwargs):
++    """Caller re-verifies, then materializes. Integrity failures refuse closed."""
++    try:
++        snapshot = load_verified_candidate_snapshot(
++            agent_output_dir=dirs["agent"],
++            candidate_id=candidate_id,
++        )
++    except CandidateIntegrityError as exc:
++        raise PromotionError(f"candidate cannot be verified for promotion: {exc}") from exc
++    expected = kwargs.pop("expected_candidate_digest", snapshot.manifest_digest)
+     return promote_candidate(
+-        candidate_id,
+-        agent_output_dir=dirs["agent"],
++        snapshot,
++        expected_candidate_digest=expected,
+         library_dir=dirs["library"],
+         tests_dir=dirs["tests"],
+         **kwargs,
+     )
+ 
+ 
+ def test_happy_path_writes_module_init_and_test_scaffold(dirs) -> None:
+-    _write_candidate(dirs["agent"], "cand-ok", _FACTOR_SRC)
++    digest = _write_candidate(dirs["agent"], "cand-ok", _FACTOR_SRC)
+ 
+-    result = _promote("cand-ok", dirs, promotion_date="2026-01-02")
++    result = _promote("cand-ok", dirs)
+ 
+     assert result.factor_id == "wiring_test_factor"
+     assert result.module_path == dirs["library"] / "wiring_test_factor.py"
+     assert result.init_path == dirs["library"] / "__init__.py"
+     assert result.test_path == dirs["tests"] / "test_wiring_test_factor.py"
+ 
+     module_content = result.module_path.read_text(encoding="utf-8")
+-    # Provenance header, then the candidate source verbatim.
++    # Provenance header is path-free and clock-free; then candidate source verbatim.
+     assert "candidate_id: cand-ok" in module_content
+-    assert "approved.lock" in module_content
+-    assert "promoted_on: 2026-01-02" in module_content
++    assert f"manifest_digest: {digest}" in module_content
++    assert "manifest_schema: 1.0" in module_content
++    assert "approved_on: 2026-01-01" in module_content
++    assert "approved.lock" not in module_content
++    assert str(dirs["agent"]) not in module_content
+     assert module_content.endswith(_FACTOR_SRC)
+ 
+     init_content = result.init_path.read_text(encoding="utf-8")
+     assert (
+         "from quant_system.factors.library.promoted.wiring_test_factor "
+         "import WiringTestFactor as wiring_test_factor_factor"
+     ) in init_content
+     assert "PROMOTED_FACTORS: tuple[type[BaseFactor], ...] = (" in init_content
+     assert "wiring_test_factor_factor," in init_content
+     ast.parse(init_content)
+@@ -220,20 +252,112 @@ def test_init_regeneration_is_sorted_across_promotions(dirs) -> None:
+ 
+ def test_unapproved_candidate_refused_and_nothing_written(dirs) -> None:
+     _write_candidate(dirs["agent"], "cand-pending", _FACTOR_SRC, approved=False)
+ 
+     with pytest.raises(PromotionError, match="approv"):
+         _promote("cand-pending", dirs)
+     assert not dirs["library"].exists() or not list(dirs["library"].iterdir())
+     assert not dirs["tests"].exists() or not list(dirs["tests"].iterdir())
+ 
+ 
++def test_materializer_refuses_source_changed_after_digest_bound_approval(
++    dirs, tmp_path: Path
++) -> None:
++    pool = CandidatePool(dirs["agent"])
++    artifact = pool.write_candidate(
++        task_id="tamper-promote",
++        goal="tamper-promote",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content=_VALID_FACTOR_SOURCE,
++    )
++    pool.review(
++        candidate_id=artifact.candidate_id,
++        decision="approve",
++        note="approved exact bytes",
++        expected_manifest_digest=artifact.manifest_digest,
++        expected_status="pending",
++    )
++    bound_digest = artifact.manifest_digest
++    artifact.path.write_text(
++        _VALID_FACTOR_SOURCE.replace("safe_factor", "changed_factor"),
++        encoding="utf-8",
++    )
++
++    with pytest.raises(CandidateIntegrityError):
++        load_verified_candidate_snapshot(
++            agent_output_dir=dirs["agent"],
++            candidate_id=artifact.candidate_id,
++        )
++
++    # Even if a caller somehow holds a stale expected digest, no tree write.
++    assert not dirs["library"].exists() or not any(dirs["library"].rglob("*"))
++    assert not dirs["tests"].exists() or not any(dirs["tests"].rglob("*"))
++    assert not (dirs["library"] / ".promote.lock").exists()
++    _ = bound_digest  # retained for CAS clarity; verification fails before promote
++
++
++def test_promotion_output_is_path_and_clock_independent(tmp_path: Path) -> None:
++    """Same approved bytes under two roots yield byte-identical Gate-3 files.
++
++    Provenance uses only the structured approval record's UTC date — never
++    wall clock, absolute candidate roots, or lock paths.
++    """
++    root_a = tmp_path / "root-a"
++    root_b = tmp_path / "root-b"
++    agent_a = root_a / "agent-output"
++    _write_candidate(agent_a, "cand-ok", _FACTOR_SRC)
++    shutil.copytree(agent_a, root_b / "agent-output")
++
++    lib_a = root_a / "library" / "promoted"
++    tests_a = root_a / "tests" / "factors"
++    lib_b = root_b / "library" / "promoted"
++    tests_b = root_b / "tests" / "factors"
++
++    snap_a = load_verified_candidate_snapshot(
++        agent_output_dir=agent_a, candidate_id="cand-ok"
++    )
++    snap_b = load_verified_candidate_snapshot(
++        agent_output_dir=root_b / "agent-output", candidate_id="cand-ok"
++    )
++    assert snap_a.manifest_digest == snap_b.manifest_digest
++    assert snap_a.artifact_bytes == snap_b.artifact_bytes
++
++    # Materializer must not import or call wall-clock helpers.
++    promote_source = Path(promote_module.__file__).read_text(encoding="utf-8")
++    assert "datetime" not in promote_source
++    assert "date.today" not in promote_source
++    assert "time.time" not in promote_source
++
++    result_a = promote_candidate(
++        snap_a,
++        expected_candidate_digest=snap_a.manifest_digest,
++        library_dir=lib_a,
++        tests_dir=tests_a,
++    )
++    result_b = promote_candidate(
++        snap_b,
++        expected_candidate_digest=snap_b.manifest_digest,
++        library_dir=lib_b,
++        tests_dir=tests_b,
++    )
++
++    assert result_a.module_path.read_bytes() == result_b.module_path.read_bytes()
++    assert result_a.init_path.read_bytes() == result_b.init_path.read_bytes()
++    assert result_a.test_path.read_bytes() == result_b.test_path.read_bytes()
++    module = result_a.module_path.read_text(encoding="utf-8")
++    assert str(agent_a) not in module
++    assert str(root_b) not in module
++    assert "approved.lock" not in module
++    assert "approved_on: 2026-01-01" in module
++
++
+ def test_rejected_lock_refuses_even_with_approved_lock(dirs) -> None:
+     _write_candidate(dirs["agent"], "cand-rejected", _FACTOR_SRC, approved=True)
+     cdir = dirs["agent"] / "agent" / "candidates" / "cand-rejected"
+     # Conflicting controls force legacy_unbound and never authorize.
+     (cdir / "rejected.lock").write_text("{}", encoding="utf-8")
+ 
+     with pytest.raises(PromotionError):
+         _promote("cand-rejected", dirs)
+ 
+ 
+diff --git a/tests/test_agent_promotion.py b/tests/test_agent_promotion.py
+index e8ffd3c..e868200 100644
+--- a/tests/test_agent_promotion.py
++++ b/tests/test_agent_promotion.py
+@@ -1,40 +1,58 @@
+ from __future__ import annotations
+ 
+ import json
+ from pathlib import Path
+ 
+ import pytest
+ 
+ from quant_system.agent.candidate_manifest import (
++    CandidateIntegrityError,
+     build_candidate_manifest,
+     canonical_json_bytes,
+ )
++from quant_system.agent.candidate_pool import CandidatePool
+ from quant_system.agent.promotion import CandidateLoadError, load_approved_factor_candidates
+ from quant_system.factors.registry import build_default_factor_registry
+ 
+ _FACTOR_SRC = '''
+ from quant_system.factors.base import BaseFactor
+ 
+ 
+ class WiringTestFactor(BaseFactor):
+     factor_id = "wiring_test_factor"
+     factor_name = "Wiring Test Factor"
+     factor_version = "0.1.0-candidate"
+     default_lookback = 20
+     direction = "higher_is_better"
+     description = "test candidate"
+ 
+     def _compute_values(self, frame):
+         return frame["close"] * 0.0
+ '''
+ 
++_VALID_FACTOR_SOURCE = '''
++from quant_system.factors.base import BaseFactor
++
++
++class SafeFactor(BaseFactor):
++    factor_id = "safe_factor"
++    factor_name = "Safe Factor"
++    factor_version = "0.1.0-candidate"
++    default_lookback = 20
++    direction = "higher_is_better"
++    description = "tamper test candidate"
++
++    def _compute_values(self, frame):
++        return frame["close"] * 0.0
++'''
++
+ 
+ 
+ def _write_candidate(agent_root, candidate_id, source, approved):
+     """Write a verified candidate under agent_root/agent/candidates."""
+     cdir = Path(agent_root) / "agent" / "candidates" / candidate_id
+     cdir.mkdir(parents=True, exist_ok=True)
+     metadata = {
+         "candidate_id": candidate_id,
+         "task_id": "task",
+         "artifact_type": "factor",
+@@ -81,20 +99,84 @@ def test_loads_only_approved_candidates(tmp_path):
+         approved=False,
+     )
+     registry = build_default_factor_registry()
+     loaded = load_approved_factor_candidates(registry, agent_output_dir=tmp_path)
+     assert loaded == ["wiring_test_factor"]
+     assert registry.create("wiring_test_factor") is not None
+     with pytest.raises(KeyError):
+         registry.create("other_id")
+ 
+ 
++def test_loader_refuses_source_changed_after_digest_bound_approval(tmp_path) -> None:
++    pool = CandidatePool(tmp_path)
++    artifact = pool.write_candidate(
++        task_id="tamper-task",
++        goal="tamper",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content=_VALID_FACTOR_SOURCE,
++    )
++    pool.review(
++        candidate_id=artifact.candidate_id,
++        decision="approve",
++        note="approved exact bytes",
++        expected_manifest_digest=artifact.manifest_digest,
++        expected_status="pending",
++    )
++    artifact.path.write_text(
++        _VALID_FACTOR_SOURCE.replace("safe_factor", "changed_factor"),
++        encoding="utf-8",
++    )
++
++    registry = build_default_factor_registry()
++    with pytest.raises(CandidateIntegrityError):
++        load_approved_factor_candidates(registry, agent_output_dir=tmp_path)
++    assert "changed_factor" not in registry.factor_ids()
++    assert "safe_factor" not in registry.factor_ids()
++
++
++def test_loader_skips_legacy_unbound_approval_without_compiling(tmp_path) -> None:
++    # Legacy empty approved.lock never authorizes one-shot research load.
++    cdir = tmp_path / "agent" / "candidates" / "cand-legacy"
++    cdir.mkdir(parents=True)
++    metadata = {
++        "candidate_id": "cand-legacy",
++        "task_id": "task",
++        "artifact_type": "factor",
++        "goal": "goal",
++        "universe": ["SPY"],
++        "status": "pending",
++        "created_at": "2026-01-01T00:00:00Z",
++        "updated_at": "2026-01-01T00:00:00Z",
++        "files": ["factor.py.candidate"],
++        "safety": {
++            "auto_promotion": False,
++            "requires_human_review": True,
++            "review_status": "pending",
++        },
++    }
++    (cdir / "metadata.json").write_text(
++        json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8"
++    )
++    (cdir / "factor.py.candidate").write_text(_VALID_FACTOR_SOURCE, encoding="utf-8")
++    manifest, _digest, _ = build_candidate_manifest(cdir)
++    (cdir / "manifest.v1.json").write_bytes(
++        canonical_json_bytes(manifest.model_dump(mode="json"))
++    )
++    (cdir / "approved.lock").write_text("{}", encoding="utf-8")
++
++    registry = build_default_factor_registry()
++    loaded = load_approved_factor_candidates(registry, agent_output_dir=tmp_path)
++    assert loaded == []
++    assert "safe_factor" not in registry.factor_ids()
++
++
+ def test_duplicate_registration_is_skipped_idempotently(tmp_path):
+     _write_candidate(tmp_path, "cand-a", _FACTOR_SRC, approved=True)
+     registry = build_default_factor_registry()
+     assert load_approved_factor_candidates(registry, agent_output_dir=tmp_path) == [
+         "wiring_test_factor"
+     ]
+     assert load_approved_factor_candidates(registry, agent_output_dir=tmp_path) == []
+ 
+ 
+ def test_forbidden_import_raises(tmp_path):
+diff --git a/tests/test_factor_registry_factory.py b/tests/test_factor_registry_factory.py
+index 9a34662..76e78f9 100644
+--- a/tests/test_factor_registry_factory.py
++++ b/tests/test_factor_registry_factory.py
+@@ -1,15 +1,16 @@
+ from __future__ import annotations
+ 
+ import json
+ from pathlib import Path
+ 
++import pytest
+ from fastapi.testclient import TestClient
+ 
+ from quant_system.agent.candidate_manifest import (
+     build_candidate_manifest,
+     canonical_json_bytes,
+ )
+ from quant_system.api.server import create_app
+ from quant_system.factors import library
+ from quant_system.factors.base import BaseFactor
+ from quant_system.factors.registry import (
+@@ -132,20 +133,50 @@ def test_approved_candidates_only_when_requested(tmp_path) -> None:
+ 
+ def test_pending_candidate_is_not_loaded(tmp_path) -> None:
+     _write_candidate(tmp_path, "cand-pending", _CANDIDATE_SRC, approved=False)
+ 
+     registry = build_factor_registry(
+         include_approved_candidates=True, agent_output_dir=tmp_path
+     )
+     assert "wiring_test_factor" not in registry.factor_ids()
+ 
+ 
++def test_factory_refuses_tampered_approved_candidate(tmp_path) -> None:
++    from quant_system.agent.candidate_manifest import CandidateIntegrityError
++    from quant_system.agent.candidate_pool import CandidatePool
++
++    pool = CandidatePool(tmp_path)
++    artifact = pool.write_candidate(
++        task_id="factory-tamper",
++        goal="factory-tamper",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content=_CANDIDATE_SRC,
++    )
++    pool.review(
++        candidate_id=artifact.candidate_id,
++        decision="approve",
++        note="approved exact bytes",
++        expected_manifest_digest=artifact.manifest_digest,
++        expected_status="pending",
++    )
++    artifact.path.write_text(
++        _CANDIDATE_SRC.replace("wiring_test_factor", "tampered_factor"),
++        encoding="utf-8",
++    )
++
++    with pytest.raises(CandidateIntegrityError):
++        build_factor_registry(
++            include_approved_candidates=True, agent_output_dir=tmp_path
++        )
++
++
+ def test_approved_candidates_requested_without_dir_is_safe(tmp_path) -> None:
+     # No candidates_dir supplied: must not raise and must not load anything.
+     registry = build_factor_registry(
+         include_approved_candidates=True, agent_output_dir=tmp_path / "missing"
+     )
+     assert set(registry.factor_ids()) == _EXAMPLE_IDS
+ 
+ 
+ # --- origin provenance metadata (Task P2) --------------------------------
+ 

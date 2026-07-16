@@ -1,0 +1,1921 @@
+# Review package: 4933b898fbfe82208cb42eb63c11dfd366341835..HEAD
+
+## Commits
+5c8188a feat(agent): unify API candidate root with CLI source of truth
+
+## Files changed
+ src/frontend/playwright.config.ts       |   1 +
+ src/quant_system/agent/paths.py         |  33 +++++++
+ src/quant_system/agent/runner.py        |  31 +++++--
+ src/quant_system/api/bootstrap.py       |   3 +
+ src/quant_system/api/dependencies.py    |   5 ++
+ src/quant_system/api/routes/agent.py    |  25 ++++--
+ src/quant_system/api/routes/factors.py  |  31 ++++---
+ src/quant_system/api/server.py          |   2 +
+ src/quant_system/cli.py                 | 155 +++++++++++++++++++++-----------
+ tests/test_agent_paths.py               |  96 ++++++++++++++++++++
+ tests/test_agent_phase7.py              |  12 +--
+ tests/test_agent_promote.py             |  18 ++--
+ tests/test_agent_propose_source_file.py |   2 +-
+ tests/test_api_agent.py                 |  71 +++++++++++++--
+ tests/test_cli_experiment_provider.py   | 127 +++++++++++++-------------
+ tests/test_cli_json_output.py           |  10 +--
+ tests/test_factor_registry_factory.py   |  76 ++++++++--------
+ tests/test_frontend_e2e_config.py       |   1 +
+ 18 files changed, 490 insertions(+), 209 deletions(-)
+
+## Diff
+diff --git a/src/frontend/playwright.config.ts b/src/frontend/playwright.config.ts
+index 31cbf1e..8a97069 100644
+--- a/src/frontend/playwright.config.ts
++++ b/src/frontend/playwright.config.ts
+@@ -90,20 +90,21 @@ export default defineConfig({
+           timeout: 60_000,
+           env: {
+             QS_ENVIRONMENT: "test",
+             QS_DATABASE_ENABLED: "false",
+             QS_DATABASE_AUTO_MIGRATE: "false",
+             QS_AIHOT_ENABLED: "false",
+             QS_HERMES_ARTIFACT_FEED_PATH: hermesArtifactFixture,
+             QS_HERMES_ARTIFACT_FRESHNESS_BUDGET_SECONDS: "315360000",
+             QS_API_CORS_ORIGINS: JSON.stringify(e2eCorsOrigins),
+             QS_DATA_DIR: e2eDataRoot,
++            QS_AGENT_OUTPUT_DIR: path.join(e2eDataRoot, "agent-output"),
+             QS_PARQUET_DIR: path.join(e2eDataRoot, "parquet"),
+             QS_DUCKDB_PATH: path.join(e2eDataRoot, "quant_system.duckdb"),
+             QS_OPTIONS_RADAR_OUTPUT_DIR: path.join(e2eDataRoot, "options_scans"),
+             QS_OPTIONS_RADAR_UNIVERSE_PATH: path.join(
+               e2eDataRoot,
+               "options_universe",
+               "universe.csv",
+             ),
+             QS_OPTIONS_RADAR_EARNINGS_CALENDAR_PATH: path.join(
+               e2eDataRoot,
+diff --git a/src/quant_system/agent/paths.py b/src/quant_system/agent/paths.py
+new file mode 100644
+index 0000000..02e9247
+--- /dev/null
++++ b/src/quant_system/agent/paths.py
+@@ -0,0 +1,33 @@
++from __future__ import annotations
++
++import os
++from pathlib import Path
++
++PLATFORM_REPO_ROOT = Path(__file__).resolve().parents[3]
++DEFAULT_AGENT_OUTPUT_DIR = PLATFORM_REPO_ROOT / "data" / "agent_run"
++DEFAULT_LEGACY_CANDIDATES_DIR = PLATFORM_REPO_ROOT / "data" / "agent" / "candidates"
++
++
++def _repo_anchored_absolute(raw: str | Path) -> Path:
++    path = Path(raw).expanduser()
++    anchored = path if path.is_absolute() else PLATFORM_REPO_ROOT / path
++    # abspath/normpath is lexical; unlike Path.resolve(), it does not follow a
++    # symlink that the dirfd filesystem boundary must detect and reject.
++    return Path(os.path.abspath(os.fspath(anchored)))
++
++
++def resolve_agent_output_dir(explicit: str | Path | None = None) -> Path:
++    raw = explicit if explicit is not None else os.environ.get("QS_AGENT_OUTPUT_DIR")
++    if raw is None:
++        return DEFAULT_AGENT_OUTPUT_DIR
++    return _repo_anchored_absolute(raw)
++
++
++def resolve_legacy_candidates_dir(explicit: str | Path | None = None) -> Path:
++    if explicit is None:
++        return DEFAULT_LEGACY_CANDIDATES_DIR
++    return _repo_anchored_absolute(explicit)
++
++
++def resolve_candidates_dir(agent_output_dir: str | Path) -> Path:
++    return Path(agent_output_dir) / "agent" / "candidates"
+diff --git a/src/quant_system/agent/runner.py b/src/quant_system/agent/runner.py
+index f928879..ab02a0f 100644
+--- a/src/quant_system/agent/runner.py
++++ b/src/quant_system/agent/runner.py
+@@ -23,115 +23,128 @@ from quant_system.agent.workflows import (
+ )
+ 
+ 
+ def _task_id(task_type: AgentTaskType, subject: str) -> str:
+     created = utc_now_iso().replace(":", "").replace("-", "")
+     digest = hashlib.sha256(f"{task_type.value}|{subject}|{created}".encode()).hexdigest()[:8]
+     return f"agent-{task_type.value}-{created}-{digest}"
+ 
+ 
+ class AgentRunner:
+-    def __init__(self, *, output_dir: str | Path, llm: LLMClient | None = None) -> None:
+-        self.output_dir = Path(output_dir)
++    def __init__(
++        self,
++        *,
++        agent_output_dir: str | Path,
++        result_output_dir: str | Path | None = None,
++        llm: LLMClient | None = None,
++    ) -> None:
++        self.agent_output_dir = Path(agent_output_dir)
++        # Experiment/result reads are a separately named root. Never fall back
++        # from general data into the candidate root, or the reverse.
++        self.result_output_dir = (
++            Path(result_output_dir)
++            if result_output_dir is not None
++            else self.agent_output_dir
++        )
+         self.llm = llm or StubLLMClient()
+-        self.candidates = CandidatePool(self.output_dir)
++        self.candidates = CandidatePool(self.agent_output_dir)
+ 
+     def propose_factor(
+         self,
+         *,
+         goal: str,
+         universe: list[str],
+         metadata_extra: dict[str, Any] | None = None,
+     ) -> CandidateArtifact:
+         task = AgentTask(
+             task_id=_task_id(AgentTaskType.FACTOR_PROPOSAL, goal),
+             task_type=AgentTaskType.FACTOR_PROPOSAL,
+             goal=goal,
+             universe=universe,
+         )
+-        audit = AgentAuditLog(self.output_dir, task_id=task.task_id)
++        audit = AgentAuditLog(self.agent_output_dir, task_id=task.task_id)
+         audit.record("task", task.model_dump(mode="json"))
+         return factor_proposal.run(
+             llm=self.llm,
+             audit=audit,
+             candidates=self.candidates,
+             task=task,
+             goal=goal,
+             universe=universe,
+             metadata_extra=metadata_extra,
+         )
+ 
+     def propose_experiment(self, *, goal: str, universe: list[str]) -> CandidateArtifact:
+         task = AgentTask(
+             task_id=_task_id(AgentTaskType.EXPERIMENT_DESIGN, goal),
+             task_type=AgentTaskType.EXPERIMENT_DESIGN,
+             goal=goal,
+             universe=universe,
+         )
+-        audit = AgentAuditLog(self.output_dir, task_id=task.task_id)
++        audit = AgentAuditLog(self.agent_output_dir, task_id=task.task_id)
+         audit.record("task", task.model_dump(mode="json"))
+         return experiment_design.run(
+             llm=self.llm,
+             audit=audit,
+             candidates=self.candidates,
+             task=task,
+             goal=goal,
+             universe=universe,
+         )
+ 
+     def summarize(self, *, experiment_id: str) -> CandidateArtifact:
+         task = AgentTask(
+             task_id=_task_id(AgentTaskType.RESULT_SUMMARY, experiment_id),
+             task_type=AgentTaskType.RESULT_SUMMARY,
+             goal=f"summarize {experiment_id}",
+             experiment_id=experiment_id,
+         )
+-        audit = AgentAuditLog(self.output_dir, task_id=task.task_id)
++        audit = AgentAuditLog(self.agent_output_dir, task_id=task.task_id)
+         audit.record("task", task.model_dump(mode="json"))
+         return result_summary.run(
+             llm=self.llm,
+             audit=audit,
+             candidates=self.candidates,
+             task=task,
+-            output_dir=self.output_dir,
++            output_dir=self.result_output_dir,
+             experiment_id=experiment_id,
+         )
+ 
+     def audit_leakage(self, *, factor_id: str) -> CandidateArtifact:
+         task = AgentTask(
+             task_id=_task_id(AgentTaskType.LEAKAGE_AUDIT, factor_id),
+             task_type=AgentTaskType.LEAKAGE_AUDIT,
+             goal=f"leakage audit {factor_id}",
+             factor_id=factor_id,
+         )
+-        audit = AgentAuditLog(self.output_dir, task_id=task.task_id)
++        audit = AgentAuditLog(self.agent_output_dir, task_id=task.task_id)
+         audit.record("task", task.model_dump(mode="json"))
+         return leakage_audit.run(
+             llm=self.llm,
+             audit=audit,
+             candidates=self.candidates,
+             task=task,
+             factor_id=factor_id,
+         )
+ 
+     def list_candidates(self) -> list[dict]:
+         return self.candidates.list_candidates()
+ 
+     def review(
+         self,
+         *,
+         candidate_id: str,
+         decision: Literal["approve", "reject"],
+         note: str,
+     ) -> ReviewRecord:
+         task_id = _task_id(AgentTaskType.REVIEW, candidate_id)
+-        audit = AgentAuditLog(self.output_dir, task_id=task_id)
++        audit = AgentAuditLog(self.agent_output_dir, task_id=task_id)
+         audit.record(
+             "task",
+             {
+                 "task_id": task_id,
+                 "task_type": AgentTaskType.REVIEW.value,
+                 "candidate_id": candidate_id,
+             },
+         )
+         record = self.candidates.review(
+             candidate_id=candidate_id,
+diff --git a/src/quant_system/api/bootstrap.py b/src/quant_system/api/bootstrap.py
+index 743a51c..0300f6b 100644
+--- a/src/quant_system/api/bootstrap.py
++++ b/src/quant_system/api/bootstrap.py
+@@ -1,35 +1,38 @@
+ from __future__ import annotations
+ 
+ from pathlib import Path
+ from typing import Any
+ 
++from quant_system.agent.paths import resolve_agent_output_dir
+ from quant_system.api.jobs.backtest_jobs import BacktestJobRunner
+ from quant_system.config.settings import Settings, reload_settings
+ 
+ 
+ def build_services(
+     *,
+     settings: Settings | None = None,
+     output_dir: str | Path | None = None,
++    agent_output_dir: str | Path | None = None,
+     bind_address: str = "127.0.0.1",
+ ) -> dict[str, Any]:
+     """Build the small app-state payload shared by Phase 9 routes.
+ 
+     Phase 9 intentionally keeps this thin: construct settings, resolve paths,
+     and expose them via ``app.state``. Existing Phase 1-8 functions remain the
+     source of business logic.
+     """
+ 
+     active_settings = settings or reload_settings()
+     base_dir = Path(output_dir) if output_dir is not None else active_settings.data.data_dir
+     api_runs_dir = base_dir / "api_runs"
+     return {
+         "settings": active_settings,
+         "bind_address": bind_address,
+         "output_dir": base_dir,
++        "agent_output_dir": resolve_agent_output_dir(agent_output_dir),
+         "api_runs_dir": api_runs_dir,
+         "backtest_job_runner": BacktestJobRunner(
+             api_runs_dir=api_runs_dir,
+             settings=active_settings,
+         ),
+     }
+diff --git a/src/quant_system/api/dependencies.py b/src/quant_system/api/dependencies.py
+index 8aee00c..ca5eb34 100644
+--- a/src/quant_system/api/dependencies.py
++++ b/src/quant_system/api/dependencies.py
+@@ -14,27 +14,32 @@ def get_services(request: Request) -> dict[str, Any]:
+ 
+ 
+ def get_settings(request: Request) -> Settings:
+     return request.app.state.services["settings"]
+ 
+ 
+ def get_output_dir(request: Request) -> Path:
+     return request.app.state.services["output_dir"]
+ 
+ 
++def get_agent_output_dir(request: Request) -> Path:
++    return request.app.state.services["agent_output_dir"]
++
++
+ def get_api_runs_dir(request: Request) -> Path:
+     return request.app.state.services["api_runs_dir"]
+ 
+ 
+ def get_backtest_job_runner(request: Request) -> BacktestJobRunner:
+     return request.app.state.services["backtest_job_runner"]
+ 
+ 
+ def get_bind_address(request: Request) -> str:
+     return request.app.state.services["bind_address"]
+ 
+ 
+ SettingsDep = Annotated[Settings, Depends(get_settings)]
+ OutputDirDep = Annotated[Path, Depends(get_output_dir)]
++AgentOutputDirDep = Annotated[Path, Depends(get_agent_output_dir)]
+ ApiRunsDirDep = Annotated[Path, Depends(get_api_runs_dir)]
+ BacktestJobRunnerDep = Annotated[BacktestJobRunner, Depends(get_backtest_job_runner)]
+ BindAddressDep = Annotated[str, Depends(get_bind_address)]
+diff --git a/src/quant_system/api/routes/agent.py b/src/quant_system/api/routes/agent.py
+index e2bb885..eb8d14a 100644
+--- a/src/quant_system/api/routes/agent.py
++++ b/src/quant_system/api/routes/agent.py
+@@ -1,60 +1,62 @@
+ from __future__ import annotations
+ 
+ import json
+ 
+ from fastapi import APIRouter, HTTPException
+ 
+ from quant_system.agent.llm import build_llm_client
++from quant_system.agent.paths import resolve_candidates_dir
+ from quant_system.agent.runner import AgentRunner
+-from quant_system.api.dependencies import OutputDirDep, SettingsDep
++from quant_system.api.dependencies import AgentOutputDirDep, OutputDirDep, SettingsDep
+ from quant_system.api.errors import not_found_404
+ from quant_system.api.schemas.agent import (
+     AgentCandidateDetailResponse,
+     AgentCandidatesResponse,
+     AgentLLMConfigResponse,
+     AgentReviewRequest,
+     AgentReviewResponse,
+     AgentTaskRequest,
+     AgentTaskResponse,
+ )
+ from quant_system.api.schemas.common import resolve_run_dir
+ 
+ router = APIRouter()
+ 
+ 
+ @router.get("/agent/candidates", response_model=AgentCandidatesResponse)
+ def list_candidates(
+-    output_dir: OutputDirDep,
++    agent_output_dir: AgentOutputDirDep,
+     status: str | None = None,
+ ) -> dict:
+-    candidates = AgentRunner(output_dir=output_dir).list_candidates()
++    candidates = AgentRunner(agent_output_dir=agent_output_dir).list_candidates()
+     if status is not None:
+         candidates = [candidate for candidate in candidates if candidate.get("status") == status]
+     return {"candidates": candidates}
+ 
+ 
+ @router.get("/agent/candidates/{candidate_id}", response_model=AgentCandidateDetailResponse)
+-def candidate_detail(candidate_id: str, output_dir: OutputDirDep) -> dict:
+-    candidate_dir = resolve_run_dir(output_dir / "agent" / "candidates", candidate_id)
++def candidate_detail(candidate_id: str, agent_output_dir: AgentOutputDirDep) -> dict:
++    candidates_root = resolve_candidates_dir(agent_output_dir)
++    candidate_dir = resolve_run_dir(candidates_root, candidate_id)
+     metadata_path = candidate_dir / "metadata.json"
+     if not metadata_path.exists():
+         raise not_found_404("agent_candidate", candidate_id)
+     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+     files = metadata.get("files", [])
+     source_preview = ""
+     if files:
+         source_path = candidate_dir / str(files[0])
+         if source_path.exists() and source_path.is_file():
+             source_preview = source_path.read_text(encoding="utf-8")
+     audits = []
+-    audit_dir = output_dir / "agent" / "audit"
++    audit_dir = agent_output_dir / "agent" / "audit"
+     if audit_dir.exists():
+         for path in sorted(audit_dir.glob("*.jsonl")):
+             audits.extend(
+                 line
+                 for line in path.read_text(encoding="utf-8").splitlines()
+                 if candidate_id in line
+             )
+     reviews_path = candidate_dir / "reviews.jsonl"
+     reviews = reviews_path.read_text(encoding="utf-8").splitlines() if reviews_path.exists() else []
+     return {
+@@ -63,27 +65,32 @@ def candidate_detail(candidate_id: str, output_dir: OutputDirDep) -> dict:
+         "source_preview": source_preview,
+         "audit": audits,
+         "reviews": reviews,
+     }
+ 
+ 
+ @router.post("/agent/tasks", response_model=AgentTaskResponse)
+ def run_agent_task(
+     request: AgentTaskRequest,
+     output_dir: OutputDirDep,
++    agent_output_dir: AgentOutputDirDep,
+     settings: SettingsDep,
+ ) -> dict:
+     try:
+         llm = build_llm_client(settings)
+     except RuntimeError as exc:
+         raise HTTPException(status_code=400, detail=str(exc)) from exc
+-    runner = AgentRunner(output_dir=output_dir, llm=llm)
++    runner = AgentRunner(
++        agent_output_dir=agent_output_dir,
++        result_output_dir=output_dir,
++        llm=llm,
++    )
+     if request.task_type == "propose-factor":
+         artifact = runner.propose_factor(goal=request.goal, universe=request.universe)
+     elif request.task_type == "propose-experiment":
+         artifact = runner.propose_experiment(goal=request.goal, universe=request.universe)
+     elif request.task_type == "summarize":
+         if not request.experiment_id:
+             raise HTTPException(status_code=422, detail="experiment_id is required")
+         artifact = runner.summarize(experiment_id=request.experiment_id)
+     elif request.task_type == "audit-leakage":
+         if not request.factor_id:
+@@ -101,24 +108,24 @@ def run_agent_task(
+     }
+ 
+ 
+ @router.post(
+     "/agent/candidates/{candidate_id}/review",
+     response_model=AgentReviewResponse,
+ )
+ def review_candidate(
+     candidate_id: str,
+     request: AgentReviewRequest,
+-    output_dir: OutputDirDep,
++    agent_output_dir: AgentOutputDirDep,
+ ) -> dict:
+     try:
+-        record = AgentRunner(output_dir=output_dir).review(
++        record = AgentRunner(agent_output_dir=agent_output_dir).review(
+             candidate_id=candidate_id,
+             decision=request.decision,
+             note=request.note,
+         )
+     except FileNotFoundError as exc:
+         raise not_found_404("agent_candidate", candidate_id) from exc
+     return {
+         "candidate_id": record.candidate_id,
+         "decision": record.decision,
+         "registration": "manual_required",
+diff --git a/src/quant_system/api/routes/factors.py b/src/quant_system/api/routes/factors.py
+index b8bac48..0ea6d7e 100644
+--- a/src/quant_system/api/routes/factors.py
++++ b/src/quant_system/api/routes/factors.py
+@@ -1,18 +1,23 @@
+ from __future__ import annotations
+ 
+ import json
+-from pathlib import Path
+ 
+ from fastapi import APIRouter, HTTPException
+ 
+-from quant_system.api.dependencies import ApiRunsDirDep, OutputDirDep, SettingsDep
++from quant_system.agent.paths import resolve_candidates_dir
++from quant_system.api.dependencies import (
++    AgentOutputDirDep,
++    ApiRunsDirDep,
++    OutputDirDep,
++    SettingsDep,
++)
+ from quant_system.api.errors import not_found_404, provider_unavailable_400
+ from quant_system.api.schemas.common import (
+     make_run_id,
+     read_parquet_records,
+     resolve_run_dir,
+ )
+ from quant_system.api.schemas.factors import (
+     FactorCatalogResponse,
+     FactorLabResponse,
+     FactorRunDetailResponse,
+@@ -21,39 +26,37 @@ from quant_system.api.schemas.factors import (
+     FactorRunsResponse,
+ )
+ from quant_system.data.provider_factory import DataProviderUnavailableError
+ from quant_system.factors.lab import build_factor_lab_dashboard
+ from quant_system.factors.pipeline import run_factor_research
+ from quant_system.factors.registry import build_factor_registry
+ from quant_system.storage.runs_repository import list_run_metadatas, persist_run
+ 
+ router = APIRouter()
+ 
+-# Human-approved candidates live at the CLI's canonical output path (mirror of
+-# cli.py's --candidates-dir default). It is a fixed on-disk location, not the
+-# API output_dir, because HQA drives propose/approve through the CLI. Loading
+-# from here execs approved candidate source (SafetyGate + AST gated) and is
+-# reserved for this opt-in catalog view — never the resident trading path.
+-# Anchored on the repo root (this file: src/quant_system/api/routes/factors.py)
+-# so it does not silently fail closed under a non-repo-root CWD (F6).
+-_REPO_ROOT = Path(__file__).resolve().parents[4]
+-AGENT_CANDIDATES_DIR = _REPO_ROOT / "data" / "agent_run" / "agent" / "candidates"
+-
+ 
+ @router.get("/factors", response_model=FactorCatalogResponse)
+-def list_factors(include_candidates: bool = False) -> dict:
++def list_factors(
++    agent_output_dir: AgentOutputDirDep,
++    include_candidates: bool = False,
++) -> dict:
+     # Default: examples + promoted only (no candidate exec). Opt-in surfaces
+     # human-approved candidates with origin="candidate"; pending candidates are
+     # dropped by the SafetyGate inside the loader and never appear.
++    # Candidate root comes only from the injected agent output dir (create_app
++    # isolation boundary) — never a process-global constant or QS_DATA_DIR.
++    candidates_dir = (
++        resolve_candidates_dir(agent_output_dir) if include_candidates else None
++    )
+     registry = build_factor_registry(
+         include_approved_candidates=include_candidates,
+-        candidates_dir=AGENT_CANDIDATES_DIR if include_candidates else None,
++        candidates_dir=candidates_dir,
+     )
+     origins = registry.origins()
+     return {
+         "factors": [
+             {
+                 **metadata.model_dump(mode="json"),
+                 "origin": origins[metadata.factor_id],
+             }
+             for metadata in registry.list_metadata()
+         ]
+diff --git a/src/quant_system/api/server.py b/src/quant_system/api/server.py
+index e5d1ad7..d2740ad 100644
+--- a/src/quant_system/api/server.py
++++ b/src/quant_system/api/server.py
+@@ -354,36 +354,38 @@ def _run_paper_account_pending_order_processor(
+         except Exception as exc:  # noqa: BLE001 - background worker must not kill API
+             logger.warning("paper pending-order auto-check skipped: %s", exc)
+         if stop_event.wait(interval):
+             break
+ 
+ 
+ def create_app(
+     *,
+     settings: Settings | None = None,
+     output_dir: str | Path | None = None,
++    agent_output_dir: str | Path | None = None,
+     bind_address: str | None = None,
+     bind_public_confirmed: bool | None = None,
+ ) -> FastAPI:
+     active_bind_address = bind_address or os.getenv("QS_API_BIND_ADDRESS", "127.0.0.1")
+     active_bind_public_confirmed = (
+         bind_public_confirmed
+         if bind_public_confirmed is not None
+         else os.getenv("QS_API_BIND_PUBLIC_CONFIRMED") == "I_UNDERSTAND"
+     )
+     validate_bind_address(
+         bind_address=active_bind_address,
+         bind_public_confirmed=active_bind_public_confirmed,
+     )
+     services = build_services(
+         settings=settings,
+         output_dir=output_dir,
++        agent_output_dir=agent_output_dir,
+         bind_address=active_bind_address,
+     )
+     active_settings: Settings = services["settings"]
+     configure_logging(
+         active_settings.log_level,
+         log_dir=services["output_dir"] / "_runtime" / "logs",
+     )
+     logger.info("api app configured")
+ 
+     @asynccontextmanager
+diff --git a/src/quant_system/cli.py b/src/quant_system/cli.py
+index 5db080c..fa77f6f 100644
+--- a/src/quant_system/cli.py
++++ b/src/quant_system/cli.py
+@@ -10,20 +10,21 @@ from datetime import UTC, date, datetime, timedelta
+ from pathlib import Path
+ from typing import Annotated, Any, Literal
+ 
+ import pandas as pd
+ import typer
+ 
+ from quant_system import __version__
+ from quant_system.agent.llm.base import LLMClient
+ from quant_system.agent.llm.fixed import FixedContentLLMClient
+ from quant_system.agent.llm.stub import StubLLMClient
++from quant_system.agent.paths import resolve_agent_output_dir, resolve_candidates_dir
+ from quant_system.agent.promote import PromotionError, promote_candidate
+ from quant_system.agent.promotion import load_approved_factor_candidates
+ from quant_system.agent.runner import AgentRunner
+ from quant_system.backtest.pipeline import BacktestRunResult, run_sample_backtest
+ from quant_system.config.settings import load_settings, reload_settings
+ from quant_system.data.pipeline import IngestionResult, run_sample_ingestion, run_tiingo_ingestion
+ from quant_system.data.price_history import (
+     HistoricalPriceReadError,
+     read_historical_prices,
+ )
+@@ -798,52 +799,48 @@ def run_config_experiment_command(
+         Literal["sample", "futu", "tiingo"],
+         typer.Option("--provider", help="OHLCV data provider for the experiment."),
+     ] = "sample",
+     include_approved_candidates: Annotated[
+         bool,
+         typer.Option(
+             "--include-approved-candidates",
+             help="Load human-approved agent candidate factors into the registry.",
+         ),
+     ] = False,
+-    candidates_dir: Annotated[
++    agent_output_dir: Annotated[
+         str | None,
+         typer.Option(
+-            "--candidates-dir",
++            "--agent-output-dir",
+             help=(
+-                "Candidate directory to load when --include-approved-candidates is set. "
+-                "Defaults to data/agent_run/agent/candidates."
++                "Agent output root used when --include-approved-candidates is set. "
++                "Normalized by resolve_agent_output_dir; candidates live under "
++                "agent/candidates. Defaults to QS_AGENT_OUTPUT_DIR or the repo "
++                "canonical agent_run root."
+             ),
+         ),
+     ] = None,
+     json_output: Annotated[
+         bool,
+         typer.Option("--json", help="Append a machine-readable JSON summary line."),
+     ] = False,
+ ) -> None:
+     """Run a Phase 4 experiment from a JSON config file."""
+     config = load_experiment_config(config_path)
+     settings = reload_settings()
+     provider_instance, data_source = build_ohlcv_provider(settings, requested=provider)
+     factor_registry = None
+     loaded: list[str] = []
+     if include_approved_candidates:
+         factor_registry = build_default_factor_registry()
+-        # Mirror the agent CLI's candidate output dir: propose-factor / agent
+-        # review default output_dir to "data/agent_run" and CandidatePool writes
+-        # approved.lock under <output_dir>/agent/candidates/<id>. Reading from
+-        # settings.data.data_dir/"agent"/"candidates" would miss the real path.
+-        active_candidates_dir = (
+-            Path(candidates_dir)
+-            if candidates_dir is not None
+-            else Path("data/agent_run") / "agent" / "candidates"
+-        )
++        # Same resolver as agent CLI: never CWD-relative and never QS_DATA_DIR.
++        active_agent_root = resolve_agent_output_dir(agent_output_dir)
++        active_candidates_dir = resolve_candidates_dir(active_agent_root)
+         loaded = list(
+             load_approved_factor_candidates(
+                 factor_registry,
+                 candidates_dir=active_candidates_dir,
+             )
+         )
+         typer.echo(f"approved_candidates_loaded={','.join(loaded) or '<none>'}")
+     result = run_experiment(
+         config,
+         output_dir=output_dir,
+@@ -1628,24 +1625,30 @@ def paper_strategy_recover_pending_command(
+     )
+ 
+ 
+ @agent_app.command("propose-factor")
+ def agent_propose_factor(
+     goal: Annotated[str, typer.Option("--goal", help="Research goal for the candidate factor.")],
+     universe: Annotated[
+         str,
+         typer.Option("--universe", help="Comma-separated symbols, for example SPY,QQQ."),
+     ] = "SPY,QQQ",
+-    output_dir: Annotated[
+-        str,
+-        typer.Option("--output-dir", help="Agent artifact output directory."),
+-    ] = "data/agent_run",
++    agent_output_dir: Annotated[
++        str | None,
++        typer.Option(
++            "--agent-output-dir",
++            help=(
++                "Agent artifact output root. Defaults to QS_AGENT_OUTPUT_DIR or "
++                "the repo-anchored canonical agent_run root."
++            ),
++        ),
++    ] = None,
+     llm_name: Annotated[
+         Literal["stub", "openai"],
+         typer.Option("--llm", help="LLM backend. Defaults to deterministic stub."),
+     ] = "stub",
+     source_file: Annotated[
+         str | None,
+         typer.Option(
+             "--source-file",
+             help="Externally generated factor source to ingest as a pending candidate.",
+         ),
+@@ -1660,21 +1663,21 @@ def agent_propose_factor(
+     if source_file is not None:
+         path = Path(source_file)
+         llm = FixedContentLLMClient(path.read_text(encoding="utf-8"))
+         metadata_extra = {
+             "generator": "external-source",
+             "source_file_name": path.name,
+         }
+     else:
+         llm = _build_agent_llm(llm_name)
+     artifact = AgentRunner(
+-        output_dir=output_dir,
++        agent_output_dir=resolve_agent_output_dir(agent_output_dir),
+         llm=llm,
+     ).propose_factor(
+         goal=goal,
+         universe=_parse_universe(universe),
+         metadata_extra=metadata_extra,
+     )
+     _emit_agent_artifact(artifact.candidate_id, artifact.path, artifact.metadata_path)
+     if json_output:
+         _emit_json(
+             {
+@@ -1686,94 +1689,133 @@ def agent_propose_factor(
+         )
+ 
+ 
+ @agent_app.command("propose-experiment")
+ def agent_propose_experiment(
+     goal: Annotated[str, typer.Option("--goal", help="Research goal for the experiment.")],
+     universe: Annotated[
+         str,
+         typer.Option("--universe", help="Comma-separated symbols, for example SPY,QQQ."),
+     ] = "SPY,QQQ",
+-    output_dir: Annotated[
+-        str,
+-        typer.Option("--output-dir", help="Agent artifact output directory."),
+-    ] = "data/agent_run",
++    agent_output_dir: Annotated[
++        str | None,
++        typer.Option(
++            "--agent-output-dir",
++            help=(
++                "Agent artifact output root. Defaults to QS_AGENT_OUTPUT_DIR or "
++                "the repo-anchored canonical agent_run root."
++            ),
++        ),
++    ] = None,
+     llm_name: Annotated[
+         Literal["stub", "openai"],
+         typer.Option("--llm", help="LLM backend. Defaults to deterministic stub."),
+     ] = "stub",
+ ) -> None:
+     """Create an experiment config candidate for human review."""
+     artifact = AgentRunner(
+-        output_dir=output_dir,
++        agent_output_dir=resolve_agent_output_dir(agent_output_dir),
+         llm=_build_agent_llm(llm_name),
+     ).propose_experiment(goal=goal, universe=_parse_universe(universe))
+     _emit_agent_artifact(artifact.candidate_id, artifact.path, artifact.metadata_path)
+ 
+ 
+ @agent_app.command("summarize")
+ def agent_summarize(
+     experiment_id: Annotated[
+         str,
+         typer.Option("--experiment-id", help="Experiment id to summarize."),
+     ],
+-    output_dir: Annotated[
+-        str,
+-        typer.Option("--output-dir", help="Agent artifact output directory."),
+-    ] = "data/agent_run",
++    agent_output_dir: Annotated[
++        str | None,
++        typer.Option(
++            "--agent-output-dir",
++            help=(
++                "Agent artifact output root for candidates/audit. Defaults to "
++                "QS_AGENT_OUTPUT_DIR or the repo-anchored canonical agent_run root."
++            ),
++        ),
++    ] = None,
++    result_output_dir: Annotated[
++        str | None,
++        typer.Option(
++            "--result-output-dir",
++            help=(
++                "Experiment result root to read when summarizing. Defaults to the "
++                "resolved agent output root when omitted."
++            ),
++        ),
++    ] = None,
+     llm_name: Annotated[
+         Literal["stub", "openai"],
+         typer.Option("--llm", help="LLM backend. Defaults to deterministic stub."),
+     ] = "stub",
+ ) -> None:
+     """Summarize a local experiment for human review only."""
++    active_agent_root = resolve_agent_output_dir(agent_output_dir)
+     artifact = AgentRunner(
+-        output_dir=output_dir,
++        agent_output_dir=active_agent_root,
++        result_output_dir=(
++            Path(result_output_dir) if result_output_dir is not None else active_agent_root
++        ),
+         llm=_build_agent_llm(llm_name),
+     ).summarize(experiment_id=experiment_id)
+     _emit_agent_artifact(artifact.candidate_id, artifact.path, artifact.metadata_path)
+ 
+ 
+ @agent_app.command("audit-leakage")
+ def agent_audit_leakage(
+     factor_id: Annotated[str, typer.Option("--factor-id", help="Factor id to inspect.")],
+-    output_dir: Annotated[
+-        str,
+-        typer.Option("--output-dir", help="Agent artifact output directory."),
+-    ] = "data/agent_run",
++    agent_output_dir: Annotated[
++        str | None,
++        typer.Option(
++            "--agent-output-dir",
++            help=(
++                "Agent artifact output root. Defaults to QS_AGENT_OUTPUT_DIR or "
++                "the repo-anchored canonical agent_run root."
++            ),
++        ),
++    ] = None,
+     llm_name: Annotated[
+         Literal["stub", "openai"],
+         typer.Option("--llm", help="LLM backend. Defaults to deterministic stub."),
+     ] = "stub",
+ ) -> None:
+     """Write a point-in-time and look-ahead checklist candidate."""
+     artifact = AgentRunner(
+-        output_dir=output_dir,
++        agent_output_dir=resolve_agent_output_dir(agent_output_dir),
+         llm=_build_agent_llm(llm_name),
+     ).audit_leakage(factor_id=factor_id)
+     _emit_agent_artifact(artifact.candidate_id, artifact.path, artifact.metadata_path)
+ 
+ 
+ @agent_app.command("list-candidates")
+ def agent_list_candidates(
+-    output_dir: Annotated[
+-        str,
+-        typer.Option("--output-dir", help="Agent artifact output directory."),
+-    ] = "data/agent_run",
++    agent_output_dir: Annotated[
++        str | None,
++        typer.Option(
++            "--agent-output-dir",
++            help=(
++                "Agent artifact output root. Defaults to QS_AGENT_OUTPUT_DIR or "
++                "the repo-anchored canonical agent_run root."
++            ),
++        ),
++    ] = None,
+ ) -> None:
+     """List candidate artifacts and their review status."""
+-    candidates = AgentRunner(output_dir=output_dir).list_candidates()
++    active_agent_root = resolve_agent_output_dir(agent_output_dir)
++    candidates = AgentRunner(agent_output_dir=active_agent_root).list_candidates()
+     if not candidates:
+         typer.echo("no_candidates=true")
+         return
+     for candidate in candidates:
+-        path = Path(output_dir, "agent", "candidates", candidate["candidate_id"])
++        path = resolve_candidates_dir(active_agent_root) / candidate["candidate_id"]
+         typer.echo(
+             " ".join(
+                 [
+                     f"candidate_id={candidate['candidate_id']}",
+                     f"type={candidate['artifact_type']}",
+                     f"status={candidate['status']}",
+                     f"path={path}",
+                 ]
+             )
+         )
+@@ -1783,31 +1825,39 @@ def agent_list_candidates(
+ def agent_review(
+     candidate_id: Annotated[
+         str,
+         typer.Option("--candidate-id", help="Candidate id from list-candidates."),
+     ],
+     decision: Annotated[
+         Literal["approve", "reject"],
+         typer.Option("--decision", help="Manual review decision."),
+     ],
+     note: Annotated[str, typer.Option("--note", help="Manual review note.")],
+-    output_dir: Annotated[
+-        str,
+-        typer.Option("--output-dir", help="Agent artifact output directory."),
+-    ] = "data/agent_run",
++    agent_output_dir: Annotated[
++        str | None,
++        typer.Option(
++            "--agent-output-dir",
++            help=(
++                "Agent artifact output root. Defaults to QS_AGENT_OUTPUT_DIR or "
++                "the repo-anchored canonical agent_run root."
++            ),
++        ),
++    ] = None,
+     json_output: Annotated[
+         bool,
+         typer.Option("--json", help="Append a machine-readable JSON summary line."),
+     ] = False,
+ ) -> None:
+     """Record a manual review; approve only writes an approval lock."""
+-    record = AgentRunner(output_dir=output_dir).review(
++    record = AgentRunner(
++        agent_output_dir=resolve_agent_output_dir(agent_output_dir),
++    ).review(
+         candidate_id=candidate_id,
+         decision=decision,
+         note=note,
+     )
+     typer.echo(
+         " ".join(
+             [
+                 f"candidate_id={record.candidate_id}",
+                 f"decision={record.decision}",
+                 "registration=manual_required",
+@@ -1823,41 +1873,46 @@ def agent_review(
+             }
+         )
+ 
+ 
+ @agent_app.command("promote-candidate")
+ def agent_promote_candidate(
+     candidate_id: Annotated[
+         str,
+         typer.Option("--candidate-id", help="Approved candidate id from list-candidates."),
+     ],
+-    candidates_dir: Annotated[
+-        str,
++    agent_output_dir: Annotated[
++        str | None,
+         typer.Option(
+-            "--candidates-dir",
+-            help="Candidate directory (defaults to data/agent_run/agent/candidates).",
++            "--agent-output-dir",
++            help=(
++                "Agent artifact output root. Candidates are loaded from "
++                "agent/candidates under this root via resolve_candidates_dir."
++            ),
+         ),
+-    ] = "data/agent_run/agent/candidates",
++    ] = None,
+     library_dir: Annotated[
+         str,
+         typer.Option("--library-dir", help="Promoted factor library package directory."),
+     ] = "src/quant_system/factors/library/promoted",
+     tests_dir: Annotated[
+         str,
+         typer.Option("--tests-dir", help="Directory for generated factor test scaffolds."),
+     ] = "tests/factors",
+ ) -> None:
+     """Write the deterministic Gate-3 promotion diff; NEVER commits (D-20)."""
+     try:
+         result = promote_candidate(
+             candidate_id,
+-            candidates_dir=Path(candidates_dir),
++            candidates_dir=resolve_candidates_dir(
++                resolve_agent_output_dir(agent_output_dir)
++            ),
+             library_dir=Path(library_dir),
+             tests_dir=Path(tests_dir),
+         )
+     except PromotionError as exc:
+         typer.echo(f"promotion_refused reason={exc}")
+         raise typer.Exit(code=1) from exc
+     typer.echo(f"factor_id={result.factor_id}")
+     typer.echo(f"module={result.module_path}")
+     typer.echo(f"init={result.init_path}")
+     typer.echo(f"test={result.test_path}")
+diff --git a/tests/test_agent_paths.py b/tests/test_agent_paths.py
+new file mode 100644
+index 0000000..19ead88
+--- /dev/null
++++ b/tests/test_agent_paths.py
+@@ -0,0 +1,96 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++from quant_system.agent.paths import (
++    PLATFORM_REPO_ROOT,
++    resolve_agent_output_dir,
++    resolve_candidates_dir,
++    resolve_legacy_candidates_dir,
++)
++
++
++def test_agent_root_has_one_repo_default_and_explicit_env_override(
++    monkeypatch, tmp_path
++) -> None:
++    monkeypatch.delenv("QS_AGENT_OUTPUT_DIR", raising=False)
++    monkeypatch.setenv("QS_DATA_DIR", str(tmp_path / "must-not-move-agent-root"))
++    monkeypatch.chdir(tmp_path)
++    assert resolve_agent_output_dir() == (
++        PLATFORM_REPO_ROOT / "data" / "agent_run"
++    )
++    monkeypatch.setenv("QS_AGENT_OUTPUT_DIR", str(tmp_path / "agent-output"))
++    assert resolve_agent_output_dir() == tmp_path / "agent-output"
++    assert resolve_legacy_candidates_dir() == (
++        PLATFORM_REPO_ROOT / "data" / "agent" / "candidates"
++    )
++
++
++def test_resolve_candidates_dir_appends_agent_candidates_once(tmp_path) -> None:
++    agent = tmp_path / "agent-output"
++    assert resolve_candidates_dir(agent) == agent / "agent" / "candidates"
++
++
++def test_explicit_relative_agent_output_dir_is_repo_anchored(monkeypatch, tmp_path) -> None:
++    monkeypatch.delenv("QS_AGENT_OUTPUT_DIR", raising=False)
++    monkeypatch.chdir(tmp_path)
++    resolved = resolve_agent_output_dir("relative-agent-root")
++    assert resolved == PLATFORM_REPO_ROOT / "relative-agent-root"
++    assert resolved.is_absolute()
++
++
++def test_active_candidate_consumers_do_not_hardcode_agent_run_paths() -> None:
++    """Source regression: no CWD-relative or QS_DATA_DIR-derived candidate roots."""
++    roots = [
++        Path("src/quant_system/cli.py"),
++        Path("src/quant_system/api/routes"),
++        Path("src/quant_system/agent"),
++        Path("src/frontend/playwright.config.ts"),
++    ]
++    forbidden_substrings = (
++        'Path("data/agent_run")',
++        "Path('data/agent_run')",
++        '="data/agent_run"',
++        "='data/agent_run'",
++        '="data/agent_run/agent/candidates"',
++        "='data/agent_run/agent/candidates'",
++        "AGENT_CANDIDATES_DIR",
++    )
++    # QS_DATA_DIR must never appear as a candidate-root derivation source in
++    # active agent/candidate consumers (playwright may still set it for general data).
++    qs_data_candidate_patterns = (
++        "QS_DATA_DIR",  # checked only under agent + routes + cli, not playwright
++    )
++
++    offenders: list[str] = []
++    for root in roots:
++        paths = [root] if root.is_file() else sorted(root.rglob("*"))
++        for path in paths:
++            if not path.is_file():
++                continue
++            if path.suffix not in {".py", ".ts", ".tsx"}:
++                continue
++            # paths.py is the single allowed definition of the repo default.
++            if path.as_posix().endswith("quant_system/agent/paths.py"):
++                continue
++            text = path.read_text(encoding="utf-8")
++            for needle in forbidden_substrings:
++                if needle in text:
++                    offenders.append(f"{path}: contains {needle!r}")
++            if path.as_posix().endswith("playwright.config.ts"):
++                continue
++            for needle in qs_data_candidate_patterns:
++                if needle not in text:
++                    continue
++                # Allow comments/help text about QS_DATA_DIR for non-candidate
++                # output dirs (experiment/report). Flag only candidate-adjacent use.
++                for line_no, line in enumerate(text.splitlines(), start=1):
++                    if "QS_DATA_DIR" not in line:
++                        continue
++                    lowered = line.lower()
++                    if "candidate" in lowered or "agent_run" in lowered or "agent_output" in lowered:
++                        offenders.append(
++                            f"{path}:{line_no}: QS_DATA_DIR near candidate context: {line.strip()}"
++                        )
++
++    assert not offenders, "hardcoded/derived candidate roots:\n" + "\n".join(offenders)
+diff --git a/tests/test_agent_phase7.py b/tests/test_agent_phase7.py
+index f3983f5..f73e7b9 100644
+--- a/tests/test_agent_phase7.py
++++ b/tests/test_agent_phase7.py
+@@ -46,52 +46,52 @@ def test_safety_gate_rejects_path_traversal_candidate_id(tmp_path) -> None:
+     outside_dir = Path(tmp_path, "agent", "escape")
+     outside_dir.mkdir(parents=True)
+     (outside_dir / "approved.lock").write_text("not a candidate", encoding="utf-8")
+ 
+     gate = SafetyGate(Path(tmp_path, "agent", "candidates"))
+ 
+     assert gate.allow_promotion("../escape") is False
+ 
+ 
+ def test_audit_log_records_all_steps(tmp_path) -> None:
+-    result = AgentRunner(output_dir=tmp_path, llm=StubLLMClient()).propose_factor(
++    result = AgentRunner(agent_output_dir=tmp_path, llm=StubLLMClient()).propose_factor(
+         goal="low-vol momentum",
+         universe=["SPY", "QQQ"],
+     )
+ 
+     audit_files = list(Path(tmp_path, "agent", "audit").glob("*.jsonl"))
+     assert len(audit_files) == 1
+     events = [
+         json.loads(line)["event_type"]
+         for line in audit_files[0].read_text(encoding="utf-8").splitlines()
+     ]
+     assert {"task", "tool_call", "candidate_written"}.issubset(events)
+     assert result.path.name == "factor.py.candidate"
+ 
+ 
+ def test_factor_proposal_does_not_exec_generated_code(tmp_path, monkeypatch) -> None:
+     def fail_if_called(command: str) -> int:
+         raise AssertionError(f"os.system was called with {command!r}")
+ 
+     monkeypatch.setattr(os, "system", fail_if_called)
+ 
+-    artifact = AgentRunner(output_dir=tmp_path, llm=MaliciousLLM()).propose_factor(
++    artifact = AgentRunner(agent_output_dir=tmp_path, llm=MaliciousLLM()).propose_factor(
+         goal="try to execute shell",
+         universe=["SPY"],
+     )
+ 
+     assert artifact.path.name.endswith(".candidate")
+     assert 'os.system("rm -rf /")' in artifact.path.read_text(encoding="utf-8")
+ 
+ 
+ def test_candidate_metadata_safety_block(tmp_path) -> None:
+-    artifact = AgentRunner(output_dir=tmp_path, llm=StubLLMClient()).propose_factor(
++    artifact = AgentRunner(agent_output_dir=tmp_path, llm=StubLLMClient()).propose_factor(
+         goal="low-vol momentum",
+         universe=["SPY", "QQQ"],
+     )
+ 
+     metadata = json.loads(artifact.metadata_path.read_text(encoding="utf-8"))
+ 
+     assert metadata["safety"] == {
+         "auto_promotion": False,
+         "requires_human_review": True,
+         "review_status": "pending",
+@@ -101,41 +101,41 @@ def test_candidate_metadata_safety_block(tmp_path) -> None:
+ def test_review_approve_creates_lock_only(tmp_path) -> None:
+     proposal = runner.invoke(
+         app,
+         [
+             "agent",
+             "propose-factor",
+             "--goal",
+             "low-vol momentum",
+             "--universe",
+             "SPY,QQQ",
+-            "--output-dir",
++            "--agent-output-dir",
+             str(tmp_path),
+         ],
+     )
+     assert proposal.exit_code == 0
+     candidate_dirs = list(Path(tmp_path, "agent", "candidates").iterdir())
+     assert len(candidate_dirs) == 1
+     candidate_id = candidate_dirs[0].name
+ 
+     review = runner.invoke(
+         app,
+         [
+             "agent",
+             "review",
+             "--candidate-id",
+             candidate_id,
+             "--decision",
+             "approve",
+             "--note",
+             "manual review passed",
+-            "--output-dir",
++            "--agent-output-dir",
+             str(tmp_path),
+         ],
+     )
+ 
+     assert review.exit_code == 0
+     assert Path(tmp_path, "agent", "candidates", candidate_id, "approved.lock").exists()
+     assert candidate_id not in build_default_factor_registry().factor_ids()
+ 
+ 
+ def test_review_rejection_revokes_prior_approval(tmp_path) -> None:
+@@ -174,20 +174,20 @@ def test_stub_llm_is_deterministic() -> None:
+         "propose factor",
+         system="research assistant",
+         max_tokens=512,
+         temperature=0.0,
+     )
+ 
+     assert first == second
+ 
+ 
+ def test_propose_experiment_outputs_valid_experiment_config(tmp_path) -> None:
+-    artifact = AgentRunner(output_dir=tmp_path, llm=StubLLMClient()).propose_experiment(
++    artifact = AgentRunner(agent_output_dir=tmp_path, llm=StubLLMClient()).propose_experiment(
+         goal="test a momentum and volatility blend",
+         universe=["SPY", "QQQ"],
+     )
+ 
+     payload = json.loads(artifact.path.read_text(encoding="utf-8"))
+     config = ExperimentConfig.model_validate(payload)
+ 
+     assert config.symbols == ["SPY", "QQQ"]
+     assert config.factor_blend.factors
+diff --git a/tests/test_agent_promote.py b/tests/test_agent_promote.py
+index 3d90b0b..9a0f908 100644
+--- a/tests/test_agent_promote.py
++++ b/tests/test_agent_promote.py
+@@ -351,60 +351,64 @@ def test_promote_module_never_touches_git_or_spawns_processes() -> None:
+     roots: set[str] = set()
+     for node in ast.walk(tree):
+         if isinstance(node, ast.Import):
+             roots.update(alias.name.split(".")[0] for alias in node.names)
+         elif isinstance(node, ast.ImportFrom) and node.module:
+             roots.add(node.module.split(".")[0])
+     assert roots.isdisjoint({"subprocess", "git", "os", "sys"})
+ 
+ 
+ def test_cli_promote_candidate_prints_files_and_gate3_line(dirs, tmp_path: Path) -> None:
+-    _write_candidate(dirs["candidates"], "cand-ok", _FACTOR_SRC)
++    agent_root = tmp_path / "agent-output"
++    candidates_dir = agent_root / "agent" / "candidates"
++    _write_candidate(candidates_dir, "cand-ok", _FACTOR_SRC)
+ 
+     result = runner.invoke(
+         app,
+         [
+             "agent",
+             "promote-candidate",
+             "--candidate-id",
+             "cand-ok",
+-            "--candidates-dir",
+-            str(dirs["candidates"]),
++            "--agent-output-dir",
++            str(agent_root),
+             "--library-dir",
+             str(dirs["library"]),
+             "--tests-dir",
+             str(dirs["tests"]),
+         ],
+     )
+ 
+     assert result.exit_code == 0, result.output
+     assert "factor_id=wiring_test_factor" in result.output
+     assert str(dirs["library"] / "wiring_test_factor.py") in result.output
+     assert str(dirs["library"] / "__init__.py") in result.output
+     assert str(dirs["tests"] / "test_wiring_test_factor.py") in result.output
+     gate_lines = [line for line in result.output.splitlines() if line.startswith("GATE 3")]
+     assert len(gate_lines) == 1
+     assert "git diff --" in gate_lines[0]
+ 
+ 
+-def test_cli_promote_candidate_refusal_exits_nonzero(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-pending", _FACTOR_SRC, approved=False)
++def test_cli_promote_candidate_refusal_exits_nonzero(dirs, tmp_path: Path) -> None:
++    agent_root = tmp_path / "agent-output"
++    candidates_dir = agent_root / "agent" / "candidates"
++    _write_candidate(candidates_dir, "cand-pending", _FACTOR_SRC, approved=False)
+ 
+     result = runner.invoke(
+         app,
+         [
+             "agent",
+             "promote-candidate",
+             "--candidate-id",
+             "cand-pending",
+-            "--candidates-dir",
+-            str(dirs["candidates"]),
++            "--agent-output-dir",
++            str(agent_root),
+             "--library-dir",
+             str(dirs["library"]),
+             "--tests-dir",
+             str(dirs["tests"]),
+         ],
+     )
+ 
+     assert result.exit_code == 1
+     assert "promotion_refused" in result.output
+ 
+diff --git a/tests/test_agent_propose_source_file.py b/tests/test_agent_propose_source_file.py
+index 24627f3..0b5ca42 100644
+--- a/tests/test_agent_propose_source_file.py
++++ b/tests/test_agent_propose_source_file.py
+@@ -49,21 +49,21 @@ def test_agent_propose_factor_accepts_source_file_and_keeps_candidate_pending(tm
+ 
+     result = runner.invoke(
+         app,
+         [
+             "agent",
+             "propose-factor",
+             "--goal",
+             "external source factor",
+             "--source-file",
+             str(source_file),
+-            "--output-dir",
++            "--agent-output-dir",
+             str(output_dir),
+         ],
+     )
+ 
+     assert result.exit_code == 0, result.output
+     parsed = _kv_output(result.output)
+     assert parsed["candidate_id"].startswith("factor-external_source_factor-")
+     assert parsed["status"] == "pending"
+     candidate_path = Path(parsed["path"])
+     metadata_path = Path(parsed["metadata"])
+diff --git a/tests/test_api_agent.py b/tests/test_api_agent.py
+index 9e0de5b..c21e9f9 100644
+--- a/tests/test_api_agent.py
++++ b/tests/test_api_agent.py
+@@ -1,117 +1,170 @@
+ import sys
+ from pathlib import Path
+ 
+ from fastapi.testclient import TestClient
+ 
++import quant_system.api.routes.agent as agent_routes
+ from quant_system.agent.candidate_pool import CandidatePool
++from quant_system.agent.llm.stub import StubLLMClient
+ from quant_system.api.server import create_app
+ 
+ 
++def _agent_app(tmp_path, *, agent=None, general=None):
++    agent_root = agent if agent is not None else tmp_path / "agent-output"
++    general_root = general if general is not None else tmp_path / "general"
++    return agent_root, TestClient(
++        create_app(output_dir=general_root, agent_output_dir=agent_root)
++    )
++
++
++def test_agent_api_uses_injected_agent_output_dir_not_general_data_dir(tmp_path) -> None:
++    general = tmp_path / "general"
++    agent = tmp_path / "agent-output"
++    artifact = CandidatePool(agent).write_candidate(
++        task_id="task-root-contract",
++        goal="root contract",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# candidate\n",
++    )
++
++    client = TestClient(create_app(output_dir=general, agent_output_dir=agent))
++    payload = client.get("/api/agent/candidates").json()
++
++    assert [item["candidate_id"] for item in payload["candidates"]] == [
++        artifact.candidate_id
++    ]
++    assert not (general / "agent" / "candidates").exists()
++
++
++def test_agent_task_writes_candidate_and_audit_only_to_injected_agent_root(
++    tmp_path, monkeypatch
++) -> None:
++    general = tmp_path / "general"
++    agent = tmp_path / "agent-output"
++    monkeypatch.setattr(agent_routes, "build_llm_client", lambda _settings: StubLLMClient())
++    client = TestClient(create_app(output_dir=general, agent_output_dir=agent))
++
++    response = client.post(
++        "/api/agent/tasks",
++        json={
++            "task_type": "propose-factor",
++            "goal": "root contract",
++            "universe": ["SPY"],
++        },
++    )
++
++    assert response.status_code == 200
++    assert list((agent / "agent" / "candidates").glob("*/metadata.json"))
++    assert list((agent / "agent" / "audit").glob("*.jsonl"))
++    assert not (general / "agent").exists()
++
++
+ def test_agent_candidate_list_detail_and_review_do_not_import_source(tmp_path) -> None:
+-    pool = CandidatePool(tmp_path)
++    agent, client = _agent_app(tmp_path)
++    pool = CandidatePool(agent)
+     artifact = pool.write_candidate(
+         task_id="task-001",
+         goal="malicious candidate",
+         artifact_type="factor",
+         filename="factor.py.candidate",
+         content='import os\nos.system("echo should-not-run")\n',
+     )
+     before_modules = set(sys.modules)
+-    client = TestClient(create_app(output_dir=tmp_path))
+ 
+     list_response = client.get("/api/agent/candidates", params={"status": "pending"})
+     assert list_response.status_code == 200
+     assert artifact.candidate_id in {
+         item["candidate_id"] for item in list_response.json()["candidates"]
+     }
+ 
+     detail_response = client.get(f"/api/agent/candidates/{artifact.candidate_id}")
+     assert detail_response.status_code == 200
+     detail = detail_response.json()
+     assert 'os.system("echo should-not-run")' in detail["source_preview"]
+     assert set(sys.modules) == before_modules
+ 
+     review_response = client.post(
+         f"/api/agent/candidates/{artifact.candidate_id}/review",
+         json={"decision": "approve", "note": "manual review only"},
+     )
+     assert review_response.status_code == 200
+-    assert Path(tmp_path, "agent", "candidates", artifact.candidate_id, "approved.lock").exists()
++    assert Path(agent, "agent", "candidates", artifact.candidate_id, "approved.lock").exists()
+     assert set(sys.modules) == before_modules
+ 
+ 
+ def test_agent_tasks_propose_factor(tmp_path) -> None:
+-    client = TestClient(create_app(output_dir=tmp_path))
++    _, client = _agent_app(tmp_path)
+ 
+     response = client.post(
+         "/api/agent/tasks",
+         json={
+             "task_type": "propose-factor",
+             "goal": "low-vol momentum",
+             "universe": ["SPY", "QQQ"],
+         },
+     )
+ 
+     assert response.status_code == 200
+     payload = response.json()
+     assert payload["candidate_id"]
+     assert payload["metadata"]["safety"]["auto_promotion"] is False
+ 
+ 
+ def test_agent_task_rejects_unknown_type(tmp_path) -> None:
+-    client = TestClient(create_app(output_dir=tmp_path))
++    _, client = _agent_app(tmp_path)
+ 
+     response = client.post("/api/agent/tasks", json={"task_type": "submit-order"})
+ 
+     assert response.status_code == 422
+     assert response.json()["safety"]["live_trading_enabled"] is False
+ 
+ 
+ def test_agent_candidate_detail_rejects_path_traversal(tmp_path) -> None:
+-    client = TestClient(create_app(output_dir=tmp_path))
++    _, client = _agent_app(tmp_path)
+ 
+     response = client.get("/api/agent/candidates/..%2Foutside")
+ 
+     assert response.status_code == 404
+     assert response.json()["safety"]["dry_run"] is True
+ 
+ 
+ def test_agent_candidate_review_404_uses_standard_detail(tmp_path) -> None:
+-    client = TestClient(create_app(output_dir=tmp_path))
++    _, client = _agent_app(tmp_path)
+ 
+     response = client.post(
+         "/api/agent/candidates/missing-candidate/review",
+         json={"decision": "reject", "note": "not found"},
+     )
+ 
+     assert response.status_code == 404
+     detail = response.json()["detail"]
+     assert detail["code"] == "not_found"
+     assert detail["resource"] == "agent_candidate"
+     assert detail["id"] == "missing-candidate"
+ 
+ 
+ def test_agent_candidates_list_returns_latest_first(tmp_path) -> None:
+-    pool = CandidatePool(tmp_path)
++    agent, client = _agent_app(tmp_path)
++    pool = CandidatePool(agent)
+     first = pool.write_candidate(
+         task_id="task-001",
+         goal="first",
+         artifact_type="factor",
+         filename="factor.py.candidate",
+         content="# first\n",
+     )
+     second = pool.write_candidate(
+         task_id="task-002",
+         goal="second",
+         artifact_type="factor",
+         filename="factor.py.candidate",
+         content="# second\n",
+     )
+-    client = TestClient(create_app(output_dir=tmp_path))
+ 
+     response = client.get("/api/agent/candidates")
+ 
+     assert response.status_code == 200
+     payload = response.json()
+     assert payload["candidates"][0]["candidate_id"] == second.candidate_id
+     assert payload["candidates"][1]["candidate_id"] == first.candidate_id
+diff --git a/tests/test_cli_experiment_provider.py b/tests/test_cli_experiment_provider.py
+index 0adda44..3af15d7 100644
+--- a/tests/test_cli_experiment_provider.py
++++ b/tests/test_cli_experiment_provider.py
+@@ -96,100 +96,99 @@ def test_run_config_defaults_to_sample(tmp_path, monkeypatch):
+     monkeypatch.setattr(cli_module, "run_experiment", fake_run_experiment)
+ 
+     result = runner.invoke(
+         app,
+         ["experiment", "run-config", "--config", str(_write_config(tmp_path))],
+     )
+     assert result.exit_code == 0, result.output
+     assert captured["data_source"] == "sample"
+ 
+ 
+-def test_include_approved_candidates_reads_same_dir_agent_cli_writes_to(tmp_path, monkeypatch):
+-    # Finding #3: --include-approved-candidates must read from the directory the
+-    # agent CLI (propose-factor / agent review) actually writes approved.lock to,
+-    # i.e. CandidatePool(output_dir).candidates_dir with output_dir defaulting to
+-    # "data/agent_run". A mismatch silently loads zero candidates.
+-    from quant_system.agent.candidate_pool import CandidatePool
+-
+-    captured = {}
+-
+-    def fake_load(registry, *, candidates_dir):
+-        captured["candidates_dir"] = candidates_dir
+-        return []
+-
+-    monkeypatch.setattr(cli_module, "load_approved_factor_candidates", fake_load)
+-    monkeypatch.setattr(
+-        cli_module, "build_ohlcv_provider", lambda settings, *, requested: (object(), requested)
+-    )
+-
++def _stub_run_experiment_result(tmp_path):
+     class _R:
+         experiment_id = "e-1"
+         run_count = 1
+         best_run_id = None
+         config_path = tmp_path / "c"
+         runs_path = tmp_path / "r"
+         folds_path = tmp_path / "f"
+         agent_summary_path = tmp_path / "a.json"
+         report_path = tmp_path / "rep.md"
+ 
+-    monkeypatch.setattr(cli_module, "run_experiment", lambda *a, **k: _R())
++    return _R()
+ 
+-    result = runner.invoke(
+-        app,
+-        [
+-            "experiment",
+-            "run-config",
+-            "--config",
+-            str(_write_config(tmp_path)),
+-            "--include-approved-candidates",
+-        ],
++
++def _invoke_stubbed_run_config_with_approved_candidates(
++    monkeypatch, tmp_path, extra_args: list[str] | None = None
++):
++    monkeypatch.setattr(
++        cli_module, "build_ohlcv_provider", lambda settings, *, requested: (object(), requested)
+     )
+-    assert result.exit_code == 0, result.output
+-    expected = str(CandidatePool("data/agent_run").candidates_dir)
+-    assert str(captured["candidates_dir"]) == expected, (
+-        f"loader reads {captured['candidates_dir']!r}, but agent CLI writes to {expected!r}"
++    monkeypatch.setattr(
++        cli_module, "run_experiment", lambda *a, **k: _stub_run_experiment_result(tmp_path)
+     )
++    args = [
++        "experiment",
++        "run-config",
++        "--config",
++        str(_write_config(tmp_path)),
++        "--include-approved-candidates",
++    ]
++    if extra_args:
++        args.extend(extra_args)
++    result = runner.invoke(app, args)
++    assert result.exit_code == 0, result.output
++    return result
+ 
+ 
+-def test_include_approved_candidates_accepts_candidates_dir_override(
+-    tmp_path,
+-    monkeypatch,
+-):
+-    custom_candidates_dir = tmp_path / "custom" / "agent" / "candidates"
++def test_run_config_candidate_loader_is_cwd_independent_and_uses_env(
++    monkeypatch, tmp_path
++) -> None:
++    from pathlib import Path
++
++    from quant_system.agent.paths import resolve_agent_output_dir, resolve_candidates_dir
++
++    agent = tmp_path / "agent-output"
++    outside = tmp_path / "outside-platform-repo"
++    outside.mkdir()
++    monkeypatch.setenv("QS_AGENT_OUTPUT_DIR", str(agent))
++    monkeypatch.setenv("QS_DATA_DIR", str(tmp_path / "general-data"))
++    monkeypatch.chdir(outside)
++
+     captured = {}
+ 
+     def fake_load(registry, *, candidates_dir):
+-        captured["candidates_dir"] = candidates_dir
++        captured["candidates_dir"] = Path(candidates_dir)
+         return []
+ 
+     monkeypatch.setattr(cli_module, "load_approved_factor_candidates", fake_load)
+-    monkeypatch.setattr(
+-        cli_module, "build_ohlcv_provider", lambda settings, *, requested: (object(), requested)
+-    )
++    _invoke_stubbed_run_config_with_approved_candidates(monkeypatch, tmp_path)
+ 
+-    class _R:
+-        experiment_id = "e-1"
+-        run_count = 1
+-        best_run_id = None
+-        config_path = tmp_path / "c"
+-        runs_path = tmp_path / "r"
+-        folds_path = tmp_path / "f"
+-        agent_summary_path = tmp_path / "a.json"
+-        report_path = tmp_path / "rep.md"
++    assert captured["candidates_dir"] == resolve_candidates_dir(resolve_agent_output_dir())
++    assert captured["candidates_dir"] == agent / "agent" / "candidates"
+ 
+-    monkeypatch.setattr(cli_module, "run_experiment", lambda *a, **k: _R())
+ 
+-    result = runner.invoke(
+-        app,
+-        [
+-            "experiment",
+-            "run-config",
+-            "--config",
+-            str(_write_config(tmp_path)),
+-            "--include-approved-candidates",
+-            "--candidates-dir",
+-            str(custom_candidates_dir),
+-        ],
++def test_include_approved_candidates_accepts_agent_output_dir_override(
++    tmp_path,
++    monkeypatch,
++) -> None:
++    from pathlib import Path
++
++    from quant_system.agent.paths import resolve_agent_output_dir, resolve_candidates_dir
++
++    custom_agent_root = tmp_path / "custom-agent-root"
++    captured = {}
++
++    def fake_load(registry, *, candidates_dir):
++        captured["candidates_dir"] = Path(candidates_dir)
++        return []
++
++    monkeypatch.setattr(cli_module, "load_approved_factor_candidates", fake_load)
++    _invoke_stubbed_run_config_with_approved_candidates(
++        monkeypatch,
++        tmp_path,
++        extra_args=["--agent-output-dir", str(custom_agent_root)],
+     )
+ 
+-    assert result.exit_code == 0, result.output
+-    assert captured["candidates_dir"] == custom_candidates_dir
++    assert captured["candidates_dir"] == resolve_candidates_dir(
++        resolve_agent_output_dir(custom_agent_root)
++    )
+diff --git a/tests/test_cli_json_output.py b/tests/test_cli_json_output.py
+index c49e488..93de308 100644
+--- a/tests/test_cli_json_output.py
++++ b/tests/test_cli_json_output.py
+@@ -39,21 +39,21 @@ def _last_line(output: str) -> str:
+ 
+ def _propose_factor(tmp_path: Path, *extra: str):
+     output_dir = tmp_path / "agent_run"
+     result = runner.invoke(
+         app,
+         [
+             "agent",
+             "propose-factor",
+             "--goal",
+             "json contract check",
+-            "--output-dir",
++            "--agent-output-dir",
+             str(output_dir),
+             *extra,
+         ],
+     )
+     assert result.exit_code == 0, result.output
+     return result, output_dir
+ 
+ 
+ def _candidate_id(output: str) -> str:
+     match = _CANDIDATE_ID_RE.search(output)
+@@ -131,21 +131,21 @@ def test_agent_review_legacy_line_byte_identical_without_json(tmp_path) -> None:
+         app,
+         [
+             "agent",
+             "review",
+             "--candidate-id",
+             candidate_id,
+             "--decision",
+             "approve",
+             "--note",
+             "json contract regression",
+-            "--output-dir",
++            "--agent-output-dir",
+             str(output_dir),
+         ],
+     )
+ 
+     assert result.exit_code == 0, result.output
+     expected = f"candidate_id={candidate_id} decision=approve registration=manual_required"
+     assert _last_line(result.output) == expected
+ 
+ 
+ def test_agent_review_json_emits_contract_on_last_line(tmp_path) -> None:
+@@ -156,21 +156,21 @@ def test_agent_review_json_emits_contract_on_last_line(tmp_path) -> None:
+         app,
+         [
+             "agent",
+             "review",
+             "--candidate-id",
+             candidate_id,
+             "--decision",
+             "approve",
+             "--note",
+             "json contract",
+-            "--output-dir",
++            "--agent-output-dir",
+             str(output_dir),
+             "--json",
+         ],
+     )
+ 
+     assert result.exit_code == 0, result.output
+     payload = json.loads(_last_line(result.output))
+     assert set(payload) == {"candidate_id", "decision", "registration"}
+     assert payload["candidate_id"] == candidate_id
+     assert payload["decision"] == "approve"
+@@ -249,22 +249,22 @@ def test_run_config_json_lists_loaded_approved_candidates(tmp_path, monkeypatch)
+     )
+ 
+     result = runner.invoke(
+         app,
+         [
+             "experiment",
+             "run-config",
+             "--config",
+             str(_write_experiment_config(tmp_path)),
+             "--include-approved-candidates",
+-            "--candidates-dir",
+-            str(tmp_path / "candidates"),
++            "--agent-output-dir",
++            str(tmp_path / "agent-output"),
+             "--json",
+         ],
+     )
+ 
+     assert result.exit_code == 0, result.output
+     payload = json.loads(_last_line(result.output))
+     assert payload["approved_candidates_loaded"] == ["candidate_x"]
+ 
+ 
+ # --- doctor -------------------------------------------------------------------
+diff --git a/tests/test_factor_registry_factory.py b/tests/test_factor_registry_factory.py
+index c34829c..a802b75 100644
+--- a/tests/test_factor_registry_factory.py
++++ b/tests/test_factor_registry_factory.py
+@@ -1,15 +1,14 @@
+ from __future__ import annotations
+ 
+ from fastapi.testclient import TestClient
+ 
+-import quant_system.api.routes.factors as factors_route
+ from quant_system.api.server import create_app
+ from quant_system.factors import library
+ from quant_system.factors.base import BaseFactor
+ from quant_system.factors.registry import (
+     build_default_factor_registry,
+     build_factor_registry,
+ )
+ 
+ _EXAMPLE_IDS = {"momentum", "volatility", "liquidity", "rsi", "macd"}
+ 
+@@ -125,82 +124,89 @@ def test_registry_tracks_origin_per_registration_pass(monkeypatch, tmp_path) ->
+ 
+ 
+ def test_default_registry_has_no_candidate_origins() -> None:
+     registry = build_factor_registry()
+     assert set(registry.origins().values()) <= {"builtin", "promoted"}
+ 
+ 
+ # --- API /factors provenance (Task P2) -----------------------------------
+ 
+ 
+-def _api_client(tmp_path, monkeypatch, candidates_dir):
+-    # Point the route's candidate lookup at an isolated tmp dir instead of the
+-    # on-disk data/agent_run/agent/candidates default.
+-    monkeypatch.setattr(
+-        factors_route, "AGENT_CANDIDATES_DIR", candidates_dir, raising=True
++def _api_client(tmp_path, agent_output_dir):
++    # Inject the agent root through create_app; QS_DATA_DIR/output_dir must not
++    # relocate the candidate pool.
++    return TestClient(
++        create_app(
++            output_dir=tmp_path / "api",
++            agent_output_dir=agent_output_dir,
++        )
+     )
+-    return TestClient(create_app(output_dir=tmp_path / "api"))
+ 
+ 
+-def test_factors_default_call_has_no_candidate_origin(tmp_path, monkeypatch) -> None:
+-    candidates_dir = tmp_path / "candidates"
+-    candidates_dir.mkdir()
++def test_factors_default_call_has_no_candidate_origin(tmp_path) -> None:
++    agent = tmp_path / "agent-output"
++    candidates_dir = agent / "agent" / "candidates"
++    candidates_dir.mkdir(parents=True)
+     _write_candidate(candidates_dir, "cand-approved", _CANDIDATE_SRC, approved=True)
+-    client = _api_client(tmp_path, monkeypatch, candidates_dir)
++    client = _api_client(tmp_path, agent)
+ 
+     response = client.get("/api/factors")
+ 
+     assert response.status_code == 200
+     factors = response.json()["factors"]
+     origins = {item["factor_id"]: item["origin"] for item in factors}
+     assert set(origins) == _EXAMPLE_IDS
+     assert all(origin == "builtin" for origin in origins.values())
+     assert "wiring_test_factor" not in origins
+ 
+ 
+-def test_factors_include_candidates_lists_approved_candidate(
+-    tmp_path, monkeypatch
+-) -> None:
+-    candidates_dir = tmp_path / "candidates"
+-    candidates_dir.mkdir()
++def test_factors_include_candidates_lists_approved_candidate(tmp_path) -> None:
++    agent = tmp_path / "agent-output"
++    candidates_dir = agent / "agent" / "candidates"
++    candidates_dir.mkdir(parents=True)
+     _write_candidate(candidates_dir, "cand-approved", _CANDIDATE_SRC, approved=True)
+-    client = _api_client(tmp_path, monkeypatch, candidates_dir)
++    client = _api_client(tmp_path, agent)
+ 
+     response = client.get("/api/factors", params={"include_candidates": "true"})
+ 
+     assert response.status_code == 200
+     origins = {item["factor_id"]: item["origin"] for item in response.json()["factors"]}
+     assert origins["wiring_test_factor"] == "candidate"
+     for example_id in _EXAMPLE_IDS:
+         assert origins[example_id] == "builtin"
+ 
+ 
+-def test_factors_include_candidates_excludes_pending_candidate(
+-    tmp_path, monkeypatch
+-) -> None:
+-    candidates_dir = tmp_path / "candidates"
+-    candidates_dir.mkdir()
++def test_factors_include_candidates_excludes_pending_candidate(tmp_path) -> None:
++    agent = tmp_path / "agent-output"
++    candidates_dir = agent / "agent" / "candidates"
++    candidates_dir.mkdir(parents=True)
+     _write_candidate(candidates_dir, "cand-pending", _CANDIDATE_SRC, approved=False)
+-    client = _api_client(tmp_path, monkeypatch, candidates_dir)
++    client = _api_client(tmp_path, agent)
+ 
+     response = client.get("/api/factors", params={"include_candidates": "true"})
+ 
+     assert response.status_code == 200
+     factor_ids = {item["factor_id"] for item in response.json()["factors"]}
+     assert "wiring_test_factor" not in factor_ids
+     assert factor_ids == _EXAMPLE_IDS
+ 
+ 
+-# --- Candidate dir path resolution (review finding F6) --------------------
++def test_factors_candidate_catalog_uses_create_app_agent_root(tmp_path) -> None:
++    general = tmp_path / "general"
++    agent = tmp_path / "agent-output"
++    candidates_dir = agent / "agent" / "candidates"
++    candidates_dir.mkdir(parents=True)
++    _write_candidate(
++        candidates_dir,
++        "cand-approved",
++        _CANDIDATE_SRC,
++        approved=True,
++    )
++
++    client = TestClient(create_app(output_dir=general, agent_output_dir=agent))
++    payload = client.get("/api/factors?include_candidates=true").json()
+ 
++    assert "wiring_test_factor" in {
++        item["factor_id"] for item in payload["factors"]
++    }
++    assert not (general / "agent").exists()
+ 
+-def test_agent_candidates_dir_is_absolute_and_cwd_independent() -> None:
+-    # A relative AGENT_CANDIDATES_DIR silently resolves against the process CWD;
+-    # under any CWD other than the repo root the approved-candidate catalog view
+-    # fails closed (empty), which reads as "no candidates" rather than an error.
+-    # Pin it to an absolute, CWD-independent path anchored on the repo layout.
+-    assert factors_route.AGENT_CANDIDATES_DIR.is_absolute()
+-    assert factors_route.AGENT_CANDIDATES_DIR.parts[-3:] == (
+-        "agent_run",
+-        "agent",
+-        "candidates",
+-    )
+diff --git a/tests/test_frontend_e2e_config.py b/tests/test_frontend_e2e_config.py
+index 6822759..8df99ec 100644
+--- a/tests/test_frontend_e2e_config.py
++++ b/tests/test_frontend_e2e_config.py
+@@ -18,20 +18,21 @@ def test_playwright_backend_uses_isolated_test_environment() -> None:
+     assert 'QS_ENVIRONMENT: "test"' in backend_block
+     assert 'QS_DATABASE_ENABLED: "false"' in backend_block
+     assert 'QS_DATABASE_AUTO_MIGRATE: "false"' in backend_block
+     assert 'QS_AIHOT_ENABLED: "false"' in backend_block
+     assert "QS_HERMES_ARTIFACT_FEED_PATH: hermesArtifactFixture" in backend_block
+     assert "QS_HERMES_ARTIFACT_FRESHNESS_BUDGET_SECONDS" in backend_block
+     assert "QS_API_CORS_ORIGINS: JSON.stringify(e2eCorsOrigins)" in backend_block
+     assert "frontendUrl" in backend_block
+     assert 'const e2eDataRoot = path.join(frontendRoot, ".tmp", "e2e-data")' in config
+     assert "QS_DATA_DIR: e2eDataRoot" in backend_block
++    assert 'QS_AGENT_OUTPUT_DIR: path.join(e2eDataRoot, "agent-output")' in backend_block
+     assert 'QS_PARQUET_DIR: path.join(e2eDataRoot, "parquet")' in backend_block
+     assert 'QS_DUCKDB_PATH: path.join(e2eDataRoot, "quant_system.duckdb")' in backend_block
+     assert (
+         'QS_OPTIONS_RADAR_OUTPUT_DIR: path.join(e2eDataRoot, "options_scans")'
+         in backend_block
+     )
+     assert "QS_OPTIONS_RADAR_UNIVERSE_PATH" in compact_backend_block
+     assert "QS_OPTIONS_RADAR_EARNINGS_CALENDAR_PATH" in compact_backend_block
+     assert "QS_OPTIONS_RADAR_VIX_HISTORY_PATH" in compact_backend_block
+     assert "QS_DATABASE_ENABLED" not in frontend_block

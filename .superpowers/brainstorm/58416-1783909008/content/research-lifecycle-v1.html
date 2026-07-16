@@ -1,0 +1,70 @@
+<h2>设计第 4 部分：从一句话到可审计研究结果</h2>
+<p class="subtitle">旧页面里的几十个参数不会原样搬进聊天。Hermes 先把自然语言整理成结构化计划，用户看懂并确认后才执行。</p>
+
+<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;align-items:stretch;margin-top:26px">
+  <div style="padding:16px;border:1px solid #67528d;border-radius:12px;background:rgba(139,92,246,.09)"><div class="letter">1</div><h3>提出目标</h3><p style="color:var(--muted)">“复现这篇论文里的流动性因子。”</p></div>
+  <div style="display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--accent)">→</div>
+  <div style="padding:16px;border:1px solid #405b81;border-radius:12px;background:rgba(59,130,246,.08)"><div class="letter">2</div><h3>计划预览</h3><p style="color:var(--muted)">Hermes 整理公式、数据、区间、试验预算与安全边界。</p></div>
+  <div style="display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--accent)">→</div>
+  <div style="padding:16px;border:1px solid #6b4f24;border-radius:12px;background:rgba(245,158,11,.08)"><div class="letter">3</div><h3>人工确认</h3><p style="color:var(--muted)">公式任务必须经过 Gate 1；普通只读查询可直接运行。</p></div>
+  <div style="display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--accent)">→</div>
+  <div style="padding:16px;border:1px solid #356044;border-radius:12px;background:rgba(34,197,94,.08)"><div class="letter">4</div><h3>异步执行</h3><p style="color:var(--muted)">Hermes 调 HQA 与平台确定性 CLI；消息流实时显示步骤。</p></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 60px 1fr 60px 1fr;gap:12px;align-items:stretch;margin-top:12px">
+  <div style="padding:16px;border:1px solid #405b81;border-radius:12px;background:rgba(59,130,246,.06)"><div class="letter">5</div><h3>结果归档</h3><p style="color:var(--muted)">因子证据、回测、实验比较和原始 provenance 形成统一结果。</p></div>
+  <div style="display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--accent)">→</div>
+  <div style="padding:16px;border:1px solid #6b4f24;border-radius:12px;background:rgba(245,158,11,.06)"><div class="letter">6</div><h3>后续审批</h3><p style="color:var(--muted)">Gate 2 审候选源码；满意后 Gate 3 审 promotion diff。</p></div>
+  <div style="display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--accent)">→</div>
+  <div style="padding:16px;border:1px solid #356044;border-radius:12px;background:rgba(34,197,94,.06)"><div class="letter">7</div><h3>形成经验</h3><p style="color:var(--muted)">结果、判断和失败原因进入复盘与 Hermes 长期上下文。</p></div>
+</div>
+
+<div class="split" style="margin-top:30px;align-items:stretch">
+  <div class="mockup">
+    <div class="mockup-header">A. 执行前：Hermes 研究计划卡</div>
+    <div class="mockup-body" style="padding:24px;background:#121116">
+      <div class="label">待确认研究计划</div><h3 style="font-size:24px;color:#f3efe8;margin-top:8px">复现流动性枯竭预警因子</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px">
+        <div style="padding:14px;border:1px solid #302d35;border-radius:10px"><div class="label">因子定义</div><p style="margin-top:8px">Amihud 周度变化率 × 换手率衰减</p></div>
+        <div style="padding:14px;border:1px solid #302d35;border-radius:10px"><div class="label">数据与范围</div><p style="margin-top:8px">Tiingo EOD · SPY / QQQ · 2020-2026</p></div>
+        <div style="padding:14px;border:1px solid #302d35;border-radius:10px"><div class="label">反过拟合纪律</div><p style="margin-top:8px">最多 2 次探索；最近 183 天 holdout</p></div>
+        <div style="padding:14px;border:1px solid #302d35;border-radius:10px"><div class="label">允许的动作</div><p style="margin-top:8px">生成 proposal-only 候选并做一次性研究回测</p></div>
+      </div>
+      <div style="margin-top:14px;padding:13px;border-left:3px solid #f4bd63;background:#1d1914;color:#d8c6aa">需要确认：平台是否具备可靠的 dollar_volume 字段？</div>
+      <label style="display:block;margin-top:16px;color:#aaa3ae">你的补充<textarea style="display:block;width:100%;min-height:66px;margin-top:8px;border:1px solid #403a46;border-radius:9px;background:#17161b;color:#eee;padding:10px" placeholder="修改定义、范围或约束"></textarea></label>
+      <div style="display:flex;gap:10px;margin-top:16px"><button style="padding:10px 16px;border:1px solid #38614a;border-radius:8px;background:#183023;color:#7ee0a4">确认公式并开始</button><button style="padding:10px 16px;border:1px solid #4a454d;border-radius:8px;background:#18161c;color:#bbb4bf">让 Hermes 修改计划</button></div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">B. 执行中：只显示可理解的步骤</div>
+    <div class="mockup-body" style="padding:24px;background:#121116">
+      <div style="display:flex;justify-content:space-between;align-items:center"><div><div class="label">研究任务</div><h3 style="font-size:24px;color:#f3efe8;margin-top:8px">流动性因子复现</h3></div><span style="padding:7px 11px;border-radius:999px;background:#1b2537;color:#9eb4eb">运行中 · 4 / 6</span></div>
+      <div style="margin-top:22px;display:grid;gap:12px">
+        <div style="padding:14px;border:1px solid #304838;border-radius:10px"><b style="color:#75db9c">✓</b>　读取已确认公式与数据范围 <span style="float:right;color:#85808a">完成</span></div>
+        <div style="padding:14px;border:1px solid #304838;border-radius:10px"><b style="color:#75db9c">✓</b>　验证 dollar_volume 可用性 <span style="float:right;color:#85808a">完成</span></div>
+        <div style="padding:14px;border:1px solid #304838;border-radius:10px"><b style="color:#75db9c">✓</b>　生成 proposal-only 候选源码 <span style="float:right;color:#85808a">完成</span></div>
+        <div style="padding:14px;border:1px solid #405b81;border-radius:10px;background:#151923"><b style="color:#9eb4eb">●</b>　运行一次性真实历史回测 <span style="float:right;color:#9eb4eb">进行中</span></div>
+        <div style="padding:14px;border:1px solid #302d35;border-radius:10px;color:#77717c">○　生成稳定性与 holdout 摘要</div>
+        <div style="padding:14px;border:1px solid #302d35;border-radius:10px;color:#77717c">○　整理结果与下一步建议</div>
+      </div>
+      <details style="margin-top:16px;padding:13px;border:1px solid #302d35;border-radius:10px;color:#9b94a0"><summary>技术事件与原始日志</summary><p style="margin-top:9px">tool calls、run IDs、stdout/stderr 和 artifact paths。</p></details>
+      <button style="margin-top:16px;padding:9px 14px;border:1px solid #6d3c43;border-radius:8px;background:#301a1d;color:#ef9aa5">停止任务</button>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:28px">
+  <div class="mockup-header">C. 完成后：统一研究结果，不再回到旧页面</div>
+  <div class="mockup-body" style="padding:24px;background:#121116">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div class="label">研究结果</div><h3 style="font-size:25px;color:#f3efe8;margin-top:8px">流动性枯竭因子 · Trial 1</h3><p style="color:#aaa3ae;margin-top:7px">候选源码、因子证据、回测、实验稳定性和审批历史集中在同一结果中。</p></div><span style="padding:8px 12px;border-radius:999px;background:#342716;color:#f2c874">等待 Gate 2</span></div>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:20px"><div style="padding:15px;border:1px solid #302d35;border-radius:10px"><div class="label">Sharpe</div><strong style="display:block;font-size:24px;margin-top:7px">1.18</strong></div><div style="padding:15px;border:1px solid #302d35;border-radius:10px"><div class="label">最大回撤</div><strong style="display:block;font-size:24px;margin-top:7px">14.0%</strong></div><div style="padding:15px;border:1px solid #302d35;border-radius:10px"><div class="label">Holdout</div><strong style="display:block;font-size:20px;margin-top:7px;color:#75db9c">保留</strong></div><div style="padding:15px;border:1px solid #302d35;border-radius:10px"><div class="label">试验次数</div><strong style="display:block;font-size:24px;margin-top:7px">1 / 2</strong></div></div>
+    <div style="display:flex;gap:8px;margin-top:18px;border-bottom:1px solid #302d35;padding-bottom:10px;color:#9f98a4"><strong style="color:#d2c2ef">结论</strong><span>因子证据</span><span>回测曲线</span><span>实验稳定性</span><span>源码与审计</span><span>审批历史</span></div>
+    <div style="margin-top:18px;padding:17px;border:1px solid #304838;border-radius:10px;background:#171b18"><strong style="color:#75db9c">Hermes 结论</strong><p style="margin-top:9px;color:#c2cbc5">结果有一定解释力，但还不足以晋级。建议先审查候选源码，再决定是否进行第 2 次探索；不要提前运行 final holdout。</p></div>
+    <div style="display:flex;gap:10px;margin-top:16px"><button style="padding:10px 16px;border:1px solid #886b39;border-radius:8px;background:#2a2113;color:#f4ce86">进入 Gate 2 审批</button><button style="padding:10px 16px;border:1px solid #4a454d;border-radius:8px;background:#18161c;color:#bbb4bf">和 Hermes 继续讨论</button></div>
+  </div>
+</div>
+
+<div style="margin-top:26px;padding:17px;border:1px solid #6b4f24;border-radius:12px;background:rgba(245,158,11,.07)">
+  <strong>降级约束：</strong>Hermes 离线时仍能阅读所有历史结果，但不能启动新的因子、回测或实验；不会保留旧手工运行表单作为旁路。
+</div>

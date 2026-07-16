@@ -1,0 +1,4343 @@
+# Review package: cb4d7e0f06352cc6a52a3320f2c3478fe5fb1803..HEAD
+
+## Commits
+ed3b9bb fix(agent): require expected_status for candidate review CAS
+51647d9 fix(agent): make candidate writes immutable and approvals revision-bound
+
+## Files changed
+ src/quant_system/agent/candidate_fs.py   | 141 +++++++
+ src/quant_system/agent/candidate_pool.py | 677 +++++++++++++++++++++++++++----
+ src/quant_system/agent/models.py         |  18 +
+ src/quant_system/agent/promote.py        |  27 +-
+ src/quant_system/agent/promotion.py      |  43 +-
+ src/quant_system/agent/runner.py         |  34 +-
+ src/quant_system/agent/safety.py         |  39 +-
+ src/quant_system/api/routes/agent.py     | 228 +++++++++--
+ src/quant_system/api/routes/factors.py   |   6 +-
+ src/quant_system/api/schemas/agent.py    |  29 +-
+ src/quant_system/cli.py                  |  64 ++-
+ src/quant_system/factors/registry.py     |   8 +-
+ tests/test_agent_phase7.py               |  58 ++-
+ tests/test_agent_promote.py              | 142 +++++--
+ tests/test_agent_promotion.py            | 103 +++--
+ tests/test_api_agent.py                  | 163 +++++++-
+ tests/test_candidate_repository.py       | 600 +++++++++++++++++++++++++++
+ tests/test_cli_experiment_provider.py    |  19 +-
+ tests/test_cli_json_output.py            |  49 ++-
+ tests/test_factor_registry_factory.py    |  62 ++-
+ 20 files changed, 2239 insertions(+), 271 deletions(-)
+
+## Diff
+diff --git a/src/quant_system/agent/candidate_fs.py b/src/quant_system/agent/candidate_fs.py
+index b44a806..d7f8138 100644
+--- a/src/quant_system/agent/candidate_fs.py
++++ b/src/quant_system/agent/candidate_fs.py
+@@ -2,38 +2,42 @@
+ 
+ All trusted candidate I/O starts by lexically walking absolute paths from `/`
+ with O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC, then uses held directory FDs plus single
+ component names only. No Path.open / path-string os.replace for content writes.
+ """
+ 
+ from __future__ import annotations
+ 
+ import ctypes
+ import errno
++import fcntl
+ import os
+ import platform
+ import secrets
+ import stat
+ from collections.abc import Iterator
+ from contextlib import contextmanager, suppress
+ from dataclasses import dataclass
+ from pathlib import Path, PurePosixPath
+ 
+ __all__ = [
+     "CandidateConflictError",
+     "CandidateIntegrityError",
+     "OpenedDirectory",
+     "assert_entry_is_open_fd",
+     "atomic_write_noreplace_at",
++    "locked_candidates_root",
++    "mkdir_exclusive_at",
+     "open_absolute_directory",
+     "open_directory_at",
+     "read_regular_bytes_at",
++    "remove_entry_tree_at",
+     "rename_directory_noreplace_at",
+     "write_regular_exclusive_at",
+ ]
+ 
+ 
+ class CandidateIntegrityError(RuntimeError):
+     """Candidate path, type, identity, or byte-boundary violation."""
+ 
+ 
+ class CandidateConflictError(RuntimeError):
+@@ -373,20 +377,157 @@ def _lexical_absolute_components(path: Path) -> list[str]:
+     components = list(abs_path.parts[1:])
+     if not components:
+         raise CandidateIntegrityError(
+             "refusing to use filesystem root as candidate path"
+         )
+     for component in components:
+         _validate_single_component(component)
+     return components
+ 
+ 
++def mkdir_exclusive_at(parent_fd: int, name: str, mode: int = 0o755) -> None:
++    """Create a single-component directory exclusively under a held parent FD."""
++    _ensure_runtime_support()
++    _validate_single_component(name, what="directory name")
++    try:
++        os.mkdir(name, mode, dir_fd=parent_fd)
++    except FileExistsError as exc:
++        raise CandidateConflictError(f"directory {name!r} already exists") from exc
++    except OSError as exc:
++        if exc.errno == errno.EEXIST:
++            raise CandidateConflictError(f"directory {name!r} already exists") from exc
++        raise CandidateIntegrityError(f"cannot create directory {name!r}") from exc
++    os.fsync(parent_fd)
++
++
++def remove_entry_tree_at(parent_fd: int, name: str) -> None:
++    """Recursively remove a single-component entry relative to a held parent FD."""
++    _ensure_runtime_support()
++    _validate_single_component(name, what="entry name")
++    try:
++        entry_st = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
++    except FileNotFoundError:
++        return
++    except OSError as exc:
++        raise CandidateIntegrityError(f"cannot stat entry {name!r} for removal") from exc
++
++    if stat.S_ISLNK(entry_st.st_mode) or stat.S_ISREG(entry_st.st_mode):
++        try:
++            os.unlink(name, dir_fd=parent_fd)
++        except OSError as exc:
++            raise CandidateIntegrityError(f"cannot unlink {name!r}") from exc
++        os.fsync(parent_fd)
++        return
++
++    if not stat.S_ISDIR(entry_st.st_mode):
++        raise CandidateIntegrityError(f"cannot remove non-directory entry {name!r}")
++
++    dir_fd = open_directory_at(parent_fd, name)
++    try:
++        assert_entry_is_open_fd(parent_fd, name, dir_fd)
++        for child in os.listdir(dir_fd):
++            remove_entry_tree_at(dir_fd, child)
++        assert_entry_is_open_fd(parent_fd, name, dir_fd)
++    finally:
++        os.close(dir_fd)
++    try:
++        os.rmdir(name, dir_fd=parent_fd)
++    except OSError as exc:
++        raise CandidateIntegrityError(f"cannot rmdir {name!r}") from exc
++    os.fsync(parent_fd)
++
++
++@contextmanager
++def locked_candidates_root(
++    agent_output_dir: Path, *, create: bool
++) -> Iterator[OpenedDirectory]:
++    """Open candidates root under exclusive flock on a verified regular pool lock."""
++    from quant_system.agent.paths import resolve_candidates_dir
++
++    candidates_path = resolve_candidates_dir(Path(agent_output_dir))
++    with open_absolute_directory(candidates_path, create=create) as opened:
++        flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
++        try:
++            lock_fd = os.open(".candidate-pool.lock", flags, 0o600, dir_fd=opened.fd)
++        except OSError as exc:
++            raise CandidateIntegrityError(
++                "cannot open candidate pool lock"
++            ) from exc
++        try:
++            lock_stat = os.fstat(lock_fd)
++            if not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_nlink != 1:
++                raise CandidateIntegrityError(
++                    "candidate pool lock must be regular"
++                )
++            # Re-check the parent entry is still a single-link regular file and
++            # not a symlink/hardlink swapped after open.
++            try:
++                entry_stat = os.stat(
++                    ".candidate-pool.lock",
++                    dir_fd=opened.fd,
++                    follow_symlinks=False,
++                )
++            except OSError as exc:
++                raise CandidateIntegrityError(
++                    "candidate pool lock entry missing"
++                ) from exc
++            if stat.S_ISLNK(entry_stat.st_mode):
++                raise CandidateIntegrityError(
++                    "candidate pool lock must be regular"
++                )
++            if not stat.S_ISREG(entry_stat.st_mode) or entry_stat.st_nlink != 1:
++                raise CandidateIntegrityError(
++                    "candidate pool lock must be regular"
++                )
++            if (entry_stat.st_dev, entry_stat.st_ino) != (
++                lock_stat.st_dev,
++                lock_stat.st_ino,
++            ):
++                raise CandidateIntegrityError(
++                    "candidate pool lock identity does not match held fd"
++                )
++            fcntl.flock(lock_fd, fcntl.LOCK_EX)
++            assert_entry_is_open_fd(opened.parent_fd, opened.name, opened.fd)
++            # Confirm lock name still maps to the held lock fd.
++            entry_stat = os.stat(
++                ".candidate-pool.lock",
++                dir_fd=opened.fd,
++                follow_symlinks=False,
++            )
++            held = os.fstat(lock_fd)
++            if (entry_stat.st_dev, entry_stat.st_ino) != (held.st_dev, held.st_ino):
++                raise CandidateIntegrityError(
++                    "candidate pool lock identity does not match held fd"
++                )
++            if not stat.S_ISREG(held.st_mode) or held.st_nlink != 1:
++                raise CandidateIntegrityError(
++                    "candidate pool lock must be regular"
++                )
++            yield opened
++            entry_stat = os.stat(
++                ".candidate-pool.lock",
++                dir_fd=opened.fd,
++                follow_symlinks=False,
++            )
++            held = os.fstat(lock_fd)
++            if (entry_stat.st_dev, entry_stat.st_ino) != (held.st_dev, held.st_ino):
++                raise CandidateIntegrityError(
++                    "candidate pool lock identity does not match held fd"
++                )
++            assert_entry_is_open_fd(opened.parent_fd, opened.name, opened.fd)
++        finally:
++            with suppress(OSError):
++                fcntl.flock(lock_fd, fcntl.LOCK_UN)
++            with suppress(OSError):
++                os.close(lock_fd)
++
++
+ @contextmanager
+ def open_absolute_directory(path: Path, *, create: bool) -> Iterator[OpenedDirectory]:
+     """Open an absolute directory by walking each component from `/` with O_NOFOLLOW."""
+     _ensure_runtime_support()
+     components = _lexical_absolute_components(path)
+ 
+     root_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+     parent_fd = root_fd
+     child_fd: int | None = None
+     intermediate_fds: list[int] = []
+diff --git a/src/quant_system/agent/candidate_pool.py b/src/quant_system/agent/candidate_pool.py
+index ed768c4..d75553e 100644
+--- a/src/quant_system/agent/candidate_pool.py
++++ b/src/quant_system/agent/candidate_pool.py
+@@ -1,135 +1,660 @@
++"""Atomic candidate repository with digest-bound review CAS.
++
++All create/review mutations hold the candidates-root pool lock and write only
++through Task-2 dirfd primitives. Metadata and artifact bytes are immutable after
++publication; review status is derived from structured decision locks.
++"""
++
+ from __future__ import annotations
+ 
+ import hashlib
+ import json
++import os
+ import re
++import secrets
++import stat as stat_mod
++from contextlib import suppress
+ from pathlib import Path
+ from typing import Any, Literal
+ 
++from quant_system.agent.candidate_fs import (
++    CandidateConflictError,
++    CandidateIntegrityError,
++    OpenedDirectory,
++    assert_entry_is_open_fd,
++    atomic_write_noreplace_at,
++    locked_candidates_root,
++    mkdir_exclusive_at,
++    open_absolute_directory,
++    open_directory_at,
++    read_regular_bytes_at,
++    remove_entry_tree_at,
++    rename_directory_noreplace_at,
++    write_regular_exclusive_at,
++)
++from quant_system.agent.candidate_manifest import (
++    CandidateMigrationRequiredError,
++    CandidateReviewStateStaleError,
++    CandidateStaleError,
++    VerifiedCandidateSnapshot,
++    _build_manifest_from_opened,
++    _normalized_relative_path,
++    _validate_candidate_id,
++    _verify_from_opened,
++    canonical_json_bytes,
++    load_verified_candidate_snapshot,
++)
+ from quant_system.agent.models import (
+     CandidateArtifact,
++    CandidateReadItem,
+     CandidateStatus,
+     ReviewRecord,
+     utc_now_iso,
+ )
++from quant_system.agent.paths import resolve_candidates_dir
++
++__all__ = [
++    "CandidateConflictError",
++    "CandidateIntegrityError",
++    "CandidateMigrationRequiredError",
++    "CandidatePool",
++    "CandidateReviewStateStaleError",
++    "CandidateStaleError",
++]
+ 
+ _SAFE_ID_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
+-_SAFE_CANDIDATE_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
++_HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
++_PROTECTED_METADATA_KEYS = frozenset(
++    {
++        "candidate_id",
++        "task_id",
++        "artifact_type",
++        "goal",
++        "universe",
++        "status",
++        "created_at",
++        "updated_at",
++        "files",
++        "safety",
++    }
++)
++_METADATA_NAME = "metadata.json"
++_MANIFEST_NAME = "manifest.v1.json"
++_APPROVED_LOCK = "approved.lock"
++_REJECTED_LOCK = "rejected.lock"
++_LEGACY_APPROVED_LOCK = "legacy-approved.lock"
++_LEGACY_REJECTED_LOCK = "legacy-rejected.lock"
++_CONTROL_NAMES = (
++    _APPROVED_LOCK,
++    _REJECTED_LOCK,
++    _LEGACY_APPROVED_LOCK,
++    _LEGACY_REJECTED_LOCK,
++)
++_SKIP_LIST_NAMES = frozenset({".candidate-pool.lock", ".", ".."})
+ 
+ 
+ def _slug(value: str, *, fallback: str = "candidate", max_length: int = 40) -> str:
+     cleaned = _SAFE_ID_PATTERN.sub("_", value.lower()).strip("_")
+     return (cleaned or fallback)[:max_length].strip("_") or fallback
+ 
+ 
+ def _candidate_id(*, task_id: str, artifact_type: str, goal: str) -> str:
+     digest = hashlib.sha256(f"{task_id}|{artifact_type}|{goal}".encode()).hexdigest()[:10]
+-    return f"{_slug(artifact_type)}-{_slug(goal)}-{digest}"
++    return _validate_candidate_id(
++        f"{_slug(artifact_type)}-{_slug(goal)}-{digest}"
++    )
++
++
++def _validate_filename(filename: str) -> str:
++    return _normalized_relative_path(filename).name
++
++
++def _validate_digest(value: str) -> str:
++    if not isinstance(value, str) or _HEX_DIGEST.fullmatch(value) is None:
++        raise CandidateIntegrityError("manifest digest must be lowercase 64-char hex")
++    return value
++
++
++def _validate_note(note: str) -> str:
++    if not isinstance(note, str) or not (1 <= len(note) <= 2000):
++        raise CandidateIntegrityError("review note must be 1..2000 characters")
++    return note
++
++
++def _sha256_hex(payload: bytes) -> str:
++    return hashlib.sha256(payload).hexdigest()
++
++
++def _control_present(parent_fd: int, name: str) -> bool:
++    try:
++        os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
++        return True
++    except FileNotFoundError:
++        return False
++    except OSError as exc:
++        raise CandidateIntegrityError(f"cannot stat control {name!r}") from exc
++
++
++def _any_decision_control(parent_fd: int) -> bool:
++    return any(_control_present(parent_fd, name) for name in _CONTROL_NAMES)
++
++
++def _stable_inputs_match(
++    snapshot: VerifiedCandidateSnapshot,
++    *,
++    task_id: str,
++    goal: str,
++    artifact_type: str,
++    filename: str,
++    content: str,
++    universe: list[str],
++) -> bool:
++    meta = snapshot.metadata
++    if meta.get("task_id") != task_id:
++        return False
++    if meta.get("goal") != goal:
++        return False
++    if meta.get("artifact_type") != artifact_type:
++        return False
++    if list(meta.get("universe") or []) != list(universe):
++        return False
++    if list(meta.get("files") or []) != [filename]:
++        return False
++    expected = content.encode("utf-8")
++    actual = snapshot.artifact_bytes.get(filename)
++    return actual == expected
++
++
++def _artifact_from_snapshot(
++    snapshot: VerifiedCandidateSnapshot,
++    *,
++    task_id: str | None = None,
++) -> CandidateArtifact:
++    filename = snapshot.manifest.files[0].path if snapshot.manifest.files else ""
++    meta_task = snapshot.metadata.get("task_id")
++    resolved_task = task_id if task_id is not None else (
++        meta_task if isinstance(meta_task, str) else ""
++    )
++    created = snapshot.metadata.get("created_at")
++    kwargs: dict[str, Any] = {
++        "candidate_id": snapshot.candidate_id,
++        "task_id": resolved_task,
++        "artifact_type": snapshot.manifest.artifact_type,
++        "path": snapshot.candidate_dir / filename,
++        "metadata_path": snapshot.candidate_dir / _METADATA_NAME,
++        "status": CandidateStatus.PENDING,
++        "manifest_digest": snapshot.manifest_digest,
++    }
++    if isinstance(created, str):
++        kwargs["created_at"] = created
++    return CandidateArtifact(**kwargs)
++
++
++def _status_from_binding(
++    binding: str,
++) -> Literal["pending", "approved", "rejected"] | None:
++    if binding in {"pending", "approved", "rejected"}:
++        return binding  # type: ignore[return-value]
++    return None
++
++
++def _integrity_error_code(exc: BaseException) -> str:
++    text = str(exc).lower()
++    if "symlink" in text:
++        return "symlink"
++    if "hard link" in text or "nlink" in text:
++        return "hardlink"
++    if "candidate_id" in text:
++        return "id_mismatch"
++    if "manifest" in text:
++        return "manifest_mismatch"
++    if "regular" in text or "not a" in text:
++        return "type_mismatch"
++    return "corrupt"
+ 
+ 
+ class CandidatePool:
+     """Stores agent outputs as inert candidate artifacts for human review."""
+ 
+     def __init__(self, output_dir: str | Path) -> None:
+         self.output_dir = Path(output_dir)
+-        self.candidates_dir = self.output_dir / "agent" / "candidates"
++        self.candidates_dir = resolve_candidates_dir(self.output_dir)
+ 
+     def write_candidate(
+         self,
+         *,
+         task_id: str,
+         goal: str,
+         artifact_type: str,
+         filename: str,
+         content: str,
+         universe: list[str] | None = None,
+         metadata_extra: dict[str, Any] | None = None,
+     ) -> CandidateArtifact:
+         candidate_id = _candidate_id(task_id=task_id, artifact_type=artifact_type, goal=goal)
+-        candidate_dir = self.candidates_dir / candidate_id
+-        candidate_dir.mkdir(parents=True, exist_ok=True)
+-        artifact_path = candidate_dir / filename
+-        artifact_path.write_text(content, encoding="utf-8")
+-        metadata_path = candidate_dir / "metadata.json"
+-        metadata = {
+-            "candidate_id": candidate_id,
+-            "task_id": task_id,
+-            "artifact_type": artifact_type,
+-            "goal": goal,
+-            "universe": universe or [],
+-            "status": CandidateStatus.PENDING.value,
+-            "created_at": utc_now_iso(),
+-            "updated_at": utc_now_iso(),
+-            "files": [filename],
+-            "safety": {
+-                "auto_promotion": False,
+-                "requires_human_review": True,
+-                "review_status": "pending",
+-            },
+-        }
+-        metadata.update(metadata_extra or {})
+-        metadata_path.write_text(
+-            json.dumps(metadata, indent=2, sort_keys=True),
+-            encoding="utf-8",
+-        )
+-        return CandidateArtifact(
+-            candidate_id=candidate_id,
+-            task_id=task_id,
+-            artifact_type=artifact_type,
+-            path=artifact_path,
+-            metadata_path=metadata_path,
+-            status=CandidateStatus.PENDING,
++        safe_filename = _validate_filename(filename)
++        universe_list = list(universe or [])
++        extra = dict(metadata_extra or {})
++        collisions = set(extra) & _PROTECTED_METADATA_KEYS
++        if collisions:
++            raise CandidateIntegrityError(
++                f"metadata_extra collides with protected keys: {sorted(collisions)}"
++            )
++        if not isinstance(content, str):
++            raise CandidateIntegrityError("candidate content must be a string")
++        content_bytes = content.encode("utf-8")
++
++        with locked_candidates_root(self.output_dir, create=True) as root:
++            assert_entry_is_open_fd(root.parent_fd, root.name, root.fd)
++
++            if _control_present(root.fd, candidate_id) or self._entry_is_dir(
++                root.fd, candidate_id
++            ):
++                try:
++                    existing = self._verify_under_root(root, candidate_id)
++                except CandidateMigrationRequiredError as exc:
++                    raise CandidateConflictError(
++                        f"candidate {candidate_id!r} exists without verified manifest"
++                    ) from exc
++                except CandidateIntegrityError as exc:
++                    raise CandidateConflictError(
++                        f"candidate {candidate_id!r} exists and is not reusable"
++                    ) from exc
++                if _stable_inputs_match(
++                    existing,
++                    task_id=task_id,
++                    goal=goal,
++                    artifact_type=artifact_type,
++                    filename=safe_filename,
++                    content=content,
++                    universe=universe_list,
++                ):
++                    assert_entry_is_open_fd(root.parent_fd, root.name, root.fd)
++                    return _artifact_from_snapshot(existing, task_id=task_id)
++                raise CandidateConflictError(
++                    f"candidate {candidate_id!r} already exists with different bytes"
++                )
++
++            staging_name = f".staging-{secrets.token_hex(16)}"
++            published = False
++            mkdir_exclusive_at(root.fd, staging_name)
++            staging_fd: int | None = None
++            try:
++                staging_fd = open_directory_at(root.fd, staging_name)
++                assert_entry_is_open_fd(root.fd, staging_name, staging_fd)
++                mkdir_exclusive_at(staging_fd, candidate_id)
++                candidate_fd = open_directory_at(staging_fd, candidate_id)
++                try:
++                    assert_entry_is_open_fd(staging_fd, candidate_id, candidate_fd)
++                    created_at = utc_now_iso()
++                    metadata: dict[str, Any] = {
++                        "candidate_id": candidate_id,
++                        "task_id": task_id,
++                        "artifact_type": artifact_type,
++                        "goal": goal,
++                        "universe": universe_list,
++                        "status": CandidateStatus.PENDING.value,
++                        "created_at": created_at,
++                        "updated_at": created_at,
++                        "files": [safe_filename],
++                        "safety": {
++                            "auto_promotion": False,
++                            "requires_human_review": True,
++                            "review_status": "pending",
++                        },
++                    }
++                    for key, value in extra.items():
++                        if key not in _PROTECTED_METADATA_KEYS:
++                            metadata[key] = value
++
++                    # Pretty-printed metadata for human readability; digest binds
++                    # exact stored bytes via metadata_sha256 of these bytes.
++                    metadata_bytes = json.dumps(
++                        metadata, indent=2, sort_keys=True, ensure_ascii=False
++                    ).encode("utf-8")
++                    write_regular_exclusive_at(
++                        candidate_fd, _METADATA_NAME, metadata_bytes
++                    )
++                    write_regular_exclusive_at(
++                        candidate_fd, safe_filename, content_bytes
++                    )
++
++                    st = os.fstat(candidate_fd)
++                    staged = OpenedDirectory(
++                        fd=candidate_fd,
++                        parent_fd=staging_fd,
++                        name=candidate_id,
++                        st_dev=st.st_dev,
++                        st_ino=st.st_ino,
++                    )
++                    manifest, digest, _artifact_bytes, _meta, _raw = (
++                        _build_manifest_from_opened(staged)
++                    )
++                    manifest_bytes = canonical_json_bytes(
++                        manifest.model_dump(mode="json")
++                    )
++                    write_regular_exclusive_at(
++                        candidate_fd, _MANIFEST_NAME, manifest_bytes
++                    )
++                    # Verify staged candidate fully before publication.
++                    snapshot = _verify_from_opened(
++                        staged,
++                        candidate_dir=self.candidates_dir / candidate_id,
++                    )
++                    if snapshot.manifest_digest != digest:
++                        raise CandidateIntegrityError("staged digest mismatch")
++                    assert_entry_is_open_fd(staging_fd, candidate_id, candidate_fd)
++                    assert_entry_is_open_fd(root.fd, staging_name, staging_fd)
++                    assert_entry_is_open_fd(root.parent_fd, root.name, root.fd)
++
++                    rename_directory_noreplace_at(
++                        staging_fd, candidate_id, root.fd, candidate_id
++                    )
++                    os.fsync(root.fd)
++                    published = True
++                    assert_entry_is_open_fd(root.parent_fd, root.name, root.fd)
++                finally:
++                    os.close(candidate_fd)
++            except Exception:
++                if not published:
++                    with suppress(Exception):
++                        remove_entry_tree_at(root.fd, staging_name)
++                raise
++            else:
++                with suppress(Exception):
++                    remove_entry_tree_at(root.fd, staging_name)
++            finally:
++                if staging_fd is not None:
++                    with suppress(OSError):
++                        os.close(staging_fd)
++
++            published_snap = self._verify_under_root(root, candidate_id)
++            assert_entry_is_open_fd(root.parent_fd, root.name, root.fd)
++            return _artifact_from_snapshot(published_snap, task_id=task_id)
++
++    def get(self, candidate_id: str) -> VerifiedCandidateSnapshot:
++        candidate_id = _validate_candidate_id(candidate_id)
++        return load_verified_candidate_snapshot(
++            agent_output_dir=self.output_dir, candidate_id=candidate_id
+         )
+ 
+     def list_candidates(self) -> list[dict[str, Any]]:
++        """Legacy-shaped listing; prefer list_for_read for integrity-aware reads."""
++        items: list[dict[str, Any]] = []
++        for item in self.list_for_read():
++            payload = item.model_dump(mode="json")
++            items.append(payload)
++        return items
++
++    def list_for_read(self) -> list[CandidateReadItem]:
+         if not self.candidates_dir.exists():
+             return []
+-        candidates: list[dict[str, Any]] = []
+-        metadata_paths = sorted(
+-            self.candidates_dir.glob("*/metadata.json"),
+-            key=lambda path: (path.stat().st_mtime_ns, path.parent.name),
+-            reverse=True,
+-        )
+-        for metadata_path in metadata_paths:
+-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+-            candidate_dir = metadata_path.parent
+-            if (candidate_dir / "approved.lock").exists():
+-                metadata["status"] = CandidateStatus.APPROVED.value
+-            elif (candidate_dir / "rejected.lock").exists():
+-                metadata["status"] = CandidateStatus.REJECTED.value
+-            candidates.append(metadata)
+-        return candidates
++        results: list[CandidateReadItem] = []
++        try:
++            with open_absolute_directory(self.candidates_dir, create=False) as root:
++                assert_entry_is_open_fd(root.parent_fd, root.name, root.fd)
++                names = sorted(os.listdir(root.fd))
++                for name in names:
++                    if name in _SKIP_LIST_NAMES or name.startswith(".staging-"):
++                        continue
++                    if name.startswith("."):
++                        # Hidden control/lock files are not candidates.
++                        continue
++                    results.append(self._read_item_at(root, name))
++                assert_entry_is_open_fd(root.parent_fd, root.name, root.fd)
++        except CandidateIntegrityError:
++            # If the candidates root itself is unsafe, surface empty rather than
++            # crashing list consumers; individual corrupt items are isolated.
++            return results
++        # Newest-first by path mtime when available, else stable name order reverse.
++        def _sort_key(item: CandidateReadItem) -> tuple[int, str]:
++            path = self.candidates_dir / item.candidate_id
++            try:
++                mtime = path.stat().st_mtime_ns
++            except OSError:
++                mtime = 0
++            return (mtime, item.candidate_id)
++
++        results.sort(key=_sort_key, reverse=True)
++        return results
+ 
+     def review(
+         self,
+         *,
+         candidate_id: str,
+         decision: Literal["approve", "reject"],
+         note: str,
++        expected_manifest_digest: str,
++        expected_status: Literal["pending"],
+     ) -> ReviewRecord:
+-        if _SAFE_CANDIDATE_ID.fullmatch(candidate_id) is None:
+-            raise FileNotFoundError(f"candidate {candidate_id!r} does not exist")
+-        candidate_dir = self.candidates_dir / candidate_id
+-        metadata_path = candidate_dir / "metadata.json"
+-        if not metadata_path.exists():
+-            raise FileNotFoundError(f"candidate {candidate_id!r} does not exist")
+-
+-        record = ReviewRecord(candidate_id=candidate_id, decision=decision, note=note)
+-        with (candidate_dir / "reviews.jsonl").open("a", encoding="utf-8") as handle:
+-            handle.write(record.model_dump_json() + "\n")
+-
+-        status = CandidateStatus.APPROVED if decision == "approve" else CandidateStatus.REJECTED
+-        lock_name = "approved.lock" if decision == "approve" else "rejected.lock"
+-        opposite_lock_name = "rejected.lock" if decision == "approve" else "approved.lock"
+-        (candidate_dir / lock_name).write_text(record.model_dump_json(indent=2), encoding="utf-8")
+-        (candidate_dir / opposite_lock_name).unlink(missing_ok=True)
+-
+-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+-        metadata["status"] = status.value
+-        metadata["updated_at"] = utc_now_iso()
+-        metadata["safety"]["review_status"] = status.value
+-        metadata_path.write_text(
+-            json.dumps(metadata, indent=2, sort_keys=True),
+-            encoding="utf-8",
++        # Validate all CAS inputs before any filesystem create/open of the root.
++        candidate_id = _validate_candidate_id(candidate_id)
++        digest = _validate_digest(expected_manifest_digest)
++        note = _validate_note(note)
++        if decision not in {"approve", "reject"}:
++            raise CandidateIntegrityError("decision must be approve or reject")
++        if expected_status != "pending":
++            raise CandidateIntegrityError(
++                "expected_status must be the literal 'pending'"
++            )
++
++        lock_name = _APPROVED_LOCK if decision == "approve" else _REJECTED_LOCK
++        opposite = _REJECTED_LOCK if decision == "approve" else _APPROVED_LOCK
++
++        if not self.candidates_dir.exists():
++            raise CandidateIntegrityError(
++                f"candidate {candidate_id!r} does not exist"
++            )
++
++        with locked_candidates_root(self.output_dir, create=False) as root:
++            assert_entry_is_open_fd(root.parent_fd, root.name, root.fd)
++            try:
++                candidate_fd = open_directory_at(root.fd, candidate_id)
++            except CandidateIntegrityError as exc:
++                raise CandidateIntegrityError(
++                    f"candidate {candidate_id!r} does not exist or is not a directory"
++                ) from exc
++            try:
++                assert_entry_is_open_fd(root.fd, candidate_id, candidate_fd)
++                st = os.fstat(candidate_fd)
++                opened = OpenedDirectory(
++                    fd=candidate_fd,
++                    parent_fd=root.fd,
++                    name=candidate_id,
++                    st_dev=st.st_dev,
++                    st_ino=st.st_ino,
++                )
++                snapshot = _verify_from_opened(
++                    opened,
++                    candidate_dir=self.candidates_dir / candidate_id,
++                )
++
++                if _any_decision_control(candidate_fd):
++                    raise CandidateReviewStateStaleError(
++                        f"candidate {candidate_id!r} already has a final decision"
++                    )
++                if snapshot.approval_binding != "pending":
++                    raise CandidateReviewStateStaleError(
++                        f"candidate {candidate_id!r} is not pending"
++                    )
++                if snapshot.manifest_digest != digest:
++                    raise CandidateStaleError(
++                        f"candidate {candidate_id!r} manifest digest mismatch"
++                    )
++                # expected_status is always pending (validated); current is pending.
++                assert_entry_is_open_fd(root.fd, candidate_id, candidate_fd)
++                assert_entry_is_open_fd(root.parent_fd, root.name, root.fd)
++
++                if _control_present(candidate_fd, opposite):
++                    raise CandidateReviewStateStaleError(
++                        f"candidate {candidate_id!r} already has a final decision"
++                    )
++
++                created_at = utc_now_iso()
++                record = ReviewRecord(
++                    candidate_id=candidate_id,
++                    decision=decision,
++                    note=note,
++                    manifest_digest=digest,
++                    created_at=created_at,
++                )
++                lock_payload = canonical_json_bytes(
++                    {
++                        "schema_version": "1.0",
++                        "candidate_id": candidate_id,
++                        "decision": decision,
++                        "manifest_digest": digest,
++                        "note": note,
++                        "reviewer": record.reviewer,
++                        "created_at": created_at,
++                    }
++                )
++                # Exclusive no-replace publication of the decision lock.
++                atomic_write_noreplace_at(candidate_fd, lock_name, lock_payload)
++                assert_entry_is_open_fd(root.fd, candidate_id, candidate_fd)
++                assert_entry_is_open_fd(root.parent_fd, root.name, root.fd)
++                # Confirm lock bytes are the ones we wrote and opposite absent.
++                written = read_regular_bytes_at(candidate_fd, lock_name)
++                if written != lock_payload:
++                    raise CandidateIntegrityError("decision lock bytes changed")
++                if _control_present(candidate_fd, opposite):
++                    raise CandidateIntegrityError(
++                        "opposite decision lock appeared during review"
++                    )
++                return record
++            finally:
++                os.close(candidate_fd)
++
++    def _entry_is_dir(self, parent_fd: int, name: str) -> bool:
++        try:
++            st = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
++        except FileNotFoundError:
++            return False
++        except OSError as exc:
++            raise CandidateIntegrityError(f"cannot stat {name!r}") from exc
++        return stat_mod.S_ISDIR(st.st_mode) and not stat_mod.S_ISLNK(st.st_mode)
++
++    def _verify_under_root(
++        self, root: OpenedDirectory, candidate_id: str
++    ) -> VerifiedCandidateSnapshot:
++        candidate_fd = open_directory_at(root.fd, candidate_id)
++        try:
++            assert_entry_is_open_fd(root.fd, candidate_id, candidate_fd)
++            st = os.fstat(candidate_fd)
++            opened = OpenedDirectory(
++                fd=candidate_fd,
++                parent_fd=root.fd,
++                name=candidate_id,
++                st_dev=st.st_dev,
++                st_ino=st.st_ino,
++            )
++            return _verify_from_opened(
++                opened, candidate_dir=self.candidates_dir / candidate_id
++            )
++        finally:
++            os.close(candidate_fd)
++
++    def _read_item_at(self, root: OpenedDirectory, name: str) -> CandidateReadItem:
++        try:
++            candidate_id = _validate_candidate_id(name)
++        except CandidateIntegrityError:
++            return CandidateReadItem(
++                candidate_id=name,
++                integrity_state="corrupt",
++                integrity_error_code="invalid_id",
++                approval_enabled=False,
++            )
++        try:
++            candidate_fd = open_directory_at(root.fd, candidate_id)
++        except CandidateIntegrityError:
++            return CandidateReadItem(
++                candidate_id=candidate_id,
++                integrity_state="corrupt",
++                integrity_error_code="not_directory",
++                approval_enabled=False,
++            )
++        try:
++            assert_entry_is_open_fd(root.fd, candidate_id, candidate_fd)
++            st = os.fstat(candidate_fd)
++            opened = OpenedDirectory(
++                fd=candidate_fd,
++                parent_fd=root.fd,
++                name=candidate_id,
++                st_dev=st.st_dev,
++                st_ino=st.st_ino,
++            )
++            try:
++                snapshot = _verify_from_opened(
++                    opened, candidate_dir=self.candidates_dir / candidate_id
++                )
++            except CandidateMigrationRequiredError:
++                return self._migration_item(opened, candidate_id)
++            except CandidateIntegrityError as exc:
++                return CandidateReadItem(
++                    candidate_id=candidate_id,
++                    integrity_state="corrupt",
++                    integrity_error_code=_integrity_error_code(exc),
++                    approval_enabled=False,
++                )
++            status = _status_from_binding(snapshot.approval_binding)
++            return CandidateReadItem(
++                candidate_id=snapshot.candidate_id,
++                artifact_type=snapshot.manifest.artifact_type,
++                goal=snapshot.manifest.goal,
++                universe=list(snapshot.manifest.universe),
++                status=status,
++                integrity_state="verified",
++                manifest_digest=snapshot.manifest_digest,
++                observed_manifest_digest=None,
++                approval_binding=snapshot.approval_binding,
++                approval_enabled=snapshot.approval_binding == "pending",
++                integrity_error_code=None,
++            )
++        finally:
++            os.close(candidate_fd)
++
++    def _migration_item(
++        self, opened: OpenedDirectory, candidate_id: str
++    ) -> CandidateReadItem:
++        try:
++            manifest, digest, _artifact_bytes, metadata, _raw = (
++                _build_manifest_from_opened(opened)
++            )
++        except CandidateIntegrityError as exc:
++            return CandidateReadItem(
++                candidate_id=candidate_id,
++                integrity_state="corrupt",
++                integrity_error_code=_integrity_error_code(exc),
++                approval_enabled=False,
++            )
++        # Observed digest is non-authoritative evidence only.
++        status: Literal["pending", "approved", "rejected"] | None = "pending"
++        if _control_present(opened.fd, _APPROVED_LOCK) or _control_present(
++            opened.fd, _LEGACY_APPROVED_LOCK
++        ):
++            status = "approved"
++        elif _control_present(opened.fd, _REJECTED_LOCK) or _control_present(
++            opened.fd, _LEGACY_REJECTED_LOCK
++        ):
++            status = "rejected"
++        goal = metadata.get("goal") if isinstance(metadata.get("goal"), str) else manifest.goal
++        artifact_type = (
++            metadata.get("artifact_type")
++            if isinstance(metadata.get("artifact_type"), str)
++            else manifest.artifact_type
+         )
+-        return record
++        return CandidateReadItem(
++            candidate_id=candidate_id,
++            artifact_type=artifact_type,
++            goal=goal,
++            universe=list(manifest.universe),
++            status=status,
++            integrity_state="migration_required",
++            manifest_digest=None,
++            observed_manifest_digest=digest,
++            approval_binding="legacy_unbound",
++            approval_enabled=False,
++            integrity_error_code=None,
++        )
++
++
+diff --git a/src/quant_system/agent/models.py b/src/quant_system/agent/models.py
+index 9d254a5..9e4ce4c 100644
+--- a/src/quant_system/agent/models.py
++++ b/src/quant_system/agent/models.py
+@@ -50,18 +50,36 @@ class AgentDecision(BaseModel):
+ 
+ 
+ class CandidateArtifact(BaseModel):
+     candidate_id: str
+     task_id: str
+     artifact_type: str
+     path: Path
+     metadata_path: Path
+     status: CandidateStatus = CandidateStatus.PENDING
+     created_at: str = Field(default_factory=utc_now_iso)
++    manifest_digest: str | None = None
+ 
+ 
+ class ReviewRecord(BaseModel):
+     candidate_id: str
+     decision: Literal["approve", "reject"]
+     note: str
+     reviewer: str = "manual"
+     created_at: str = Field(default_factory=utc_now_iso)
++    manifest_digest: str | None = None
++
++
++class CandidateReadItem(BaseModel):
++    candidate_id: str
++    artifact_type: str | None = None
++    goal: str | None = None
++    universe: list[str] | None = None
++    status: Literal["pending", "approved", "rejected"] | None = None
++    integrity_state: Literal["verified", "migration_required", "corrupt"]
++    manifest_digest: str | None = None
++    observed_manifest_digest: str | None = None
++    approval_binding: Literal["pending", "approved", "rejected", "legacy_unbound"] | None = (
++        None
++    )
++    approval_enabled: bool = False
++    integrity_error_code: str | None = None
+diff --git a/src/quant_system/agent/promote.py b/src/quant_system/agent/promote.py
+index 6704dd2..8140303 100644
+--- a/src/quant_system/agent/promote.py
++++ b/src/quant_system/agent/promote.py
+@@ -19,20 +19,21 @@ source files under the promoted library. It is deliberately boring:
+ from __future__ import annotations
+ 
+ import ast
+ import keyword
+ import re
+ from datetime import UTC, datetime
+ from pathlib import Path
+ 
+ from pydantic import BaseModel
+ 
++from quant_system.agent.candidate_pool import CandidatePool
+ from quant_system.agent.promotion import CandidateLoadError, _check_source
+ from quant_system.agent.safety import SafetyGate
+ 
+ _PROMOTED_PACKAGE = "quant_system.factors.library.promoted"
+ # Must start with a letter: `_regenerate_init` skips `_*.py` modules, so a
+ # leading-underscore factor_id would be written but never registered (F5).
+ _SAFE_FACTOR_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+ 
+ _INIT_DOCSTRING = '''"""Code-reviewed, promoted factor library (Gate-3 output of D-20).
+ 
+@@ -51,47 +52,55 @@ class PromotionError(RuntimeError):
+ class PromotionResult(BaseModel):
+     factor_id: str
+     module_path: Path
+     test_path: Path
+     init_path: Path
+ 
+ 
+ def promote_candidate(
+     candidate_id: str,
+     *,
+-    candidates_dir: Path,
++    agent_output_dir: Path,
+     library_dir: Path,
+     tests_dir: Path,
+     promotion_date: str | None = None,
+ ) -> PromotionResult:
+     """Write the promotion diff for one approved candidate; never touch git.
+ 
+     All preconditions are checked before the first write, so a refusal leaves
+     the working tree untouched. ``promotion_date`` is injectable so tests stay
+     deterministic; it defaults to today (UTC).
++
++    Callers pass the agent-output root only (never a pre-derived candidates dir).
+     """
+-    candidates_dir = Path(candidates_dir)
++    agent_output_dir = Path(agent_output_dir)
+     library_dir = Path(library_dir)
+     tests_dir = Path(tests_dir)
+ 
+-    # 1. Human approval gate (approved.lock present, no rejected.lock).
+-    if not SafetyGate(candidates_dir).allow_promotion(candidate_id):
++    # 1. Human approval gate (digest-bound structured approved.lock).
++    if not SafetyGate(agent_output_dir).allow_promotion(candidate_id):
+         raise PromotionError(
+             f"candidate {candidate_id!r} is not approved for promotion "
+-            "(approved.lock missing or rejected.lock present); "
++            "(digest-bound approval missing or not authorized); "
+             "run `agent review --decision approve` first"
+         )
+ 
+-    source_path = candidates_dir / candidate_id / "factor.py.candidate"
+-    if not source_path.exists():
++    try:
++        snapshot = CandidatePool(agent_output_dir).get(candidate_id)
++    except Exception as exc:
++        raise PromotionError(
++            f"candidate {candidate_id!r} cannot be verified for promotion: {exc}"
++        ) from exc
++    source_bytes = snapshot.artifact_bytes.get("factor.py.candidate")
++    if source_bytes is None:
+         raise PromotionError(f"candidate {candidate_id!r} has no factor.py.candidate")
+-    source = source_path.read_text(encoding="utf-8")
++    source = source_bytes.decode("utf-8")
+ 
+     # 2. Static AST safety allowlist (same check as the research-time loader).
+     try:
+         _check_source(source, candidate_id)
+     except CandidateLoadError as exc:
+         raise PromotionError(str(exc)) from exc
+ 
+     # 3. Static discovery of the single factor class -- no exec.
+     class_name, factor_id = _extract_factor_class(source, candidate_id)
+ 
+@@ -110,21 +119,21 @@ def promote_candidate(
+     if factor_id in existing_ids:
+         raise PromotionError(
+             f"factor_id {factor_id!r} already exists in the registry "
+             "(builtin, promoted, or a registrable library); choose a distinct factor_id"
+         )
+ 
+     module_path = library_dir / f"{factor_id}.py"
+     test_path = tests_dir / f"test_{factor_id}.py"
+ 
+     promoted_on = promotion_date or datetime.now(UTC).date().isoformat()
+-    approval_note = candidates_dir / candidate_id / "approved.lock"
++    approval_note = snapshot.candidate_dir / "approved.lock"
+ 
+     # 5. Serialize the check -> write -> regenerate-init critical section with an
+     # advisory lock (review findings F2/F3). Two concurrent promotions must not
+     # both pass the module-exists check and then interleave their
+     # `_regenerate_init` glob+rewrite, which would drop a factor from
+     # PROMOTED_FACTORS. `touch(exist_ok=False)` is an atomic exclusive create;
+     # the finally clause releases only the lock this call created.
+     library_dir.mkdir(parents=True, exist_ok=True)
+     lock_path = library_dir / ".promote.lock"
+     try:
+diff --git a/src/quant_system/agent/promotion.py b/src/quant_system/agent/promotion.py
+index 730aca3..4f2041a 100644
+--- a/src/quant_system/agent/promotion.py
++++ b/src/quant_system/agent/promotion.py
+@@ -314,45 +314,66 @@ def _attribute_chain(node: ast.Attribute) -> list[str]:
+         cur = cur.value
+     if isinstance(cur, ast.Name):
+         parts.append(cur.id)
+     parts.reverse()
+     return parts
+ 
+ 
+ def load_approved_factor_candidates(
+     registry: FactorRegistry,
+     *,
+-    candidates_dir: str | Path,
++    agent_output_dir: str | Path,
+ ) -> list[str]:
+-    root = Path(candidates_dir)
++    """Load factors from verified, digest-bound approved candidates under agent root.
++
++    Callers pass the agent-output root only; candidates live under
++    ``agent/candidates`` via :func:`resolve_candidates_dir`. Task 4 will pass
++    verified snapshots/bytes instead of reopening artifact paths after the gate.
++    """
++    from quant_system.agent.candidate_pool import CandidatePool
++    from quant_system.agent.paths import resolve_candidates_dir
++
++    agent_root = Path(agent_output_dir)
++    root = resolve_candidates_dir(agent_root)
+     if not root.exists():
+         return []
+-    gate = SafetyGate(root)
++    gate = SafetyGate(agent_root)
++    pool = CandidatePool(agent_root)
+     loaded: list[str] = []
+-    for candidate_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+-        source_path = candidate_dir / "factor.py.candidate"
+-        if not source_path.exists():
++    for item in pool.list_for_read():
++        if item.integrity_state != "verified":
++            continue
++        if item.artifact_type != "factor":
++            continue
++        if not gate.allow_promotion(item.candidate_id):
++            continue
++        try:
++            snapshot = pool.get(item.candidate_id)
++        except Exception:
+             continue
+-        if not gate.allow_promotion(candidate_dir.name):
++        source_name = "factor.py.candidate"
++        source_bytes = snapshot.artifact_bytes.get(source_name)
++        if source_bytes is None:
+             continue
+-        source = source_path.read_text(encoding="utf-8")
+-        _check_source(source, candidate_dir.name)
++        source = source_bytes.decode("utf-8")
++        _check_source(source, item.candidate_id)
+         # Restricted namespace: pass an explicit __builtins__ so CPython does not
+         # inject the full builtins dict (which would expose __import__/eval/exec).
+         # The guarded __import__ enforces the module allowlist at runtime too.
+         # __name__ is seeded so `class` statements (and any module-introspection)
+         # see a conventional module name rather than NameError.
+         namespace: dict[str, object] = {
+             "__builtins__": _make_safe_builtins(),
+-            "__name__": candidate_dir.name,
++            "__name__": item.candidate_id,
+         }
+-        # Human-approved candidate (approved.lock verified above); static check passed.
++        # Human-approved candidate (digest-bound approval verified above).
++        source_path = snapshot.candidate_dir / source_name
+         exec(compile(source, str(source_path), "exec"), namespace)  # noqa: S102
+         for value in namespace.values():
+             if (
+                 isinstance(value, type)
+                 and issubclass(value, BaseFactor)
+                 and value is not BaseFactor
+             ):
+                 try:
+                     registry.register(value)
+                 except ValueError:
+diff --git a/src/quant_system/agent/runner.py b/src/quant_system/agent/runner.py
+index ab02a0f..21d2e85 100644
+--- a/src/quant_system/agent/runner.py
++++ b/src/quant_system/agent/runner.py
+@@ -120,36 +120,68 @@ class AgentRunner:
+         audit.record("task", task.model_dump(mode="json"))
+         return leakage_audit.run(
+             llm=self.llm,
+             audit=audit,
+             candidates=self.candidates,
+             task=task,
+             factor_id=factor_id,
+         )
+ 
+     def list_candidates(self) -> list[dict]:
+-        return self.candidates.list_candidates()
++        return [
++            item.model_dump(mode="json") for item in self.candidates.list_for_read()
++        ]
+ 
+     def review(
+         self,
+         *,
+         candidate_id: str,
+         decision: Literal["approve", "reject"],
+         note: str,
++        expected_manifest_digest: str,
++        expected_status: Literal["pending"],
+     ) -> ReviewRecord:
++        # Validate CAS inputs before any audit/root IO so invalid IDs leave
++        # zero writes (shared with CandidatePool.review preconditions).
++        from quant_system.agent.candidate_manifest import _validate_candidate_id
++        from quant_system.agent.candidate_pool import (
++            _validate_digest,
++            _validate_note,
++        )
++
++        candidate_id = _validate_candidate_id(candidate_id)
++        expected_manifest_digest = _validate_digest(expected_manifest_digest)
++        note = _validate_note(note)
++        if expected_status != "pending":
++            from quant_system.agent.candidate_fs import CandidateIntegrityError
++
++            raise CandidateIntegrityError(
++                "expected_status must be the literal 'pending'"
++            )
++        if decision not in {"approve", "reject"}:
++            from quant_system.agent.candidate_fs import CandidateIntegrityError
++
++            raise CandidateIntegrityError("decision must be approve or reject")
++
+         task_id = _task_id(AgentTaskType.REVIEW, candidate_id)
+         audit = AgentAuditLog(self.agent_output_dir, task_id=task_id)
++        # Record CAS values before mutation; never re-list to derive them.
+         audit.record(
+             "task",
+             {
+                 "task_id": task_id,
+                 "task_type": AgentTaskType.REVIEW.value,
+                 "candidate_id": candidate_id,
++                "expected_manifest_digest": expected_manifest_digest,
++                "expected_status": expected_status,
++                "decision": decision,
+             },
+         )
+         record = self.candidates.review(
+             candidate_id=candidate_id,
+             decision=decision,
+             note=note,
++            expected_manifest_digest=expected_manifest_digest,
++            expected_status=expected_status,
+         )
+         audit.record("review_recorded", record.model_dump(mode="json"))
+         return record
+diff --git a/src/quant_system/agent/safety.py b/src/quant_system/agent/safety.py
+index a47a331..f92eccf 100644
+--- a/src/quant_system/agent/safety.py
++++ b/src/quant_system/agent/safety.py
+@@ -1,44 +1,49 @@
+ from __future__ import annotations
+ 
+-import re
+ from pathlib import Path
+ 
++from quant_system.agent.candidate_manifest import (
++    CandidateIntegrityError,
++    CandidateMigrationRequiredError,
++)
++from quant_system.agent.candidate_pool import CandidatePool
+ from quant_system.agent.models import AgentDecision
+ 
+-_SAFE_CANDIDATE_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
+-
+ 
+ class SafetyGate:
+     """Manual-review gate for agent candidates.
+ 
+-    The gate deliberately has no path that promotes artifacts automatically.
+-    It only observes whether a human-created approval lock exists.
++    Accepts only an agent-output root (never a pre-derived candidates directory).
++    Authorization requires a verified snapshot whose approval binding is digest-bound.
+     """
+ 
+-    def __init__(self, candidates_dir: str | Path) -> None:
+-        self.candidates_dir = Path(candidates_dir)
++    def __init__(self, agent_output_dir: str | Path) -> None:
++        self.agent_output_dir = Path(agent_output_dir)
+ 
+     def allow_promotion(self, candidate_id: str) -> bool:
+-        if _SAFE_CANDIDATE_ID.fullmatch(candidate_id) is None:
+-            return False
+-        root = self.candidates_dir.resolve()
+-        candidate_dir = (self.candidates_dir / candidate_id).resolve()
+         try:
+-            candidate_dir.relative_to(root)
+-        except ValueError:
++            snapshot = CandidatePool(self.agent_output_dir).get(candidate_id)
++        except (
++            CandidateIntegrityError,
++            CandidateMigrationRequiredError,
++            FileNotFoundError,
++            OSError,
++        ):
+             return False
+-        return (candidate_dir / "approved.lock").exists() and not (
+-            candidate_dir / "rejected.lock"
+-        ).exists()
++        return snapshot.approval_binding == "approved"
+ 
+     def evaluate(self, candidate_id: str) -> AgentDecision:
+         allowed = self.allow_promotion(candidate_id)
+         return AgentDecision(
+             allowed=allowed,
+             candidate_id=candidate_id,
+-            reason="manual approval lock present" if allowed else "manual approval required",
++            reason=(
++                "digest-bound manual approval present"
++                if allowed
++                else "manual approval required"
++            ),
+             safety={
+                 "auto_promotion": False,
+                 "requires_human_review": True,
+             },
+         )
+diff --git a/src/quant_system/api/routes/agent.py b/src/quant_system/api/routes/agent.py
+index eb8d14a..1d213f2 100644
+--- a/src/quant_system/api/routes/agent.py
++++ b/src/quant_system/api/routes/agent.py
+@@ -1,78 +1,215 @@
+ from __future__ import annotations
+ 
+ import json
++from contextlib import suppress
+ 
+ from fastapi import APIRouter, HTTPException
+ 
++from quant_system.agent.candidate_manifest import (
++    CandidateIntegrityError,
++    CandidateMigrationRequiredError,
++    CandidateReviewStateStaleError,
++    CandidateStaleError,
++    _validate_candidate_id,
++)
++from quant_system.agent.candidate_pool import CandidateConflictError, CandidatePool
+ from quant_system.agent.llm import build_llm_client
+-from quant_system.agent.paths import resolve_candidates_dir
+ from quant_system.agent.runner import AgentRunner
+ from quant_system.api.dependencies import AgentOutputDirDep, OutputDirDep, SettingsDep
+ from quant_system.api.errors import not_found_404
+ from quant_system.api.schemas.agent import (
+     AgentCandidateDetailResponse,
+     AgentCandidatesResponse,
+     AgentLLMConfigResponse,
+     AgentReviewRequest,
+     AgentReviewResponse,
+     AgentTaskRequest,
+     AgentTaskResponse,
+ )
+-from quant_system.api.schemas.common import resolve_run_dir
+ 
+ router = APIRouter()
+ 
+ 
++def _conflict_409(*, code: str, message: str, candidate_id: str) -> HTTPException:
++    return HTTPException(
++        status_code=409,
++        detail={
++            "code": code,
++            "message": message,
++            "resource": "agent_candidate",
++            "id": candidate_id,
++        },
++    )
++
++
+ @router.get("/agent/candidates", response_model=AgentCandidatesResponse)
+ def list_candidates(
+     agent_output_dir: AgentOutputDirDep,
+     status: str | None = None,
+ ) -> dict:
+     candidates = AgentRunner(agent_output_dir=agent_output_dir).list_candidates()
+     if status is not None:
+-        candidates = [candidate for candidate in candidates if candidate.get("status") == status]
++        candidates = [
++            candidate
++            for candidate in candidates
++            if candidate.get("status") == status
++        ]
+     return {"candidates": candidates}
+ 
+ 
+ @router.get("/agent/candidates/{candidate_id}", response_model=AgentCandidateDetailResponse)
+ def candidate_detail(candidate_id: str, agent_output_dir: AgentOutputDirDep) -> dict:
+-    candidates_root = resolve_candidates_dir(agent_output_dir)
+-    candidate_dir = resolve_run_dir(candidates_root, candidate_id)
+-    metadata_path = candidate_dir / "metadata.json"
+-    if not metadata_path.exists():
+-        raise not_found_404("agent_candidate", candidate_id)
+-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+-    files = metadata.get("files", [])
++    try:
++        _validate_candidate_id(candidate_id)
++    except CandidateIntegrityError as exc:
++        raise not_found_404("agent_candidate", candidate_id) from exc
++
++    pool = CandidatePool(agent_output_dir)
++    items = {item.candidate_id: item for item in pool.list_for_read()}
++    item = items.get(candidate_id)
++    if item is None:
++        # Try get for verified path; list may have raced empty root.
++        try:
++            snapshot = pool.get(candidate_id)
++        except (CandidateIntegrityError, CandidateMigrationRequiredError, OSError) as exc:
++            raise not_found_404("agent_candidate", candidate_id) from exc
++        item = None
++        # Build detail from verified snapshot.
++        source_preview = ""
++        if snapshot.manifest.files:
++            first = snapshot.manifest.files[0].path
++            payload = snapshot.artifact_bytes.get(first, b"")
++            source_preview = payload.decode("utf-8", errors="replace")
++        reviews: list[str] = []
++        if snapshot.review_record is not None:
++            reviews = [snapshot.review_record.model_dump_json()]
++        audits = _audit_lines(agent_output_dir, candidate_id)
++        return {
++            "candidate_id": snapshot.candidate_id,
++            "metadata": snapshot.metadata,
++            "source_preview": source_preview,
++            "audit": audits,
++            "reviews": reviews,
++            "integrity_state": "verified",
++            "manifest_digest": snapshot.manifest_digest,
++            "observed_manifest_digest": None,
++            "approval_binding": snapshot.approval_binding,
++            "approval_enabled": snapshot.approval_binding == "pending",
++            "integrity_error_code": None,
++            "status": (
++                snapshot.approval_binding
++                if snapshot.approval_binding in {"pending", "approved", "rejected"}
++                else None
++            ),
++        }
++
++    audits = _audit_lines(agent_output_dir, candidate_id)
++
++    if item.integrity_state == "corrupt":
++        return {
++            "candidate_id": candidate_id,
++            "metadata": None,
++            "source_preview": None,
++            "audit": audits,
++            "reviews": [],
++            "integrity_state": "corrupt",
++            "manifest_digest": None,
++            "observed_manifest_digest": None,
++            "approval_binding": None,
++            "approval_enabled": False,
++            "integrity_error_code": item.integrity_error_code,
++            "status": None,
++        }
++
++    if item.integrity_state == "migration_required":
++        return {
++            "candidate_id": candidate_id,
++            "metadata": None,
++            "source_preview": None,
++            "audit": audits,
++            "reviews": [],
++            "integrity_state": "migration_required",
++            "manifest_digest": None,
++            "observed_manifest_digest": item.observed_manifest_digest,
++            "approval_binding": item.approval_binding,
++            "approval_enabled": False,
++            "integrity_error_code": None,
++            "status": item.status,
++            "artifact_type": item.artifact_type,
++            "goal": item.goal,
++        }
++
++    # verified
++    try:
++        snapshot = pool.get(candidate_id)
++    except CandidateIntegrityError:
++        return {
++            "candidate_id": candidate_id,
++            "metadata": None,
++            "source_preview": None,
++            "audit": audits,
++            "reviews": [],
++            "integrity_state": "corrupt",
++            "manifest_digest": None,
++            "observed_manifest_digest": None,
++            "approval_binding": None,
++            "approval_enabled": False,
++            "integrity_error_code": "corrupt",
++            "status": None,
++        }
++
+     source_preview = ""
+-    if files:
+-        source_path = candidate_dir / str(files[0])
+-        if source_path.exists() and source_path.is_file():
+-            source_preview = source_path.read_text(encoding="utf-8")
+-    audits = []
++    if snapshot.manifest.files:
++        first = snapshot.manifest.files[0].path
++        payload = snapshot.artifact_bytes.get(first, b"")
++        source_preview = payload.decode("utf-8", errors="replace")
++    reviews = []
++    if snapshot.review_record is not None:
++        reviews = [snapshot.review_record.model_dump_json()]
++    # Merge historical legacy reviews.jsonl for display only (never authoritative).
++    legacy_reviews = snapshot.candidate_dir / "reviews.jsonl"
++    if legacy_reviews.exists() and legacy_reviews.is_file():
++        with suppress(OSError):
++            reviews = reviews + [
++                line
++                for line in legacy_reviews.read_text(encoding="utf-8").splitlines()
++                if line.strip()
++            ]
++
++    return {
++        "candidate_id": snapshot.candidate_id,
++        "metadata": snapshot.metadata,
++        "source_preview": source_preview,
++        "audit": audits,
++        "reviews": reviews,
++        "integrity_state": "verified",
++        "manifest_digest": snapshot.manifest_digest,
++        "observed_manifest_digest": None,
++        "approval_binding": snapshot.approval_binding,
++        "approval_enabled": snapshot.approval_binding == "pending",
++        "integrity_error_code": None,
++        "status": item.status,
++    }
++
++
++def _audit_lines(agent_output_dir, candidate_id: str) -> list[str]:
++    audits: list[str] = []
+     audit_dir = agent_output_dir / "agent" / "audit"
+     if audit_dir.exists():
+         for path in sorted(audit_dir.glob("*.jsonl")):
+             audits.extend(
+                 line
+                 for line in path.read_text(encoding="utf-8").splitlines()
+                 if candidate_id in line
+             )
+-    reviews_path = candidate_dir / "reviews.jsonl"
+-    reviews = reviews_path.read_text(encoding="utf-8").splitlines() if reviews_path.exists() else []
+-    return {
+-        "candidate_id": candidate_id,
+-        "metadata": metadata,
+-        "source_preview": source_preview,
+-        "audit": audits,
+-        "reviews": reviews,
+-    }
++    return audits
+ 
+ 
+ @router.post("/agent/tasks", response_model=AgentTaskResponse)
+ def run_agent_task(
+     request: AgentTaskRequest,
+     output_dir: OutputDirDep,
+     agent_output_dir: AgentOutputDirDep,
+     settings: SettingsDep,
+ ) -> dict:
+     try:
+@@ -98,44 +235,87 @@ def run_agent_task(
+         artifact = runner.audit_leakage(factor_id=request.factor_id)
+     else:
+         raise HTTPException(status_code=422, detail="unknown agent task type")
+ 
+     metadata = json.loads(artifact.metadata_path.read_text(encoding="utf-8"))
+     return {
+         "candidate_id": artifact.candidate_id,
+         "status": artifact.status.value,
+         "path": str(artifact.path),
+         "metadata": metadata,
++        "manifest_digest": artifact.manifest_digest,
+     }
+ 
+ 
+ @router.post(
+     "/agent/candidates/{candidate_id}/review",
+     response_model=AgentReviewResponse,
+ )
+ def review_candidate(
+     candidate_id: str,
+     request: AgentReviewRequest,
+     agent_output_dir: AgentOutputDirDep,
+ ) -> dict:
++    try:
++        _validate_candidate_id(candidate_id)
++    except CandidateIntegrityError as exc:
++        raise not_found_404("agent_candidate", candidate_id) from exc
++
+     try:
+         record = AgentRunner(agent_output_dir=agent_output_dir).review(
+             candidate_id=candidate_id,
+             decision=request.decision,
+             note=request.note,
++            expected_manifest_digest=request.expected_manifest_digest,
++            expected_status=request.expected_status,
+         )
+     except FileNotFoundError as exc:
+         raise not_found_404("agent_candidate", candidate_id) from exc
++    except CandidateMigrationRequiredError as exc:
++        raise _conflict_409(
++            code="migration_required",
++            message=str(exc),
++            candidate_id=candidate_id,
++        ) from exc
++    except CandidateReviewStateStaleError as exc:
++        raise _conflict_409(
++            code="review_state_stale",
++            message=str(exc),
++            candidate_id=candidate_id,
++        ) from exc
++    except CandidateStaleError as exc:
++        raise _conflict_409(
++            code="stale_digest",
++            message=str(exc),
++            candidate_id=candidate_id,
++        ) from exc
++    except CandidateConflictError as exc:
++        raise _conflict_409(
++            code="conflict",
++            message=str(exc),
++            candidate_id=candidate_id,
++        ) from exc
++    except CandidateIntegrityError as exc:
++        # Missing/corrupt candidates surface as 404; CAS integrity as 409.
++        message = str(exc).lower()
++        if "does not exist" in message or "not a directory" in message:
++            raise not_found_404("agent_candidate", candidate_id) from exc
++        raise _conflict_409(
++            code="integrity_error",
++            message=str(exc),
++            candidate_id=candidate_id,
++        ) from exc
+     return {
+         "candidate_id": record.candidate_id,
+         "decision": record.decision,
+         "registration": "manual_required",
++        "manifest_digest": record.manifest_digest,
+     }
+ 
+ 
+ @router.get("/agent/llm-config", response_model=AgentLLMConfigResponse)
+ def llm_config(settings: SettingsDep) -> dict:
+     return {
+         "provider": settings.llm.provider,
+         "model": settings.llm.model,
+         "base_url": settings.llm.base_url,
+         "timeout": settings.llm.timeout,
+diff --git a/src/quant_system/api/routes/factors.py b/src/quant_system/api/routes/factors.py
+index 0ea6d7e..13cc2a6 100644
+--- a/src/quant_system/api/routes/factors.py
++++ b/src/quant_system/api/routes/factors.py
+@@ -1,17 +1,16 @@
+ from __future__ import annotations
+ 
+ import json
+ 
+ from fastapi import APIRouter, HTTPException
+ 
+-from quant_system.agent.paths import resolve_candidates_dir
+ from quant_system.api.dependencies import (
+     AgentOutputDirDep,
+     ApiRunsDirDep,
+     OutputDirDep,
+     SettingsDep,
+ )
+ from quant_system.api.errors import not_found_404, provider_unavailable_400
+ from quant_system.api.schemas.common import (
+     make_run_id,
+     read_parquet_records,
+@@ -37,26 +36,23 @@ router = APIRouter()
+ @router.get("/factors", response_model=FactorCatalogResponse)
+ def list_factors(
+     agent_output_dir: AgentOutputDirDep,
+     include_candidates: bool = False,
+ ) -> dict:
+     # Default: examples + promoted only (no candidate exec). Opt-in surfaces
+     # human-approved candidates with origin="candidate"; pending candidates are
+     # dropped by the SafetyGate inside the loader and never appear.
+     # Candidate root comes only from the injected agent output dir (create_app
+     # isolation boundary) — never a process-global constant or QS_DATA_DIR.
+-    candidates_dir = (
+-        resolve_candidates_dir(agent_output_dir) if include_candidates else None
+-    )
+     registry = build_factor_registry(
+         include_approved_candidates=include_candidates,
+-        candidates_dir=candidates_dir,
++        agent_output_dir=agent_output_dir if include_candidates else None,
+     )
+     origins = registry.origins()
+     return {
+         "factors": [
+             {
+                 **metadata.model_dump(mode="json"),
+                 "origin": origins[metadata.factor_id],
+             }
+             for metadata in registry.list_metadata()
+         ]
+diff --git a/src/quant_system/api/schemas/agent.py b/src/quant_system/api/schemas/agent.py
+index 3a38350..dc88ae1 100644
+--- a/src/quant_system/api/schemas/agent.py
++++ b/src/quant_system/api/schemas/agent.py
+@@ -2,64 +2,81 @@ from __future__ import annotations
+ 
+ from typing import Any, Literal
+ 
+ from pydantic import BaseModel, ConfigDict, Field
+ 
+ 
+ class CandidateSummary(BaseModel):
+     model_config = ConfigDict(extra="allow")
+ 
+     candidate_id: str
+-    artifact_type: str
+-    status: str
++    artifact_type: str | None = None
++    status: str | None = None
+     goal: str | None = None
++    integrity_state: str | None = None
++    manifest_digest: str | None = None
++    observed_manifest_digest: str | None = None
++    approval_binding: str | None = None
++    approval_enabled: bool | None = None
++    integrity_error_code: str | None = None
+ 
+ 
+ class AgentCandidatesResponse(BaseModel):
+     candidates: list[CandidateSummary]
+ 
+ 
+ class AgentCandidateDetailResponse(BaseModel):
+     candidate_id: str
+-    metadata: dict[str, Any]
+-    source_preview: str
+-    audit: list[str]
+-    reviews: list[str]
++    metadata: dict[str, Any] | None = None
++    source_preview: str | None = None
++    audit: list[str] = Field(default_factory=list)
++    reviews: list[str] = Field(default_factory=list)
++    integrity_state: str | None = None
++    manifest_digest: str | None = None
++    observed_manifest_digest: str | None = None
++    approval_binding: str | None = None
++    approval_enabled: bool | None = None
++    integrity_error_code: str | None = None
++    status: str | None = None
+ 
+ 
+ class AgentTaskRequest(BaseModel):
+     task_type: Literal[
+         "propose-factor",
+         "propose-experiment",
+         "summarize",
+         "audit-leakage",
+     ]
+     goal: str = ""
+     universe: list[str] = Field(default_factory=lambda: ["SPY", "QQQ"])
+     experiment_id: str | None = None
+     factor_id: str | None = None
+ 
+ 
+ class AgentTaskResponse(BaseModel):
+     candidate_id: str
+     status: str
+     path: str
+     metadata: dict[str, Any]
++    manifest_digest: str | None = None
+ 
+ 
+ class AgentReviewRequest(BaseModel):
+     decision: Literal["approve", "reject"]
+     note: str
++    expected_manifest_digest: str
++    expected_status: Literal["pending"]
+ 
+ 
+ class AgentReviewResponse(BaseModel):
+     candidate_id: str
+     decision: Literal["approve", "reject"]
+     registration: Literal["manual_required"]
++    manifest_digest: str | None = None
+ 
+ 
+ class AgentLLMConfigResponse(BaseModel):
+     provider: str
+     model: str | None
+     base_url: str | None
+     timeout: int
+     has_api_key: bool
+diff --git a/src/quant_system/cli.py b/src/quant_system/cli.py
+index fa77f6f..78b1341 100644
+--- a/src/quant_system/cli.py
++++ b/src/quant_system/cli.py
+@@ -826,25 +826,24 @@ def run_config_experiment_command(
+     """Run a Phase 4 experiment from a JSON config file."""
+     config = load_experiment_config(config_path)
+     settings = reload_settings()
+     provider_instance, data_source = build_ohlcv_provider(settings, requested=provider)
+     factor_registry = None
+     loaded: list[str] = []
+     if include_approved_candidates:
+         factor_registry = build_default_factor_registry()
+         # Same resolver as agent CLI: never CWD-relative and never QS_DATA_DIR.
+         active_agent_root = resolve_agent_output_dir(agent_output_dir)
+-        active_candidates_dir = resolve_candidates_dir(active_agent_root)
+         loaded = list(
+             load_approved_factor_candidates(
+                 factor_registry,
+-                candidates_dir=active_candidates_dir,
++                agent_output_dir=active_agent_root,
+             )
+         )
+         typer.echo(f"approved_candidates_loaded={','.join(loaded) or '<none>'}")
+     result = run_experiment(
+         config,
+         output_dir=output_dir,
+         provider=provider_instance,
+         data_source=data_source,
+         factor_registry=factor_registry,
+     )
+@@ -1802,81 +1801,120 @@ def agent_list_candidates(
+     ] = None,
+ ) -> None:
+     """List candidate artifacts and their review status."""
+     active_agent_root = resolve_agent_output_dir(agent_output_dir)
+     candidates = AgentRunner(agent_output_dir=active_agent_root).list_candidates()
+     if not candidates:
+         typer.echo("no_candidates=true")
+         return
+     for candidate in candidates:
+         path = resolve_candidates_dir(active_agent_root) / candidate["candidate_id"]
++        digest = candidate.get("manifest_digest") or candidate.get(
++            "observed_manifest_digest"
++        )
+         typer.echo(
+             " ".join(
+                 [
+                     f"candidate_id={candidate['candidate_id']}",
+-                    f"type={candidate['artifact_type']}",
+-                    f"status={candidate['status']}",
++                    f"type={candidate.get('artifact_type')}",
++                    f"status={candidate.get('status')}",
++                    f"integrity={candidate.get('integrity_state')}",
++                    f"digest={digest}",
+                     f"path={path}",
+                 ]
+             )
+         )
+ 
+ 
+ @agent_app.command("review")
+ def agent_review(
+     candidate_id: Annotated[
+         str,
+         typer.Option("--candidate-id", help="Candidate id from list-candidates."),
+     ],
+     decision: Annotated[
+         Literal["approve", "reject"],
+         typer.Option("--decision", help="Manual review decision."),
+     ],
+     note: Annotated[str, typer.Option("--note", help="Manual review note.")],
++    expected_manifest_digest: Annotated[
++        str,
++        typer.Option(
++            "--expected-digest",
++            help="Exact lowercase SHA-256 manifest digest from list-candidates.",
++        ),
++    ],
++    expected_status: Annotated[
++        Literal["pending"],
++        typer.Option(
++            "--expected-status",
++            help="Must be the literal status pending (CAS precondition).",
++        ),
++    ],
+     agent_output_dir: Annotated[
+         str | None,
+         typer.Option(
+             "--agent-output-dir",
+             help=(
+                 "Agent artifact output root. Defaults to QS_AGENT_OUTPUT_DIR or "
+                 "the repo-anchored canonical agent_run root."
+             ),
+         ),
+     ] = None,
+     json_output: Annotated[
+         bool,
+         typer.Option("--json", help="Append a machine-readable JSON summary line."),
+     ] = False,
+ ) -> None:
+-    """Record a manual review; approve only writes an approval lock."""
+-    record = AgentRunner(
+-        agent_output_dir=resolve_agent_output_dir(agent_output_dir),
+-    ).review(
+-        candidate_id=candidate_id,
+-        decision=decision,
+-        note=note,
++    """Record a digest-bound manual review; approve only writes a structured lock."""
++    from quant_system.agent.candidate_pool import (
++        CandidateIntegrityError,
++        CandidateMigrationRequiredError,
++        CandidateReviewStateStaleError,
++        CandidateStaleError,
+     )
++
++    try:
++        record = AgentRunner(
++            agent_output_dir=resolve_agent_output_dir(agent_output_dir),
++        ).review(
++            candidate_id=candidate_id,
++            decision=decision,
++            note=note,
++            expected_manifest_digest=expected_manifest_digest,
++            expected_status=expected_status,
++        )
++    except (
++        CandidateIntegrityError,
++        CandidateMigrationRequiredError,
++        CandidateStaleError,
++        CandidateReviewStateStaleError,
++        FileNotFoundError,
++    ) as exc:
++        typer.echo(f"review_refused reason={exc}")
++        raise typer.Exit(code=1) from exc
+     typer.echo(
+         " ".join(
+             [
+                 f"candidate_id={record.candidate_id}",
+                 f"decision={record.decision}",
+                 "registration=manual_required",
+             ]
+         )
+     )
+     if json_output:
+         _emit_json(
+             {
+                 "candidate_id": record.candidate_id,
+                 "decision": record.decision,
+                 "registration": "manual_required",
++                "manifest_digest": record.manifest_digest,
+             }
+         )
+ 
+ 
+ @agent_app.command("promote-candidate")
+ def agent_promote_candidate(
+     candidate_id: Annotated[
+         str,
+         typer.Option("--candidate-id", help="Approved candidate id from list-candidates."),
+     ],
+@@ -1896,23 +1934,21 @@ def agent_promote_candidate(
+     ] = "src/quant_system/factors/library/promoted",
+     tests_dir: Annotated[
+         str,
+         typer.Option("--tests-dir", help="Directory for generated factor test scaffolds."),
+     ] = "tests/factors",
+ ) -> None:
+     """Write the deterministic Gate-3 promotion diff; NEVER commits (D-20)."""
+     try:
+         result = promote_candidate(
+             candidate_id,
+-            candidates_dir=resolve_candidates_dir(
+-                resolve_agent_output_dir(agent_output_dir)
+-            ),
++            agent_output_dir=resolve_agent_output_dir(agent_output_dir),
+             library_dir=Path(library_dir),
+             tests_dir=Path(tests_dir),
+         )
+     except PromotionError as exc:
+         typer.echo(f"promotion_refused reason={exc}")
+         raise typer.Exit(code=1) from exc
+     typer.echo(f"factor_id={result.factor_id}")
+     typer.echo(f"module={result.module_path}")
+     typer.echo(f"init={result.init_path}")
+     typer.echo(f"test={result.test_path}")
+diff --git a/src/quant_system/factors/registry.py b/src/quant_system/factors/registry.py
+index ab5dece..36f5d9a 100644
+--- a/src/quant_system/factors/registry.py
++++ b/src/quant_system/factors/registry.py
+@@ -62,21 +62,21 @@ class FactorRegistry:
+         return factor_cls(**kwargs)
+ 
+     def create_many(self, factor_ids: Iterable[str], **kwargs) -> list[BaseFactor]:
+         return [self.create(factor_id, **kwargs) for factor_id in factor_ids]
+ 
+ 
+ def build_factor_registry(
+     *,
+     include_promoted: bool = True,
+     include_approved_candidates: bool = False,
+-    candidates_dir: str | Path | None = None,
++    agent_output_dir: str | Path | None = None,
+ ) -> FactorRegistry:
+     """Single construction point for the factor registry.
+ 
+     Examples are always registered. Promoted, code-reviewed factors
+     (``library.promoted.PROMOTED_FACTORS``) are registered by default. Approved
+     agent candidates are loaded only when ``include_approved_candidates`` is set
+     — that path ``exec``'s candidate source and is reserved for one-shot research
+     (``run-config --include-approved-candidates``), NEVER the resident trading
+     path (D-20 resident-path purity).
+     """
+@@ -85,26 +85,28 @@ def build_factor_registry(
+         registry.register(factor_cls, origin="builtin")
+ 
+     if include_promoted:
+         # Import the package (not the tuple by value) so promotions and test
+         # monkeypatches of PROMOTED_FACTORS are observed at call time.
+         from quant_system.factors.library import promoted
+ 
+         for factor_cls in promoted.PROMOTED_FACTORS:
+             registry.register(factor_cls, origin="promoted")
+ 
+-    if include_approved_candidates and candidates_dir is not None:
++    if include_approved_candidates and agent_output_dir is not None:
+         # Reuse the single approved-candidate loader (SafetyGate + AST check).
+         # Lazy import avoids a circular import: promotion imports FactorRegistry.
+         from quant_system.agent.promotion import load_approved_factor_candidates
+ 
+-        loaded = load_approved_factor_candidates(registry, candidates_dir=candidates_dir)
++        loaded = load_approved_factor_candidates(
++            registry, agent_output_dir=agent_output_dir
++        )
+         # Origin is tracked from which pass registered the id, not by re-parsing:
+         # the loader reports exactly the ids it added, so retag them as candidate.
+         for factor_id in loaded:
+             registry.set_origin(factor_id, "candidate")
+ 
+     return registry
+ 
+ 
+ def build_default_factor_registry() -> FactorRegistry:
+     """Thin alias of :func:`build_factor_registry` (examples + promoted)."""
+diff --git a/tests/test_agent_phase7.py b/tests/test_agent_phase7.py
+index f73e7b9..984f8a6 100644
+--- a/tests/test_agent_phase7.py
++++ b/tests/test_agent_phase7.py
+@@ -1,17 +1,21 @@
+ import json
+ import os
+ from pathlib import Path
+ 
++import pytest
+ from typer.testing import CliRunner
+ 
+-from quant_system.agent.candidate_pool import CandidatePool
++from quant_system.agent.candidate_pool import (
++    CandidatePool,
++    CandidateReviewStateStaleError,
++)
+ from quant_system.agent.llm.stub import StubLLMClient
+ from quant_system.agent.runner import AgentRunner
+ from quant_system.agent.safety import SafetyGate
+ from quant_system.cli import app
+ from quant_system.experiments.models import ExperimentConfig
+ from quant_system.factors.registry import build_default_factor_registry
+ 
+ runner = CliRunner()
+ 
+ 
+@@ -30,31 +34,31 @@ class MaliciousLLM:
+ def test_safety_gate_default_denies_promotion(tmp_path) -> None:
+     pool = CandidatePool(tmp_path)
+     artifact = pool.write_candidate(
+         task_id="task-001",
+         goal="candidate factor",
+         artifact_type="factor",
+         filename="factor.py.candidate",
+         content="class CandidateFactor:\n    pass\n",
+     )
+ 
+-    gate = SafetyGate(pool.candidates_dir)
++    gate = SafetyGate(tmp_path)
+ 
+     assert gate.allow_promotion(artifact.candidate_id) is False
+ 
+ 
+ def test_safety_gate_rejects_path_traversal_candidate_id(tmp_path) -> None:
+     outside_dir = Path(tmp_path, "agent", "escape")
+     outside_dir.mkdir(parents=True)
+     (outside_dir / "approved.lock").write_text("not a candidate", encoding="utf-8")
+ 
+-    gate = SafetyGate(Path(tmp_path, "agent", "candidates"))
++    gate = SafetyGate(tmp_path)
+ 
+     assert gate.allow_promotion("../escape") is False
+ 
+ 
+ def test_audit_log_records_all_steps(tmp_path) -> None:
+     result = AgentRunner(agent_output_dir=tmp_path, llm=StubLLMClient()).propose_factor(
+         goal="low-vol momentum",
+         universe=["SPY", "QQQ"],
+     )
+ 
+@@ -106,66 +110,90 @@ def test_review_approve_creates_lock_only(tmp_path) -> None:
+             "propose-factor",
+             "--goal",
+             "low-vol momentum",
+             "--universe",
+             "SPY,QQQ",
+             "--agent-output-dir",
+             str(tmp_path),
+         ],
+     )
+     assert proposal.exit_code == 0
+-    candidate_dirs = list(Path(tmp_path, "agent", "candidates").iterdir())
++    candidate_dirs = [
++        p
++        for p in Path(tmp_path, "agent", "candidates").iterdir()
++        if p.is_dir() and not p.name.startswith(".")
++    ]
+     assert len(candidate_dirs) == 1
+     candidate_id = candidate_dirs[0].name
++    digest = CandidatePool(tmp_path).get(candidate_id).manifest_digest
+ 
+     review = runner.invoke(
+         app,
+         [
+             "agent",
+             "review",
+             "--candidate-id",
+             candidate_id,
+             "--decision",
+             "approve",
+             "--note",
+             "manual review passed",
++            "--expected-digest",
++            digest,
++            "--expected-status",
++            "pending",
+             "--agent-output-dir",
+             str(tmp_path),
+         ],
+     )
+ 
+     assert review.exit_code == 0
+     assert Path(tmp_path, "agent", "candidates", candidate_id, "approved.lock").exists()
+     assert candidate_id not in build_default_factor_registry().factor_ids()
+ 
+ 
+-def test_review_rejection_revokes_prior_approval(tmp_path) -> None:
++def test_review_final_decision_is_immutable(tmp_path) -> None:
+     pool = CandidatePool(tmp_path)
+     artifact = pool.write_candidate(
+         task_id="task-approve-reject",
+         goal="candidate factor",
+         artifact_type="factor",
+         filename="factor.py.candidate",
+         content="class CandidateFactor:\n    pass\n",
+     )
+     candidate_dir = pool.candidates_dir / artifact.candidate_id
+-    gate = SafetyGate(pool.candidates_dir)
+-
+-    pool.review(candidate_id=artifact.candidate_id, decision="approve", note="looks safe")
++    gate = SafetyGate(tmp_path)
++    digest = artifact.manifest_digest or ""
++
++    pool.review(
++        candidate_id=artifact.candidate_id,
++        decision="approve",
++        note="looks safe",
++        expected_manifest_digest=digest,
++        expected_status="pending",
++    )
+     assert gate.allow_promotion(artifact.candidate_id) is True
+-
+-    pool.review(candidate_id=artifact.candidate_id, decision="reject", note="revoked")
+-
+-    assert not (candidate_dir / "approved.lock").exists()
+-    assert (candidate_dir / "rejected.lock").exists()
+-    assert gate.allow_promotion(artifact.candidate_id) is False
+-    assert pool.list_candidates()[0]["status"] == "rejected"
++    approved_bytes = (candidate_dir / "approved.lock").read_bytes()
++
++    with pytest.raises(CandidateReviewStateStaleError):
++        pool.review(
++            candidate_id=artifact.candidate_id,
++            decision="reject",
++            note="revoked",
++            expected_manifest_digest=digest,
++            expected_status="pending",
++        )
++
++    assert (candidate_dir / "approved.lock").read_bytes() == approved_bytes
++    assert not (candidate_dir / "rejected.lock").exists()
++    assert gate.allow_promotion(artifact.candidate_id) is True
++    assert pool.list_for_read()[0].status == "approved"
+ 
+ 
+ def test_stub_llm_is_deterministic() -> None:
+     client = StubLLMClient()
+ 
+     first = client.generate(
+         "propose factor",
+         system="research assistant",
+         max_tokens=512,
+         temperature=0.0,
+diff --git a/tests/test_agent_promote.py b/tests/test_agent_promote.py
+index 9a0f908..f76b6fe 100644
+--- a/tests/test_agent_promote.py
++++ b/tests/test_agent_promote.py
+@@ -1,19 +1,24 @@
+ from __future__ import annotations
+ 
+ import ast
++import json
+ from pathlib import Path
+ 
+ import pytest
+ from typer.testing import CliRunner
+ 
+ import quant_system.agent.promote as promote_module
++from quant_system.agent.candidate_manifest import (
++    build_candidate_manifest,
++    canonical_json_bytes,
++)
+ from quant_system.agent.promote import PromotionError, promote_candidate
+ from quant_system.cli import app
+ 
+ runner = CliRunner()
+ 
+ _FACTOR_SRC = '''
+ from quant_system.factors.base import BaseFactor
+ 
+ 
+ class WiringTestFactor(BaseFactor):
+@@ -86,50 +91,90 @@ _COLLIDING_ID_SRC = _FACTOR_SRC.replace(
+ ).replace("WiringTestFactor", "CollidingFactor")
+ 
+ # A candidate whose factor_id starts with an underscore. `_regenerate_init`
+ # skips `_*.py` modules, so such a factor would be written but silently never
+ # registered — reject it up front instead.
+ _UNDERSCORE_ID_SRC = _FACTOR_SRC.replace(
+     'factor_id = "wiring_test_factor"', 'factor_id = "_hidden_factor"'
+ ).replace("WiringTestFactor", "HiddenFactor")
+ 
+ 
+-def _write_candidate(root: Path, candidate_id: str, source: str, *, approved: bool = True) -> None:
+-    cdir = root / candidate_id
+-    cdir.mkdir(parents=True)
++def _write_candidate(root: Path, candidate_id: str, source: str, *, approved: bool = True) -> str:
++    """Write verified candidate. root may be agent root or candidates dir.
++
++    If root already ends with agent/candidates, write there; else use agent root layout.
++    """
++    root = Path(root)
++    if root.name == "candidates" and root.parent.name == "agent":
++        cdir = root / candidate_id
++    else:
++        cdir = root / "agent" / "candidates" / candidate_id
++    cdir.mkdir(parents=True, exist_ok=True)
++    metadata = {
++        "candidate_id": candidate_id,
++        "task_id": "task",
++        "artifact_type": "factor",
++        "goal": "goal",
++        "universe": ["SPY"],
++        "status": "pending",
++        "created_at": "2026-01-01T00:00:00Z",
++        "updated_at": "2026-01-01T00:00:00Z",
++        "files": ["factor.py.candidate"],
++        "safety": {
++            "auto_promotion": False,
++            "requires_human_review": True,
++            "review_status": "pending",
++        },
++    }
++    (cdir / "metadata.json").write_text(
++        json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8"
++    )
+     (cdir / "factor.py.candidate").write_text(source, encoding="utf-8")
+-    (cdir / "metadata.json").write_text("{}", encoding="utf-8")
++    manifest, digest, _ = build_candidate_manifest(cdir)
++    (cdir / "manifest.v1.json").write_bytes(
++        canonical_json_bytes(manifest.model_dump(mode="json"))
++    )
+     if approved:
+-        (cdir / "approved.lock").write_text("{}", encoding="utf-8")
++        lock = {
++            "schema_version": "1.0",
++            "candidate_id": candidate_id,
++            "decision": "approve",
++            "manifest_digest": digest,
++            "note": "test approval",
++            "reviewer": "manual",
++            "created_at": "2026-01-01T00:00:00Z",
++        }
++        (cdir / "approved.lock").write_bytes(canonical_json_bytes(lock))
++    return digest
+ 
+ 
+ @pytest.fixture()
+ def dirs(tmp_path: Path) -> dict[str, Path]:
+     return {
+-        "candidates": tmp_path / "candidates",
++        "agent": tmp_path / "agent-output",
+         "library": tmp_path / "library" / "promoted",
+         "tests": tmp_path / "tests" / "factors",
+     }
+ 
+ 
+ def _promote(candidate_id: str, dirs: dict[str, Path], **kwargs):
+     return promote_candidate(
+         candidate_id,
+-        candidates_dir=dirs["candidates"],
++        agent_output_dir=dirs["agent"],
+         library_dir=dirs["library"],
+         tests_dir=dirs["tests"],
+         **kwargs,
+     )
+ 
+ 
+ def test_happy_path_writes_module_init_and_test_scaffold(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-ok", _FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-ok", _FACTOR_SRC)
+ 
+     result = _promote("cand-ok", dirs, promotion_date="2026-01-02")
+ 
+     assert result.factor_id == "wiring_test_factor"
+     assert result.module_path == dirs["library"] / "wiring_test_factor.py"
+     assert result.init_path == dirs["library"] / "__init__.py"
+     assert result.test_path == dirs["tests"] / "test_wiring_test_factor.py"
+ 
+     module_content = result.module_path.read_text(encoding="utf-8")
+     # Provenance header, then the candidate source verbatim.
+@@ -150,195 +195,222 @@ def test_happy_path_writes_module_init_and_test_scaffold(dirs) -> None:
+     test_content = result.test_path.read_text(encoding="utf-8")
+     assert (
+         "from quant_system.factors.library.promoted.wiring_test_factor import WiringTestFactor"
+     ) in test_content
+     assert 'metadata.factor_id == "wiring_test_factor"' in test_content
+     assert "compute" in test_content
+     ast.parse(test_content)
+ 
+ 
+ def test_init_regeneration_is_sorted_across_promotions(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-w", _FACTOR_SRC)
+-    _write_candidate(dirs["candidates"], "cand-a", _SECOND_FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-w", _FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-a", _SECOND_FACTOR_SRC)
+ 
+     _promote("cand-w", dirs)
+     result = _promote("cand-a", dirs)
+ 
+     init_content = result.init_path.read_text(encoding="utf-8")
+     alpha_import = init_content.index("promoted.alpha_scaffold_factor import")
+     wiring_import = init_content.index("promoted.wiring_test_factor import")
+     assert alpha_import < wiring_import
+     assert init_content.index("alpha_scaffold_factor_factor,") < init_content.index(
+         "wiring_test_factor_factor,"
+     )
+     ast.parse(init_content)
+ 
+ 
+ def test_unapproved_candidate_refused_and_nothing_written(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-pending", _FACTOR_SRC, approved=False)
++    _write_candidate(dirs["agent"], "cand-pending", _FACTOR_SRC, approved=False)
+ 
+     with pytest.raises(PromotionError, match="approv"):
+         _promote("cand-pending", dirs)
+     assert not dirs["library"].exists() or not list(dirs["library"].iterdir())
+     assert not dirs["tests"].exists() or not list(dirs["tests"].iterdir())
+ 
+ 
+ def test_rejected_lock_refuses_even_with_approved_lock(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-rejected", _FACTOR_SRC, approved=True)
+-    (dirs["candidates"] / "cand-rejected" / "rejected.lock").write_text("{}", encoding="utf-8")
++    _write_candidate(dirs["agent"], "cand-rejected", _FACTOR_SRC, approved=True)
++    cdir = dirs["agent"] / "agent" / "candidates" / "cand-rejected"
++    # Conflicting controls force legacy_unbound and never authorize.
++    (cdir / "rejected.lock").write_text("{}", encoding="utf-8")
+ 
+     with pytest.raises(PromotionError):
+         _promote("cand-rejected", dirs)
+ 
+ 
+ def test_missing_candidate_source_refuses(dirs) -> None:
+-    cdir = dirs["candidates"] / "cand-empty"
++    # Verified metadata/manifest without the factor artifact.
++    cdir = dirs["agent"] / "agent" / "candidates" / "cand-empty"
+     cdir.mkdir(parents=True)
+-    (cdir / "approved.lock").write_text("{}", encoding="utf-8")
+-
+-    with pytest.raises(PromotionError, match="factor.py.candidate"):
++    metadata = {
++        "candidate_id": "cand-empty",
++        "task_id": "task",
++        "artifact_type": "factor",
++        "goal": "goal",
++        "universe": ["SPY"],
++        "status": "pending",
++        "created_at": "2026-01-01T00:00:00Z",
++        "updated_at": "2026-01-01T00:00:00Z",
++        "files": ["factor.py.candidate"],
++        "safety": {
++            "auto_promotion": False,
++            "requires_human_review": True,
++            "review_status": "pending",
++        },
++    }
++    (cdir / "metadata.json").write_text(
++        json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8"
++    )
++    (cdir / "factor.py.candidate").write_text("# placeholder\n", encoding="utf-8")
++    manifest, digest, _ = build_candidate_manifest(cdir)
++    (cdir / "manifest.v1.json").write_bytes(
++        canonical_json_bytes(manifest.model_dump(mode="json"))
++    )
++    (cdir / "factor.py.candidate").unlink()
++    # Without artifact, verification fails closed — promotion refuses.
++    with pytest.raises(PromotionError):
+         _promote("cand-empty", dirs)
+ 
+ 
+ def test_ast_violation_refuses_and_nothing_written(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-evil", _EVIL_SRC)
++    _write_candidate(dirs["agent"], "cand-evil", _EVIL_SRC)
+ 
+     with pytest.raises(PromotionError, match="cand-evil"):
+         _promote("cand-evil", dirs)
+     assert not dirs["library"].exists() or not list(dirs["library"].iterdir())
+ 
+ 
+ def test_zero_factor_classes_refuses(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-none", _NO_CLASS_SRC)
++    _write_candidate(dirs["agent"], "cand-none", _NO_CLASS_SRC)
+ 
+     with pytest.raises(PromotionError, match="exactly one"):
+         _promote("cand-none", dirs)
+ 
+ 
+ def test_multiple_factor_classes_refuses(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-two", _TWO_CLASSES_SRC)
++    _write_candidate(dirs["agent"], "cand-two", _TWO_CLASSES_SRC)
+ 
+     with pytest.raises(PromotionError, match="exactly one"):
+         _promote("cand-two", dirs)
+ 
+ 
+ def test_non_string_factor_id_refuses(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-badid", _NON_STRING_ID_SRC)
++    _write_candidate(dirs["agent"], "cand-badid", _NON_STRING_ID_SRC)
+ 
+     with pytest.raises(PromotionError, match="factor_id"):
+         _promote("cand-badid", dirs)
+ 
+ 
+ def test_registry_collision_refuses_and_nothing_written(dirs) -> None:
+     # factor_id "momentum" is a builtin example. Promoting it would make the
+     # shared build_factor_registry() raise at every call site once committed
+     # (review finding F4). Refuse before any write.
+-    _write_candidate(dirs["candidates"], "cand-collide", _COLLIDING_ID_SRC)
++    _write_candidate(dirs["agent"], "cand-collide", _COLLIDING_ID_SRC)
+ 
+     with pytest.raises(PromotionError, match="already exists in the registry"):
+         _promote("cand-collide", dirs)
+     assert not dirs["library"].exists() or not list(dirs["library"].iterdir())
+     assert not dirs["tests"].exists() or not list(dirs["tests"].iterdir())
+ 
+ 
+ def test_leading_underscore_factor_id_refuses(dirs) -> None:
+     # `_regenerate_init` skips `_*.py`, so an underscore factor_id would be
+     # written but never registered (review finding F5). Reject it.
+-    _write_candidate(dirs["candidates"], "cand-underscore", _UNDERSCORE_ID_SRC)
++    _write_candidate(dirs["agent"], "cand-underscore", _UNDERSCORE_ID_SRC)
+ 
+     with pytest.raises(PromotionError, match="factor_id"):
+         _promote("cand-underscore", dirs)
+     assert not dirs["library"].exists() or not list(dirs["library"].iterdir())
+ 
+ 
+ def test_python_keyword_factor_id_refuses(dirs) -> None:
+     # factor_id "import" passes the [A-Za-z][A-Za-z0-9_]* regex but is a Python
+     # keyword; module filename import.py yields a SyntaxError in the regenerated
+     # __init__.py that bricks build_factor_registry() platform-wide (adversarial
+     # re-review MAJOR). Reject keywords in the same gate.
+     keyword_src = _FACTOR_SRC.replace(
+         'factor_id = "wiring_test_factor"', 'factor_id = "import"'
+     ).replace("WiringTestFactor", "KeywordFactor")
+-    _write_candidate(dirs["candidates"], "cand-keyword", keyword_src)
++    _write_candidate(dirs["agent"], "cand-keyword", keyword_src)
+ 
+     with pytest.raises(PromotionError, match="keyword"):
+         _promote("cand-keyword", dirs)
+     assert not dirs["library"].exists() or not list(dirs["library"].iterdir())
+ 
+ 
+ def test_alpha101_collision_refuses(dirs) -> None:
+     # F4's default registry omits alpha101, so a candidate id colliding with an
+     # alpha101 factor slipped through and could brick the register-library path
+     # (adversarial re-review MAJOR). The reserved-id set must include alpha101.
+     from quant_system.factors.library.alpha101 import ALPHA101_FACTORS
+ 
+     an_alpha_id = ALPHA101_FACTORS[0]().factor_id
+     src = _FACTOR_SRC.replace(
+         'factor_id = "wiring_test_factor"', f'factor_id = "{an_alpha_id}"'
+     ).replace("WiringTestFactor", "CollidesAlphaFactor")
+-    _write_candidate(dirs["candidates"], "cand-alpha", src)
++    _write_candidate(dirs["agent"], "cand-alpha", src)
+ 
+     with pytest.raises(PromotionError, match="already exists in the registry"):
+         _promote("cand-alpha", dirs)
+     assert not dirs["library"].exists() or not list(dirs["library"].iterdir())
+ 
+ 
+ def test_init_write_is_atomic(dirs, monkeypatch) -> None:
+     # _regenerate_init must not truncate __init__.py in place: a concurrent cold
+     # import of the promoted package during the write window would read a 0-byte
+     # / partial file and crash build_factor_registry() platform-wide (adversarial
+     # re-review MAJOR). Prove the write goes through a rename, not truncate: the
+     # real __init__.py path is never observed at 0 bytes mid-write. We approximate
+     # by asserting no temp truncation — write once, then confirm the file parses.
+-    _write_candidate(dirs["candidates"], "cand-a", _FACTOR_SRC)
+-    _write_candidate(dirs["candidates"], "cand-b", _SECOND_FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-a", _FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-b", _SECOND_FACTOR_SRC)
+ 
+     _promote("cand-a", dirs)
+     init_path = dirs["library"] / "__init__.py"
+     inode_before = init_path.stat().st_ino
+ 
+     _promote("cand-b", dirs)
+     # An atomic rename swaps in a new inode; an in-place truncate keeps the inode.
+     assert init_path.stat().st_ino != inode_before
+     ast.parse(init_path.read_text(encoding="utf-8"))
+ 
+ 
+ def test_partial_failure_rolls_back_orphan_module(dirs, monkeypatch) -> None:
+     # If _regenerate_init raises after the module .py is written, the module must
+     # be rolled back so the working tree is left untouched (docstring contract)
+     # and a corrective re-run is not blocked with a misleading "already promoted"
+     # (adversarial re-review MINOR).
+-    _write_candidate(dirs["candidates"], "cand-ok", _FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-ok", _FACTOR_SRC)
+ 
+     def _boom(_library_dir):
+         raise RuntimeError("init regeneration failed")
+ 
+     monkeypatch.setattr(promote_module, "_regenerate_init", _boom)
+ 
+     with pytest.raises(RuntimeError, match="init regeneration failed"):
+         _promote("cand-ok", dirs)
+ 
+     # The half-written module must NOT persist; lock released; re-run unblocked.
+     assert not (dirs["library"] / "wiring_test_factor.py").exists()
+     assert not (dirs["library"] / ".promote.lock").exists()
+ 
+ 
+ def test_second_promotion_of_same_factor_refuses(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-ok", _FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-ok", _FACTOR_SRC)
+     _promote("cand-ok", dirs)
+ 
+     with pytest.raises(PromotionError, match="already exists"):
+         _promote("cand-ok", dirs)
+ 
+ 
+ def test_existing_target_module_refuses_before_any_write(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-ok", _FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-ok", _FACTOR_SRC)
+     dirs["library"].mkdir(parents=True)
+     (dirs["library"] / "wiring_test_factor.py").write_text(_FACTOR_SRC, encoding="utf-8")
+ 
+     with pytest.raises(PromotionError, match="already exists"):
+         _promote("cand-ok", dirs)
+     # Pre-existing module untouched, no init/test written.
+     assert (dirs["library"] / "wiring_test_factor.py").read_text(encoding="utf-8") == _FACTOR_SRC
+     assert not (dirs["library"] / "__init__.py").exists()
+     assert not dirs["tests"].exists() or not list(dirs["tests"].iterdir())
+ 
+@@ -415,59 +487,59 @@ def test_cli_promote_candidate_refusal_exits_nonzero(dirs, tmp_path: Path) -> No
+ 
+ # --- Concurrency: promotion lockfile (review findings F2 BLOCKER / F3 MAJOR) ---
+ # Two concurrent promotions of DIFFERENT factors could both pass the
+ # module-exists check and then interleave their `_regenerate_init` glob+rewrite,
+ # dropping one factor from PROMOTED_FACTORS (silent data loss). A single
+ # advisory lock (`.promote.lock` in library_dir) serializes the whole
+ # check -> write-module -> regenerate-init critical section.
+ 
+ 
+ def test_promotion_refuses_when_lock_present(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-ok", _FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-ok", _FACTOR_SRC)
+     dirs["library"].mkdir(parents=True)
+     (dirs["library"] / ".promote.lock").write_text("", encoding="utf-8")
+ 
+     with pytest.raises(PromotionError, match="in progress"):
+         _promote("cand-ok", dirs)
+ 
+     # Nothing written past the pre-existing lock; the held lock is left intact
+     # (this promotion did not own it, so it must not remove it).
+     assert (dirs["library"] / ".promote.lock").exists()
+     assert not (dirs["library"] / "wiring_test_factor.py").exists()
+     assert not (dirs["library"] / "__init__.py").exists()
+ 
+ 
+ def test_promotion_lock_released_on_success(dirs) -> None:
+-    _write_candidate(dirs["candidates"], "cand-ok", _FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-ok", _FACTOR_SRC)
+     _promote("cand-ok", dirs)
+     assert not (dirs["library"] / ".promote.lock").exists()
+ 
+ 
+ def test_promotion_lock_released_on_refusal(dirs) -> None:
+     # A refusal that happens after lock acquisition (target module already there)
+     # must still release the lock via the finally cleanup.
+-    _write_candidate(dirs["candidates"], "cand-ok", _FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-ok", _FACTOR_SRC)
+     dirs["library"].mkdir(parents=True)
+     (dirs["library"] / "wiring_test_factor.py").write_text(_FACTOR_SRC, encoding="utf-8")
+ 
+     with pytest.raises(PromotionError, match="already exists"):
+         _promote("cand-ok", dirs)
+     assert not (dirs["library"] / ".promote.lock").exists()
+ 
+ 
+ def test_promotion_serializes_write_and_init(dirs, monkeypatch) -> None:
+     # Deterministic proof of serialization without threads: while cand-a holds
+     # the lock across its write + _regenerate_init, a re-entrant promotion of
+     # cand-b must be refused ("in progress"). If the critical section were not
+     # locked, the re-entrant call would proceed and corrupt PROMOTED_FACTORS.
+-    _write_candidate(dirs["candidates"], "cand-a", _FACTOR_SRC)
+-    _write_candidate(dirs["candidates"], "cand-b", _SECOND_FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-a", _FACTOR_SRC)
++    _write_candidate(dirs["agent"], "cand-b", _SECOND_FACTOR_SRC)
+ 
+     real_regenerate = promote_module._regenerate_init
+     reentrant_error: dict[str, object] = {}
+ 
+     def _spy(library_dir):
+         # Called while cand-a's lock is held. A second promotion must bounce.
+         try:
+             _promote("cand-b", dirs)
+         except PromotionError as exc:
+             reentrant_error["exc"] = exc
+diff --git a/tests/test_agent_promotion.py b/tests/test_agent_promotion.py
+index 64edf64..e8ffd3c 100644
+--- a/tests/test_agent_promotion.py
++++ b/tests/test_agent_promotion.py
+@@ -1,162 +1,203 @@
+ from __future__ import annotations
+ 
++import json
++from pathlib import Path
++
+ import pytest
+ 
++from quant_system.agent.candidate_manifest import (
++    build_candidate_manifest,
++    canonical_json_bytes,
++)
+ from quant_system.agent.promotion import CandidateLoadError, load_approved_factor_candidates
+ from quant_system.factors.registry import build_default_factor_registry
+ 
+ _FACTOR_SRC = '''
+ from quant_system.factors.base import BaseFactor
+ 
+ 
+ class WiringTestFactor(BaseFactor):
+     factor_id = "wiring_test_factor"
+     factor_name = "Wiring Test Factor"
+     factor_version = "0.1.0-candidate"
+     default_lookback = 20
+     direction = "higher_is_better"
+     description = "test candidate"
+ 
+     def _compute_values(self, frame):
+         return frame["close"] * 0.0
+ '''
+ 
+ 
+-def _write_candidate(root, candidate_id, source, approved):
+-    cdir = root / candidate_id
+-    cdir.mkdir(parents=True)
++
++def _write_candidate(agent_root, candidate_id, source, approved):
++    """Write a verified candidate under agent_root/agent/candidates."""
++    cdir = Path(agent_root) / "agent" / "candidates" / candidate_id
++    cdir.mkdir(parents=True, exist_ok=True)
++    metadata = {
++        "candidate_id": candidate_id,
++        "task_id": "task",
++        "artifact_type": "factor",
++        "goal": "goal",
++        "universe": ["SPY"],
++        "status": "pending",
++        "created_at": "2026-01-01T00:00:00Z",
++        "updated_at": "2026-01-01T00:00:00Z",
++        "files": ["factor.py.candidate"],
++        "safety": {
++            "auto_promotion": False,
++            "requires_human_review": True,
++            "review_status": "pending",
++        },
++    }
++    (cdir / "metadata.json").write_text(
++        json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8"
++    )
+     (cdir / "factor.py.candidate").write_text(source, encoding="utf-8")
+-    (cdir / "metadata.json").write_text("{}", encoding="utf-8")
++    manifest, digest, _ = build_candidate_manifest(cdir)
++    (cdir / "manifest.v1.json").write_bytes(
++        canonical_json_bytes(manifest.model_dump(mode="json"))
++    )
+     if approved:
+-        (cdir / "approved.lock").write_text("{}", encoding="utf-8")
++        lock = {
++            "schema_version": "1.0",
++            "candidate_id": candidate_id,
++            "decision": "approve",
++            "manifest_digest": digest,
++            "note": "test approval",
++            "reviewer": "manual",
++            "created_at": "2026-01-01T00:00:00Z",
++        }
++        (cdir / "approved.lock").write_bytes(canonical_json_bytes(lock))
++    return digest
+ 
+ 
+ def test_loads_only_approved_candidates(tmp_path):
+     _write_candidate(tmp_path, "cand-approved", _FACTOR_SRC, approved=True)
+     _write_candidate(
+         tmp_path,
+         "cand-pending",
+         _FACTOR_SRC.replace("wiring_test_factor", "other_id"),
+         approved=False,
+     )
+     registry = build_default_factor_registry()
+-    loaded = load_approved_factor_candidates(registry, candidates_dir=tmp_path)
++    loaded = load_approved_factor_candidates(registry, agent_output_dir=tmp_path)
+     assert loaded == ["wiring_test_factor"]
+     assert registry.create("wiring_test_factor") is not None
+     with pytest.raises(KeyError):
+         registry.create("other_id")
+ 
+ 
+ def test_duplicate_registration_is_skipped_idempotently(tmp_path):
+     _write_candidate(tmp_path, "cand-a", _FACTOR_SRC, approved=True)
+     registry = build_default_factor_registry()
+-    assert load_approved_factor_candidates(registry, candidates_dir=tmp_path) == [
++    assert load_approved_factor_candidates(registry, agent_output_dir=tmp_path) == [
+         "wiring_test_factor"
+     ]
+-    assert load_approved_factor_candidates(registry, candidates_dir=tmp_path) == []
++    assert load_approved_factor_candidates(registry, agent_output_dir=tmp_path) == []
+ 
+ 
+ def test_forbidden_import_raises(tmp_path):
+     bad = "import subprocess\n" + _FACTOR_SRC
+     _write_candidate(tmp_path, "cand-bad", bad, approved=True)
+     registry = build_default_factor_registry()
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(registry, candidates_dir=tmp_path)
++        load_approved_factor_candidates(registry, agent_output_dir=tmp_path)
+ 
+ 
+ # --- Static-check robustness (adversarial review findings #1/#2/#4) ---
+ # The substring blocklist was trivially bypassed via importlib/__import__/eval
+ # and exec() ran in a {} namespace that CPython populates with full __builtins__.
+ # These tests pin the hardened behavior: an AST-based allowlist blocks ALL
+ # import/eval mechanisms regardless of obfuscation, and the exec namespace no
+ # longer exposes __import__ via builtins.
+ 
+ def _approved(tmp_path, cid, src):
+     _write_candidate(tmp_path, cid, src, approved=True)
+ 
+ 
+ def test_importlib_bypass_is_blocked(tmp_path):
+     bad = "import importlib\n" + _FACTOR_SRC
+     _approved(tmp_path, "cand-importlib", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_dunder_import_bypass_is_blocked(tmp_path):
+     # class-body __import__ at load time — no 'import' keyword at all
+     bad = _FACTOR_SRC.replace(
+         "    def _compute_values(self, frame):",
+         "    _proof = __import__('subprocess')\n    def _compute_values(self, frame):",
+     )
+     _approved(tmp_path, "cand-dunder", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_eval_exec_compile_bypass_is_blocked(tmp_path):
+     bad = _FACTOR_SRC.replace(
+         "    def _compute_values(self, frame):",
+         "    _x = eval('1+1')\n    def _compute_values(self, frame):",
+     )
+     _approved(tmp_path, "cand-eval", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_string_concat_import_is_blocked(tmp_path):
+     # whitespace obfuscation: double-space between import and module
+     bad = "import  subprocess\n" + _FACTOR_SRC
+     _approved(tmp_path, "cand-ws", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_builtins_access_is_blocked(tmp_path):
+     bad = _FACTOR_SRC.replace(
+         "    def _compute_values(self, frame):",
+         "    _b = __builtins__\n    def _compute_values(self, frame):",
+     )
+     _approved(tmp_path, "cand-builtins", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_legitimate_httpx_import_not_false_positive(tmp_path):
+     # finding #4: substring 'import http' matched 'import httpx'. AST import-name
+     # check must allow numpy/pandas/quant_system and reject only disallowed modules.
+     src = _FACTOR_SRC.replace(
+         "from quant_system.factors.base import BaseFactor",
+         "import numpy as np\nfrom quant_system.factors.base import BaseFactor",
+     )
+     _approved(tmp_path, "cand-numpy", src)
+     loaded = load_approved_factor_candidates(
+         build_default_factor_registry(),
+-        candidates_dir=tmp_path,
++        agent_output_dir=tmp_path,
+     )
+     assert loaded == ["wiring_test_factor"]
+ 
+ 
+ def test_disallowed_module_import_is_blocked(tmp_path):
+     # a non-allowlisted module (e.g. 'requests') is rejected even though it is
+     # a clean, non-obfuscated import statement.
+     bad = "import requests\n" + _FACTOR_SRC
+     _approved(tmp_path, "cand-requests", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_quant_system_reexport_import_is_blocked(tmp_path):
+     bad = "from quant_system.cli import os\n" + _FACTOR_SRC
+     _approved(tmp_path, "cand-reexport", bad)
+     with pytest.raises(CandidateLoadError, match="quant_system.cli"):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ # --- Dunder-gadget hardening (review finding F1 BLOCKER) ---
+ # The Name/Attribute-only denylist let `type(x).__getattribute__(x, "__class__")`
+ # — a dunder-METHOD call whose argument is a dunder STRING CONSTANT — walk to
+ # object.__subclasses__() and reach subprocess.Popen at promoted-module import
+ # time, defeating both the AST layer and the emptied-builtins exec layer. The
+ # hardened check rejects (a) any attribute whose name is a dunder except
+ # __init__, and (b) any string constant that names a dunder.
+ 
+@@ -164,93 +205,93 @@ def test_quant_system_reexport_import_is_blocked(tmp_path):
+ def test_dunder_getattribute_gadget_is_blocked(tmp_path):
+     # The exact confirmed bypass: dunder-method attribute call with a dunder
+     # string-constant argument. Neither node type tripped the old denylist.
+     bad = _FACTOR_SRC.replace(
+         "    def _compute_values(self, frame):",
+         '    _p = type(BaseFactor).__getattribute__(BaseFactor, "__class__")\n'
+         "    def _compute_values(self, frame):",
+     )
+     _approved(tmp_path, "cand-gadget", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_dunder_attribute_access_is_blocked(tmp_path):
+     # __globals__ was not in the original denylist; the generic dunder-attribute
+     # rule must reject it (and __code__, __closure__, etc.) without enumeration.
+     bad = _FACTOR_SRC.replace(
+         "    def _compute_values(self, frame):",
+         "    _g = (lambda: 0).__globals__\n    def _compute_values(self, frame):",
+     )
+     _approved(tmp_path, "cand-globals", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_dunder_string_constant_is_blocked(tmp_path):
+     # A bare dunder string constant is the raw material for getattr/gadget walks;
+     # reject it even when it is not (yet) passed anywhere interesting.
+     bad = _FACTOR_SRC.replace(
+         "    def _compute_values(self, frame):",
+         '    _name = "__subclasses__"\n    def _compute_values(self, frame):',
+     )
+     _approved(tmp_path, "cand-dunderstr", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_super_init_still_allowed(tmp_path):
+     # The __init__ exception must survive: a factor that chains its constructor
+     # via super().__init__(...) is legitimate and must still load.
+     src = _FACTOR_SRC.replace(
+         "    def _compute_values(self, frame):",
+         "    def __init__(self, *, lookback=None):\n"
+         "        super().__init__(lookback=lookback)\n"
+         "    def _compute_values(self, frame):",
+     )
+     _approved(tmp_path, "cand-superinit", src)
+     loaded = load_approved_factor_candidates(
+-        build_default_factor_registry(), candidates_dir=tmp_path
++        build_default_factor_registry(), agent_output_dir=tmp_path
+     )
+     assert loaded == ["wiring_test_factor"]
+ 
+ 
+ def test_attrgetter_string_indirection_is_blocked(tmp_path):
+     # operator.attrgetter turns a runtime-built string into an arbitrary
+     # attribute fetch, bridging string CONCATENATION (which dodges the
+     # dunder-constant rule) to a gadget attribute. operator is an allowed import
+     # root, so the attribute-fetch-by-name primitives themselves must be denied.
+     bad = _FACTOR_SRC.replace(
+         "from quant_system.factors.base import BaseFactor",
+         "import operator\nfrom quant_system.factors.base import BaseFactor",
+     ).replace(
+         "    def _compute_values(self, frame):",
+         '    _g = operator.attrgetter("__glob" + "als__")\n'
+         "    def _compute_values(self, frame):",
+     )
+     _approved(tmp_path, "cand-attrgetter", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_methodcaller_string_indirection_is_blocked(tmp_path):
+     bad = _FACTOR_SRC.replace(
+         "from quant_system.factors.base import BaseFactor",
+         "from operator import methodcaller\nfrom quant_system.factors.base import BaseFactor",
+     ).replace(
+         "    def _compute_values(self, frame):",
+         '    _m = methodcaller("__reduce" + "__")\n'
+         "    def _compute_values(self, frame):",
+     )
+     _approved(tmp_path, "cand-methodcaller", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ # --- Re-export RCE class (adversarial re-review: BLOCKER + MAJOR) ---
+ # numpy/pandas are allowed import roots but re-export os/subprocess as PLAIN
+ # (non-dunder) attributes, so `np.ctypeslib.os.system(...)` reached a shell at
+ # class-body eval time, and `pd.read_pickle(...)`/`pd.read_csv(...)` are
+ # arbitrary-code / arbitrary-file-read primitives — all through legitimate
+ # allowed roots. The AST check now rejects (a) any attribute-chain part that
+ # names a dangerous stdlib module and (b) deserialization / file-IO reader
+ # methods, so such an attack must look obviously weird for the human Gate-2.
+@@ -259,98 +300,98 @@ def test_methodcaller_string_indirection_is_blocked(tmp_path):
+ def test_numpy_os_reexport_chain_is_blocked(tmp_path):
+     bad = _FACTOR_SRC.replace(
+         "from quant_system.factors.base import BaseFactor",
+         "import numpy as np\nfrom quant_system.factors.base import BaseFactor",
+     ).replace(
+         "    def _compute_values(self, frame):",
+         '    _x = np.ctypeslib.os\n    def _compute_values(self, frame):',
+     )
+     _approved(tmp_path, "cand-npos", bad)
+     with pytest.raises(CandidateLoadError, match="os"):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_pandas_subprocess_reexport_chain_is_blocked(tmp_path):
+     bad = _FACTOR_SRC.replace(
+         "from quant_system.factors.base import BaseFactor",
+         "import pandas as pd\nfrom quant_system.factors.base import BaseFactor",
+     ).replace(
+         "    def _compute_values(self, frame):",
+         "    _x = pd.compat.os\n    def _compute_values(self, frame):",
+     )
+     _approved(tmp_path, "cand-pdos", bad)
+     with pytest.raises(CandidateLoadError):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_pandas_read_pickle_is_blocked(tmp_path):
+     # read_pickle is a pickle-deserialization RCE primitive; reject the reader
+     # method name regardless of the object it is called on.
+     bad = _FACTOR_SRC.replace(
+         "from quant_system.factors.base import BaseFactor",
+         "import pandas as pd\nfrom quant_system.factors.base import BaseFactor",
+     ).replace(
+         "    def _compute_values(self, frame):",
+         '    _x = pd.read_pickle("/etc/passwd")\n    def _compute_values(self, frame):',
+     )
+     _approved(tmp_path, "cand-readpickle", bad)
+     with pytest.raises(CandidateLoadError, match="read_pickle"):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_pandas_read_csv_is_blocked(tmp_path):
+     bad = _FACTOR_SRC.replace(
+         "from quant_system.factors.base import BaseFactor",
+         "import pandas as pd\nfrom quant_system.factors.base import BaseFactor",
+     ).replace(
+         "    def _compute_values(self, frame):",
+         '    _x = pd.read_csv("/etc/passwd")\n    def _compute_values(self, frame):',
+     )
+     _approved(tmp_path, "cand-readcsv", bad)
+     with pytest.raises(CandidateLoadError, match="read_csv"):
+-        load_approved_factor_candidates(build_default_factor_registry(), candidates_dir=tmp_path)
++        load_approved_factor_candidates(build_default_factor_registry(), agent_output_dir=tmp_path)
+ 
+ 
+ def test_legitimate_numpy_pandas_math_still_loads(tmp_path):
+     # Guard against over-blocking: ordinary factor math on numpy/pandas must
+     # still load. Uses the real allowed vocabulary (rolling/mean/pct_change).
+     src = _FACTOR_SRC.replace(
+         "from quant_system.factors.base import BaseFactor",
+         "import numpy as np\nimport pandas as pd\nfrom quant_system.factors.base import BaseFactor",
+     ).replace(
+         "        return frame[\"close\"] * 0.0",
+         (
+             "        return frame[\"close\"].pct_change()"
+             ".rolling(self.lookback).mean() * np.float64(1.0)"
+         ),
+     )
+     _approved(tmp_path, "cand-legitmath", src)
+     loaded = load_approved_factor_candidates(
+-        build_default_factor_registry(), candidates_dir=tmp_path
++        build_default_factor_registry(), agent_output_dir=tmp_path
+     )
+     assert loaded == ["wiring_test_factor"]
+ 
+ 
+ def test_missing_dir_returns_empty(tmp_path):
+     registry = build_default_factor_registry()
+-    assert load_approved_factor_candidates(registry, candidates_dir=tmp_path / "nope") == []
++    assert load_approved_factor_candidates(registry, agent_output_dir=tmp_path / "nope") == []
+ 
+ 
+ def test_run_experiment_accepts_candidate_factor_registry(tmp_path):
+     import json
+ 
+     from quant_system.experiments.config import load_experiment_config
+     from quant_system.experiments.runner import run_experiment
+ 
+     _write_candidate(tmp_path / "cands", "cand-a", _FACTOR_SRC, approved=True)
+     registry = build_default_factor_registry()
+-    load_approved_factor_candidates(registry, candidates_dir=tmp_path / "cands")
++    load_approved_factor_candidates(registry, agent_output_dir=tmp_path / "cands")
+ 
+     config_payload = {
+         "experiment_name": "candidate-e2e",
+         "symbols": ["SPY", "QQQ"],
+         "start": "2024-01-02",
+         "end": "2024-03-15",
+         "factor_blend": {
+             "factors": [{"factor_id": "wiring_test_factor"}, {"factor_id": "momentum"}]
+         },
+     }
+@@ -373,21 +414,21 @@ def test_run_experiment_threads_candidate_registry_through_walk_forward(tmp_path
+     # registry, build_default_factor_registry() raises KeyError for it and the
+     # experiment crashes. A green run here proves the threading is intact on the
+     # walk-forward branch (not just the plain backtest branch).
+     import json
+ 
+     from quant_system.experiments.config import load_experiment_config
+     from quant_system.experiments.runner import run_experiment
+ 
+     _write_candidate(tmp_path / "cands", "cand-a", _FACTOR_SRC, approved=True)
+     registry = build_default_factor_registry()
+-    load_approved_factor_candidates(registry, candidates_dir=tmp_path / "cands")
++    load_approved_factor_candidates(registry, agent_output_dir=tmp_path / "cands")
+ 
+     config_payload = {
+         "experiment_name": "candidate-walkforward",
+         "symbols": ["SPY", "QQQ"],
+         "start": "2024-01-02",
+         "end": "2024-06-15",
+         "factor_blend": {
+             "factors": [{"factor_id": "wiring_test_factor"}, {"factor_id": "momentum"}]
+         },
+         "walk_forward": {"enabled": True, "train_bars": 40, "validation_bars": 15, "step_bars": 15},
+diff --git a/tests/test_api_agent.py b/tests/test_api_agent.py
+index c21e9f9..22aee4e 100644
+--- a/tests/test_api_agent.py
++++ b/tests/test_api_agent.py
+@@ -67,55 +67,203 @@ def test_agent_candidate_list_detail_and_review_do_not_import_source(tmp_path) -
+         task_id="task-001",
+         goal="malicious candidate",
+         artifact_type="factor",
+         filename="factor.py.candidate",
+         content='import os\nos.system("echo should-not-run")\n',
+     )
+     before_modules = set(sys.modules)
+ 
+     list_response = client.get("/api/agent/candidates", params={"status": "pending"})
+     assert list_response.status_code == 200
+-    assert artifact.candidate_id in {
+-        item["candidate_id"] for item in list_response.json()["candidates"]
+-    }
++    items = list_response.json()["candidates"]
++    assert artifact.candidate_id in {item["candidate_id"] for item in items}
++    listed = next(item for item in items if item["candidate_id"] == artifact.candidate_id)
++    assert listed["integrity_state"] == "verified"
++    assert listed["manifest_digest"] == artifact.manifest_digest
+ 
+     detail_response = client.get(f"/api/agent/candidates/{artifact.candidate_id}")
+     assert detail_response.status_code == 200
+     detail = detail_response.json()
+     assert 'os.system("echo should-not-run")' in detail["source_preview"]
++    assert detail["manifest_digest"] == artifact.manifest_digest
+     assert set(sys.modules) == before_modules
+ 
+     review_response = client.post(
+         f"/api/agent/candidates/{artifact.candidate_id}/review",
+-        json={"decision": "approve", "note": "manual review only"},
++        json={
++            "decision": "approve",
++            "note": "manual review only",
++            "expected_manifest_digest": artifact.manifest_digest,
++            "expected_status": "pending",
++        },
+     )
+     assert review_response.status_code == 200
+     assert Path(agent, "agent", "candidates", artifact.candidate_id, "approved.lock").exists()
+     assert set(sys.modules) == before_modules
+ 
+ 
++def test_agent_review_missing_expected_status_and_stale_second_decision(tmp_path) -> None:
++    agent, client = _agent_app(tmp_path)
++    artifact = CandidatePool(agent).write_candidate(
++        task_id="task-cas",
++        goal="cas",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# cas\n",
++    )
++    # Missing expected_manifest_digest is validation error.
++    missing_digest = client.post(
++        f"/api/agent/candidates/{artifact.candidate_id}/review",
++        json={
++            "decision": "approve",
++            "note": "no digest",
++            "expected_status": "pending",
++        },
++    )
++    assert missing_digest.status_code == 422
++
++    # Missing expected_status is validation error (no default to pending).
++    missing_status = client.post(
++        f"/api/agent/candidates/{artifact.candidate_id}/review",
++        json={
++            "decision": "approve",
++            "note": "no status",
++            "expected_manifest_digest": artifact.manifest_digest,
++        },
++    )
++    assert missing_status.status_code == 422
++
++    first = client.post(
++        f"/api/agent/candidates/{artifact.candidate_id}/review",
++        json={
++            "decision": "approve",
++            "note": "first",
++            "expected_manifest_digest": artifact.manifest_digest,
++            "expected_status": "pending",
++        },
++    )
++    assert first.status_code == 200
++    second = client.post(
++        f"/api/agent/candidates/{artifact.candidate_id}/review",
++        json={
++            "decision": "reject",
++            "note": "second",
++            "expected_manifest_digest": artifact.manifest_digest,
++            "expected_status": "pending",
++        },
++    )
++    assert second.status_code == 409
++    assert second.json()["detail"]["code"] == "review_state_stale"
++
++
++def test_agent_review_stale_digest_is_409(tmp_path) -> None:
++    agent, client = _agent_app(tmp_path)
++    artifact = CandidatePool(agent).write_candidate(
++        task_id="task-stale",
++        goal="stale",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# stale\n",
++    )
++    response = client.post(
++        f"/api/agent/candidates/{artifact.candidate_id}/review",
++        json={
++            "decision": "approve",
++            "note": "wrong digest",
++            "expected_manifest_digest": "0" * 64,
++            "expected_status": "pending",
++        },
++    )
++    assert response.status_code == 409
++    assert response.json()["detail"]["code"] == "stale_digest"
++
++
++def test_agent_list_isolates_corrupt_and_migration_required(tmp_path) -> None:
++    agent, client = _agent_app(tmp_path)
++    pool = CandidatePool(agent)
++    good = pool.write_candidate(
++        task_id="task-good",
++        goal="good",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# good\n",
++    )
++    legacy_dir = pool.candidates_dir / "legacy-pending"
++    legacy_dir.mkdir(parents=True)
++    import json
++
++    (legacy_dir / "metadata.json").write_text(
++        json.dumps(
++            {
++                "candidate_id": "legacy-pending",
++                "task_id": "t",
++                "artifact_type": "factor",
++                "goal": "legacy",
++                "universe": ["SPY"],
++                "status": "pending",
++                "created_at": "2026-01-01T00:00:00Z",
++                "updated_at": "2026-01-01T00:00:00Z",
++                "files": ["factor.py.candidate"],
++                "safety": {
++                    "auto_promotion": False,
++                    "requires_human_review": True,
++                    "review_status": "pending",
++                },
++            },
++            indent=2,
++            sort_keys=True,
++        ),
++        encoding="utf-8",
++    )
++    (legacy_dir / "factor.py.candidate").write_text("# legacy\n", encoding="utf-8")
++    broken = pool.candidates_dir / "broken"
++    broken.mkdir()
++    (broken / "metadata.json").write_text("{not-json", encoding="utf-8")
++
++    payload = client.get("/api/agent/candidates").json()["candidates"]
++    by_id = {item["candidate_id"]: item for item in payload}
++    assert by_id[good.candidate_id]["integrity_state"] == "verified"
++    assert by_id["legacy-pending"]["integrity_state"] == "migration_required"
++    assert by_id["legacy-pending"]["manifest_digest"] is None
++    assert by_id["broken"]["integrity_state"] == "corrupt"
++    assert by_id["broken"]["status"] is None
++
++    mig = client.post(
++        "/api/agent/candidates/legacy-pending/review",
++        json={
++            "decision": "approve",
++            "note": "migrate?",
++            "expected_manifest_digest": by_id["legacy-pending"]["observed_manifest_digest"],
++            "expected_status": "pending",
++        },
++    )
++    assert mig.status_code == 409
++    assert mig.json()["detail"]["code"] == "migration_required"
++
++
+ def test_agent_tasks_propose_factor(tmp_path) -> None:
+     _, client = _agent_app(tmp_path)
+ 
+     response = client.post(
+         "/api/agent/tasks",
+         json={
+             "task_type": "propose-factor",
+             "goal": "low-vol momentum",
+             "universe": ["SPY", "QQQ"],
+         },
+     )
+ 
+     assert response.status_code == 200
+     payload = response.json()
+     assert payload["candidate_id"]
+     assert payload["metadata"]["safety"]["auto_promotion"] is False
++    assert payload["manifest_digest"]
+ 
+ 
+ def test_agent_task_rejects_unknown_type(tmp_path) -> None:
+     _, client = _agent_app(tmp_path)
+ 
+     response = client.post("/api/agent/tasks", json={"task_type": "submit-order"})
+ 
+     assert response.status_code == 422
+     assert response.json()["safety"]["live_trading_enabled"] is False
+ 
+@@ -127,21 +275,26 @@ def test_agent_candidate_detail_rejects_path_traversal(tmp_path) -> None:
+ 
+     assert response.status_code == 404
+     assert response.json()["safety"]["dry_run"] is True
+ 
+ 
+ def test_agent_candidate_review_404_uses_standard_detail(tmp_path) -> None:
+     _, client = _agent_app(tmp_path)
+ 
+     response = client.post(
+         "/api/agent/candidates/missing-candidate/review",
+-        json={"decision": "reject", "note": "not found"},
++        json={
++            "decision": "reject",
++            "note": "not found",
++            "expected_manifest_digest": "0" * 64,
++            "expected_status": "pending",
++        },
+     )
+ 
+     assert response.status_code == 404
+     detail = response.json()["detail"]
+     assert detail["code"] == "not_found"
+     assert detail["resource"] == "agent_candidate"
+     assert detail["id"] == "missing-candidate"
+ 
+ 
+ def test_agent_candidates_list_returns_latest_first(tmp_path) -> None:
+diff --git a/tests/test_candidate_repository.py b/tests/test_candidate_repository.py
+new file mode 100644
+index 0000000..07fc272
+--- /dev/null
++++ b/tests/test_candidate_repository.py
+@@ -0,0 +1,600 @@
++from __future__ import annotations
++
++import json
++import os
++import threading
++import time
++from pathlib import Path
++
++import pytest
++from typer.testing import CliRunner
++
++from quant_system.agent.candidate_fs import locked_candidates_root
++from quant_system.agent.candidate_pool import (
++    CandidateConflictError,
++    CandidateIntegrityError,
++    CandidateMigrationRequiredError,
++    CandidatePool,
++    CandidateReviewStateStaleError,
++    CandidateStaleError,
++)
++from quant_system.agent.safety import SafetyGate
++from quant_system.cli import app
++
++runner = CliRunner()
++
++
++def _tree_fingerprint(root: Path) -> list[tuple[str, int, bytes | None]]:
++    if not root.exists():
++        return []
++    rows: list[tuple[str, int, bytes | None]] = []
++    for path in sorted(root.rglob("*")):
++        rel = str(path.relative_to(root))
++        st = path.lstat()
++        payload = None
++        if path.is_file() and not path.is_symlink():
++            payload = path.read_bytes()
++        rows.append((rel, st.st_mode, payload))
++    return rows
++
++
++def _write_unversioned_candidate(candidates_dir: Path, candidate_id: str) -> None:
++    cdir = candidates_dir / candidate_id
++    cdir.mkdir(parents=True)
++    metadata = {
++        "candidate_id": candidate_id,
++        "task_id": "legacy-task",
++        "artifact_type": "factor",
++        "goal": "legacy goal",
++        "universe": ["SPY"],
++        "status": "pending",
++        "created_at": "2026-01-01T00:00:00Z",
++        "updated_at": "2026-01-01T00:00:00Z",
++        "files": ["factor.py.candidate"],
++        "safety": {
++            "auto_promotion": False,
++            "requires_human_review": True,
++            "review_status": "pending",
++        },
++    }
++    (cdir / "metadata.json").write_text(
++        json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8"
++    )
++    (cdir / "factor.py.candidate").write_text("# legacy\n", encoding="utf-8")
++
++
++def _write_corrupt_candidate(candidates_dir: Path, candidate_id: str) -> None:
++    cdir = candidates_dir / candidate_id
++    cdir.mkdir(parents=True)
++    (cdir / "metadata.json").write_text("{not-json", encoding="utf-8")
++
++
++def _invoke_review_cli(
++    agent_output: Path,
++    candidate_id: str,
++    *,
++    digest: str = "0" * 64,
++    decision: str = "approve",
++    note: str = "cli note",
++):
++    return runner.invoke(
++        app,
++        [
++            "agent",
++            "review",
++            "--candidate-id",
++            candidate_id,
++            "--decision",
++            decision,
++            "--note",
++            note,
++            "--expected-digest",
++            digest,
++            "--expected-status",
++            "pending",
++            "--agent-output-dir",
++            str(agent_output),
++        ],
++    )
++
++
++def test_same_id_same_manifest_is_noop_but_different_bytes_conflict(tmp_path) -> None:
++    pool = CandidatePool(tmp_path)
++    first = pool.write_candidate(
++        task_id="stable-task",
++        goal="stable goal",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# exact\n",
++    )
++    before = first.path.stat().st_mtime_ns
++    second = pool.write_candidate(
++        task_id="stable-task",
++        goal="stable goal",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# exact\n",
++    )
++    assert second.manifest_digest == first.manifest_digest
++    assert second.path.stat().st_mtime_ns == before
++
++    with pytest.raises(CandidateConflictError):
++        pool.write_candidate(
++            task_id="stable-task",
++            goal="stable goal",
++            artifact_type="factor",
++            filename="factor.py.candidate",
++            content="# changed\n",
++        )
++    assert first.path.read_text(encoding="utf-8") == "# exact\n"
++
++
++def test_review_requires_current_digest_and_legacy_lock_never_allows(tmp_path) -> None:
++    pool = CandidatePool(tmp_path)
++    artifact = pool.write_candidate(
++        task_id="review-task",
++        goal="review goal",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# review\n",
++    )
++    with pytest.raises(CandidateStaleError):
++        pool.review(
++            candidate_id=artifact.candidate_id,
++            decision="approve",
++            note="wrong revision",
++            expected_manifest_digest="0" * 64,
++            expected_status="pending",
++        )
++    assert not (artifact.path.parent / "approved.lock").exists()
++
++    (artifact.path.parent / "approved.lock").write_text("{}", encoding="utf-8")
++    assert pool.get(artifact.candidate_id).approval_binding == "legacy_unbound"
++    assert SafetyGate(tmp_path).allow_promotion(artifact.candidate_id) is False
++
++
++@pytest.mark.parametrize(
++    "case",
++    [
++        "parent",
++        "absolute",
++        "metadata.json",
++        "manifest.v1.json",
++        "approved.lock",
++        "rejected.lock",
++        "reviews.jsonl",
++        "nested/metadata.json",
++    ],
++)
++def test_write_rejects_unsafe_or_reserved_filename_before_any_side_effect(
++    tmp_path, case
++) -> None:
++    filename = {
++        "parent": "../escaped.py",
++        "absolute": str(tmp_path / "absolute-escaped.py"),
++    }.get(case, case)
++    pool = CandidatePool(tmp_path / "output")
++
++    with pytest.raises(CandidateIntegrityError):
++        pool.write_candidate(
++            task_id="unsafe-path",
++            goal="must not write",
++            artifact_type="factor",
++            filename=filename,
++            content="# escaped\n",
++        )
++
++    assert not any(tmp_path.iterdir())
++    assert not pool.candidates_dir.exists()
++
++
++def test_unversioned_and_corrupt_items_remain_visible_but_never_authorize(
++    tmp_path,
++) -> None:
++    pool = CandidatePool(tmp_path / "output")
++    _write_unversioned_candidate(pool.candidates_dir, "legacy-pending")
++    _write_corrupt_candidate(pool.candidates_dir, "broken")
++
++    items = {item.candidate_id: item for item in pool.list_for_read()}
++
++    legacy = items["legacy-pending"]
++    assert legacy.integrity_state == "migration_required"
++    assert legacy.manifest_digest is None
++    assert len(legacy.observed_manifest_digest or "") == 64
++    assert legacy.approval_enabled is False
++    assert items["broken"].integrity_state == "corrupt"
++    assert items["broken"].artifact_type is None
++    assert items["broken"].status is None
++    assert items["broken"].approval_binding is None
++    with pytest.raises(CandidateMigrationRequiredError):
++        pool.review(
++            candidate_id="legacy-pending",
++            decision="approve",
++            note="observed digest is not authority",
++            expected_manifest_digest=legacy.observed_manifest_digest or "",
++            expected_status="pending",
++        )
++
++
++@pytest.mark.parametrize(
++    "bad_id",
++    ["", ".", "..", "../outside", "../../outside", "/tmp/outside", "a/b", r"a\b", "approved.lock"],
++)
++def test_get_review_safety_api_and_cli_share_candidate_id_rejection_with_zero_writes(
++    tmp_path, bad_id
++) -> None:
++    agent_output = tmp_path / "agent-output"
++    outside = tmp_path / "outside"
++    before = _tree_fingerprint(tmp_path)
++
++    with pytest.raises(CandidateIntegrityError):
++        CandidatePool(agent_output).get(bad_id)
++    with pytest.raises(CandidateIntegrityError):
++        CandidatePool(agent_output).review(
++            candidate_id=bad_id,
++            decision="approve",
++            note="must fail before IO",
++            expected_manifest_digest="0" * 64,
++            expected_status="pending",
++        )
++    assert SafetyGate(agent_output).allow_promotion(bad_id) is False
++    assert _invoke_review_cli(agent_output, bad_id).exit_code != 0
++    assert _tree_fingerprint(tmp_path) == before
++    assert not outside.exists()
++
++
++@pytest.mark.parametrize(
++    "first_decision,second_decision",
++    [
++        ("approve", "reject"),
++        ("reject", "approve"),
++        ("approve", "approve"),
++        ("reject", "reject"),
++    ],
++)
++def test_concurrent_and_retry_reviews_never_flip_final_decision(
++    tmp_path, first_decision, second_decision
++) -> None:
++    pool = CandidatePool(tmp_path)
++    artifact = pool.write_candidate(
++        task_id=f"race-{first_decision}-{second_decision}",
++        goal="race goal",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# race\n",
++    )
++    digest = artifact.manifest_digest
++    assert digest is not None
++
++    barrier = threading.Barrier(2)
++    results: list[object] = []
++    lock = threading.Lock()
++
++    def _worker(decision: str) -> None:
++        barrier.wait(timeout=5)
++        try:
++            record = pool.review(
++                candidate_id=artifact.candidate_id,
++                decision=decision,  # type: ignore[arg-type]
++                note=f"decision-{decision}",
++                expected_manifest_digest=digest,
++                expected_status="pending",
++            )
++            with lock:
++                results.append(record)
++        except Exception as exc:  # noqa: BLE001 - collect either outcome
++            with lock:
++                results.append(exc)
++
++    t1 = threading.Thread(target=_worker, args=(first_decision,))
++    t2 = threading.Thread(target=_worker, args=(second_decision,))
++    t1.start()
++    t2.start()
++    t1.join(timeout=10)
++    t2.join(timeout=10)
++
++    successes = [r for r in results if not isinstance(r, Exception)]
++    failures = [r for r in results if isinstance(r, Exception)]
++    assert len(successes) == 1
++    assert len(failures) == 1
++    assert isinstance(failures[0], CandidateReviewStateStaleError)
++
++    candidate_dir = artifact.path.parent
++    approved = candidate_dir / "approved.lock"
++    rejected = candidate_dir / "rejected.lock"
++    assert approved.exists() ^ rejected.exists()
++    winner = approved if approved.exists() else rejected
++    winner_bytes = winner.read_bytes()
++
++    # Retries never overwrite, delete, or flip the final decision.
++    for decision in (first_decision, second_decision, "approve", "reject"):
++        with pytest.raises(CandidateReviewStateStaleError):
++            pool.review(
++                candidate_id=artifact.candidate_id,
++                decision=decision,  # type: ignore[arg-type]
++                note="retry after final",
++                expected_manifest_digest=digest,
++                expected_status="pending",
++            )
++        assert winner.read_bytes() == winner_bytes
++        assert approved.exists() == (winner == approved)
++        assert rejected.exists() == (winner == rejected)
++
++
++def test_pool_lock_symlink_fifo_hardlink_fail_closed(tmp_path) -> None:
++    agent = tmp_path / "agent-output"
++    candidates = agent / "agent" / "candidates"
++    candidates.mkdir(parents=True)
++    outside = tmp_path / "outside-lock"
++    outside.write_bytes(b"outside-lock-bytes")
++
++    # Symlink lock
++    (candidates / ".candidate-pool.lock").symlink_to(outside)
++    pool = CandidatePool(agent)
++    with pytest.raises(CandidateIntegrityError):
++        pool.write_candidate(
++            task_id="lock-symlink",
++            goal="g",
++            artifact_type="factor",
++            filename="factor.py.candidate",
++            content="# x\n",
++        )
++    assert outside.read_bytes() == b"outside-lock-bytes"
++    assert not any(candidates.glob("factor-*"))
++
++    (candidates / ".candidate-pool.lock").unlink()
++
++    # FIFO lock
++    os.mkfifo(candidates / ".candidate-pool.lock")
++    with pytest.raises(CandidateIntegrityError):
++        pool.write_candidate(
++            task_id="lock-fifo",
++            goal="g",
++            artifact_type="factor",
++            filename="factor.py.candidate",
++            content="# x\n",
++        )
++    assert outside.read_bytes() == b"outside-lock-bytes"
++    os.unlink(candidates / ".candidate-pool.lock")
++
++    # Hardlink-to-outside lock
++    os.link(outside, candidates / ".candidate-pool.lock")
++    with pytest.raises(CandidateIntegrityError):
++        pool.write_candidate(
++            task_id="lock-hardlink",
++            goal="g",
++            artifact_type="factor",
++            filename="factor.py.candidate",
++            content="# x\n",
++        )
++    assert outside.read_bytes() == b"outside-lock-bytes"
++    assert candidates.joinpath(".candidate-pool.lock").stat().st_nlink >= 2
++
++
++def test_candidates_root_swap_after_open_fails_closed(tmp_path) -> None:
++    agent = tmp_path / "agent-output"
++    pool = CandidatePool(agent)
++    artifact = pool.write_candidate(
++        task_id="root-swap",
++        goal="root swap",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# root\n",
++    )
++    candidates = pool.candidates_dir
++    replacement = tmp_path / "replacement-candidates"
++    replacement.mkdir()
++    (replacement / "evil").mkdir()
++    (replacement / "evil" / "metadata.json").write_text("{}", encoding="utf-8")
++    outside_bytes = b"replacement-marker"
++    (replacement / "marker").write_bytes(outside_bytes)
++
++    original = candidates.rename(tmp_path / "original-candidates")
++    replacement.rename(candidates)
++
++    # Review against swapped root must fail closed; replacement untouched.
++    with pytest.raises((CandidateIntegrityError, CandidateStaleError, OSError)):
++        pool.review(
++            candidate_id=artifact.candidate_id,
++            decision="approve",
++            note="after swap",
++            expected_manifest_digest=artifact.manifest_digest or ("0" * 64),
++            expected_status="pending",
++        )
++    assert (candidates / "marker").read_bytes() == outside_bytes
++    assert not (candidates / "evil" / "approved.lock").exists()
++    # Restore for cleanliness
++    candidates.rename(replacement)
++    original.rename(candidates)
++
++
++def test_candidate_entry_swap_before_review_publish_fails_closed(tmp_path) -> None:
++    agent = tmp_path / "agent-output"
++    pool = CandidatePool(agent)
++    artifact = pool.write_candidate(
++        task_id="cand-swap",
++        goal="cand swap",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# cand\n",
++    )
++    candidate_dir = artifact.path.parent
++    original = candidate_dir.rename(tmp_path / "original-candidate")
++    replacement = candidate_dir
++    replacement.mkdir()
++    (replacement / "metadata.json").write_text(
++        json.dumps(
++            {
++                "candidate_id": artifact.candidate_id,
++                "artifact_type": "factor",
++                "goal": "evil",
++                "universe": [],
++                "files": ["factor.py.candidate"],
++            },
++            indent=2,
++            sort_keys=True,
++        ),
++        encoding="utf-8",
++    )
++    (replacement / "factor.py.candidate").write_text("# evil\n", encoding="utf-8")
++    outside = tmp_path / "outside-target"
++    outside.write_bytes(b"outside-candidate")
++
++    with pytest.raises(
++        (
++            CandidateIntegrityError,
++            CandidateMigrationRequiredError,
++            CandidateStaleError,
++        )
++    ):
++        pool.review(
++            candidate_id=artifact.candidate_id,
++            decision="approve",
++            note="swapped candidate",
++            expected_manifest_digest=artifact.manifest_digest or ("0" * 64),
++            expected_status="pending",
++        )
++    assert not (replacement / "approved.lock").exists()
++    assert not (replacement / "rejected.lock").exists()
++    assert outside.read_bytes() == b"outside-candidate"
++    # Original still has no decision lock.
++    assert not (original / "approved.lock").exists()
++
++
++def test_interrupted_create_leaves_no_partial_final_candidate(tmp_path, monkeypatch) -> None:
++    pool = CandidatePool(tmp_path)
++    from quant_system.agent import candidate_pool as pool_mod
++
++    def boom(*args, **kwargs):
++        raise RuntimeError("publish interrupted")
++
++    monkeypatch.setattr(pool_mod, "rename_directory_noreplace_at", boom)
++    with pytest.raises(RuntimeError, match="publish interrupted"):
++        pool.write_candidate(
++            task_id="partial-task",
++            goal="partial goal",
++            artifact_type="factor",
++            filename="factor.py.candidate",
++            content="# partial\n",
++        )
++    candidates = pool.candidates_dir
++    if candidates.exists():
++        # No final candidate directory without staging prefix.
++        for child in candidates.iterdir():
++            assert child.name.startswith(".") or child.name == ".candidate-pool.lock"
++            assert not child.name.startswith("factor-")
++
++
++def test_structured_approve_authorizes_and_metadata_stays_immutable(tmp_path) -> None:
++    pool = CandidatePool(tmp_path)
++    artifact = pool.write_candidate(
++        task_id="auth-task",
++        goal="auth goal",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# auth\n",
++    )
++    meta_before = artifact.metadata_path.read_bytes()
++    record = pool.review(
++        candidate_id=artifact.candidate_id,
++        decision="approve",
++        note="looks good",
++        expected_manifest_digest=artifact.manifest_digest or "",
++        expected_status="pending",
++    )
++    assert record.manifest_digest == artifact.manifest_digest
++    lock = json.loads(
++        (artifact.path.parent / "approved.lock").read_text(encoding="utf-8")
++    )
++    assert lock["schema_version"] == "1.0"
++    assert lock["manifest_digest"] == artifact.manifest_digest
++    assert lock["decision"] == "approve"
++    assert artifact.metadata_path.read_bytes() == meta_before
++    assert SafetyGate(tmp_path).allow_promotion(artifact.candidate_id) is True
++    items = pool.list_for_read()
++    assert items[0].status == "approved"
++    assert items[0].manifest_digest == artifact.manifest_digest
++
++
++def test_metadata_extra_cannot_override_protected_keys(tmp_path) -> None:
++    pool = CandidatePool(tmp_path)
++    with pytest.raises(CandidateIntegrityError):
++        pool.write_candidate(
++            task_id="meta-task",
++            goal="meta goal",
++            artifact_type="factor",
++            filename="factor.py.candidate",
++            content="# meta\n",
++            metadata_extra={"status": "approved", "candidate_id": "other"},
++        )
++
++
++def test_safety_gate_requires_agent_output_not_candidates_dir(tmp_path) -> None:
++    pool = CandidatePool(tmp_path)
++    artifact = pool.write_candidate(
++        task_id="gate-task",
++        goal="gate goal",
++        artifact_type="factor",
++        filename="factor.py.candidate",
++        content="# gate\n",
++    )
++    pool.review(
++        candidate_id=artifact.candidate_id,
++        decision="approve",
++        note="ok",
++        expected_manifest_digest=artifact.manifest_digest or "",
++        expected_status="pending",
++    )
++    assert SafetyGate(tmp_path).allow_promotion(artifact.candidate_id) is True
++    # Passing candidates dir as if it were agent root must not authorize.
++    assert SafetyGate(pool.candidates_dir).allow_promotion(artifact.candidate_id) is False
++
++
++def test_static_regression_no_safetygate_candidates_dir_construction() -> None:
++    """Candidate consumers must not construct SafetyGate from candidates_dir."""
++    root = Path(__file__).resolve().parents[1] / "src" / "quant_system"
++    offenders: list[str] = []
++    for path in root.rglob("*.py"):
++        text = path.read_text(encoding="utf-8")
++        if "SafetyGate(" not in text:
++            continue
++        for i, line in enumerate(text.splitlines(), start=1):
++            stripped = line.strip()
++            if "SafetyGate(" not in stripped or stripped.startswith("#"):
++                continue
++            # Allow the class definition file's docs only via name patterns.
++            lowered = stripped.lower()
++            if "candidates_dir" in lowered or '/ "agent" / "candidates"' in stripped:
++                offenders.append(f"{path}:{i}:{stripped}")
++            if ' / "agent" / "candidates"' in stripped and "SafetyGate" in stripped:
++                offenders.append(f"{path}:{i}:{stripped}")
++    assert offenders == []
++
++
++def test_locked_candidates_root_holds_exclusive_lock(tmp_path) -> None:
++    agent = tmp_path / "agent-output"
++    entered = threading.Event()
++    release = threading.Event()
++    second_entered = threading.Event()
++
++    def holder() -> None:
++        with locked_candidates_root(agent, create=True):
++            entered.set()
++            release.wait(timeout=5)
++
++    t = threading.Thread(target=holder)
++    t.start()
++    assert entered.wait(timeout=5)
++
++    def contender() -> None:
++        with locked_candidates_root(agent, create=True):
++            second_entered.set()
++
++    t2 = threading.Thread(target=contender)
++    t2.start()
++    time.sleep(0.2)
++    assert not second_entered.is_set()
++    release.set()
++    t.join(timeout=5)
++    t2.join(timeout=5)
++    assert second_entered.is_set()
+diff --git a/tests/test_cli_experiment_provider.py b/tests/test_cli_experiment_provider.py
+index 3af15d7..c32d57b 100644
+--- a/tests/test_cli_experiment_provider.py
++++ b/tests/test_cli_experiment_provider.py
+@@ -149,46 +149,49 @@ def test_run_config_candidate_loader_is_cwd_independent_and_uses_env(
+ 
+     agent = tmp_path / "agent-output"
+     outside = tmp_path / "outside-platform-repo"
+     outside.mkdir()
+     monkeypatch.setenv("QS_AGENT_OUTPUT_DIR", str(agent))
+     monkeypatch.setenv("QS_DATA_DIR", str(tmp_path / "general-data"))
+     monkeypatch.chdir(outside)
+ 
+     captured = {}
+ 
+-    def fake_load(registry, *, candidates_dir):
+-        captured["candidates_dir"] = Path(candidates_dir)
++    def fake_load(registry, *, agent_output_dir):
++        captured["agent_output_dir"] = Path(agent_output_dir)
+         return []
+ 
+     monkeypatch.setattr(cli_module, "load_approved_factor_candidates", fake_load)
+     _invoke_stubbed_run_config_with_approved_candidates(monkeypatch, tmp_path)
+ 
+-    assert captured["candidates_dir"] == resolve_candidates_dir(resolve_agent_output_dir())
+-    assert captured["candidates_dir"] == agent / "agent" / "candidates"
++    assert captured["agent_output_dir"] == resolve_agent_output_dir()
++    assert resolve_candidates_dir(captured["agent_output_dir"]) == (
++        agent / "agent" / "candidates"
++    )
+ 
+ 
+ def test_include_approved_candidates_accepts_agent_output_dir_override(
+     tmp_path,
+     monkeypatch,
+ ) -> None:
+     from pathlib import Path
+ 
+     from quant_system.agent.paths import resolve_agent_output_dir, resolve_candidates_dir
+ 
+     custom_agent_root = tmp_path / "custom-agent-root"
+     captured = {}
+ 
+-    def fake_load(registry, *, candidates_dir):
+-        captured["candidates_dir"] = Path(candidates_dir)
++    def fake_load(registry, *, agent_output_dir):
++        captured["agent_output_dir"] = Path(agent_output_dir)
+         return []
+ 
+     monkeypatch.setattr(cli_module, "load_approved_factor_candidates", fake_load)
+     _invoke_stubbed_run_config_with_approved_candidates(
+         monkeypatch,
+         tmp_path,
+         extra_args=["--agent-output-dir", str(custom_agent_root)],
+     )
+ 
+-    assert captured["candidates_dir"] == resolve_candidates_dir(
+-        resolve_agent_output_dir(custom_agent_root)
++    assert captured["agent_output_dir"] == resolve_agent_output_dir(custom_agent_root)
++    assert resolve_candidates_dir(captured["agent_output_dir"]) == (
++        custom_agent_root / "agent" / "candidates"
+     )
+diff --git a/tests/test_cli_json_output.py b/tests/test_cli_json_output.py
+index 93de308..60ed328 100644
+--- a/tests/test_cli_json_output.py
++++ b/tests/test_cli_json_output.py
+@@ -116,72 +116,117 @@ def test_propose_factor_json_emits_contract_on_last_line(tmp_path) -> None:
+     candidate_dir = Path(output_dir, "agent", "candidates", payload["candidate_id"])
+     assert payload["path"] == str(candidate_dir / "factor.py.candidate")
+     assert payload["metadata_path"] == str(candidate_dir / "metadata.json")
+     # Legacy key=value line still precedes the JSON line (regex fallback safe).
+     assert "status=pending" in result.output
+ 
+ 
+ # --- agent review -----------------------------------------------------------
+ 
+ 
++def test_agent_review_missing_expected_status_exits_nonzero(tmp_path) -> None:
++    from quant_system.agent.candidate_pool import CandidatePool
++
++    propose_result, output_dir = _propose_factor(tmp_path)
++    candidate_id = _candidate_id(propose_result.output)
++    digest = CandidatePool(output_dir).get(candidate_id).manifest_digest
++
++    result = runner.invoke(
++        app,
++        [
++            "agent",
++            "review",
++            "--candidate-id",
++            candidate_id,
++            "--decision",
++            "approve",
++            "--note",
++            "missing status CAS field",
++            "--expected-digest",
++            digest,
++            "--agent-output-dir",
++            str(output_dir),
++        ],
++    )
++    assert result.exit_code != 0
++    assert not (
++        Path(output_dir) / "agent" / "candidates" / candidate_id / "approved.lock"
++    ).exists()
++
++
+ def test_agent_review_legacy_line_byte_identical_without_json(tmp_path) -> None:
++    from quant_system.agent.candidate_pool import CandidatePool
++
+     propose_result, output_dir = _propose_factor(tmp_path)
+     candidate_id = _candidate_id(propose_result.output)
++    digest = CandidatePool(output_dir).get(candidate_id).manifest_digest
+ 
+     result = runner.invoke(
+         app,
+         [
+             "agent",
+             "review",
+             "--candidate-id",
+             candidate_id,
+             "--decision",
+             "approve",
+             "--note",
+             "json contract regression",
++            "--expected-digest",
++            digest,
++            "--expected-status",
++            "pending",
+             "--agent-output-dir",
+             str(output_dir),
+         ],
+     )
+ 
+     assert result.exit_code == 0, result.output
+     expected = f"candidate_id={candidate_id} decision=approve registration=manual_required"
+     assert _last_line(result.output) == expected
+ 
+ 
+ def test_agent_review_json_emits_contract_on_last_line(tmp_path) -> None:
++    from quant_system.agent.candidate_pool import CandidatePool
++
+     propose_result, output_dir = _propose_factor(tmp_path)
+     candidate_id = _candidate_id(propose_result.output)
++    digest = CandidatePool(output_dir).get(candidate_id).manifest_digest
+ 
+     result = runner.invoke(
+         app,
+         [
+             "agent",
+             "review",
+             "--candidate-id",
+             candidate_id,
+             "--decision",
+             "approve",
+             "--note",
+             "json contract",
++            "--expected-digest",
++            digest,
++            "--expected-status",
++            "pending",
+             "--agent-output-dir",
+             str(output_dir),
+             "--json",
+         ],
+     )
+ 
+     assert result.exit_code == 0, result.output
+     payload = json.loads(_last_line(result.output))
+-    assert set(payload) == {"candidate_id", "decision", "registration"}
++    assert set(payload) == {"candidate_id", "decision", "registration", "manifest_digest"}
+     assert payload["candidate_id"] == candidate_id
+     assert payload["decision"] == "approve"
+     assert payload["registration"] == "manual_required"
++    assert payload["manifest_digest"] == digest
+     # Legacy line still present for the regex fallback.
+     assert "registration=manual_required" in result.output.splitlines()[0]
+ 
+ 
+ # --- experiment run-config ----------------------------------------------------
+ 
+ 
+ def test_run_config_legacy_line_byte_identical_without_json(tmp_path, monkeypatch) -> None:
+     _patch_experiment(monkeypatch, tmp_path)
+ 
+@@ -238,21 +283,21 @@ def test_run_config_json_emits_contract_on_last_line(tmp_path, monkeypatch) -> N
+     assert payload["approved_candidates_loaded"] == []
+     # Legacy summary line still precedes the JSON line.
+     assert "experiment_id=e-json-1" in result.output
+ 
+ 
+ def test_run_config_json_lists_loaded_approved_candidates(tmp_path, monkeypatch) -> None:
+     _patch_experiment(monkeypatch, tmp_path)
+     monkeypatch.setattr(
+         cli_module,
+         "load_approved_factor_candidates",
+-        lambda registry, *, candidates_dir: ["candidate_x"],
++        lambda registry, *, agent_output_dir: ["candidate_x"],
+     )
+ 
+     result = runner.invoke(
+         app,
+         [
+             "experiment",
+             "run-config",
+             "--config",
+             str(_write_experiment_config(tmp_path)),
+             "--include-approved-candidates",
+diff --git a/tests/test_factor_registry_factory.py b/tests/test_factor_registry_factory.py
+index a802b75..9a34662 100644
+--- a/tests/test_factor_registry_factory.py
++++ b/tests/test_factor_registry_factory.py
+@@ -1,14 +1,21 @@
+ from __future__ import annotations
+ 
++import json
++from pathlib import Path
++
+ from fastapi.testclient import TestClient
+ 
++from quant_system.agent.candidate_manifest import (
++    build_candidate_manifest,
++    canonical_json_bytes,
++)
+ from quant_system.api.server import create_app
+ from quant_system.factors import library
+ from quant_system.factors.base import BaseFactor
+ from quant_system.factors.registry import (
+     build_default_factor_registry,
+     build_factor_registry,
+ )
+ 
+ _EXAMPLE_IDS = {"momentum", "volatility", "liquidity", "rsi", "macd"}
+ 
+@@ -35,26 +42,63 @@ class _StubPromotedFactor(BaseFactor):
+     factor_version = "1.0.0"
+     default_lookback = 10
+     direction = "higher_is_better"
+     description = "stub promoted factor"
+ 
+     def _compute_values(self, frame):
+         return frame["close"] * 0.0
+ 
+ 
+ def _write_candidate(root, candidate_id, source, *, approved):
+-    cdir = root / candidate_id
+-    cdir.mkdir(parents=True)
++    """Write verified candidate under agent root or candidates dir."""
++    root = Path(root)
++    if root.name == "candidates" and root.parent.name == "agent":
++        cdir = root / candidate_id
++    else:
++        cdir = root / "agent" / "candidates" / candidate_id
++    cdir.mkdir(parents=True, exist_ok=True)
++    metadata = {
++        "candidate_id": candidate_id,
++        "task_id": "task",
++        "artifact_type": "factor",
++        "goal": "goal",
++        "universe": ["SPY"],
++        "status": "pending",
++        "created_at": "2026-01-01T00:00:00Z",
++        "updated_at": "2026-01-01T00:00:00Z",
++        "files": ["factor.py.candidate"],
++        "safety": {
++            "auto_promotion": False,
++            "requires_human_review": True,
++            "review_status": "pending",
++        },
++    }
++    (cdir / "metadata.json").write_text(
++        json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8"
++    )
+     (cdir / "factor.py.candidate").write_text(source, encoding="utf-8")
+-    (cdir / "metadata.json").write_text("{}", encoding="utf-8")
++    manifest, digest, _ = build_candidate_manifest(cdir)
++    (cdir / "manifest.v1.json").write_bytes(
++        canonical_json_bytes(manifest.model_dump(mode="json"))
++    )
+     if approved:
+-        (cdir / "approved.lock").write_text("{}", encoding="utf-8")
++        lock = {
++            "schema_version": "1.0",
++            "candidate_id": candidate_id,
++            "decision": "approve",
++            "manifest_digest": digest,
++            "note": "test approval",
++            "reviewer": "manual",
++            "created_at": "2026-01-01T00:00:00Z",
++        }
++        (cdir / "approved.lock").write_bytes(canonical_json_bytes(lock))
++    return digest
+ 
+ 
+ def test_factory_default_is_examples_plus_promoted() -> None:
+     registry = build_factor_registry()
+     assert set(registry.factor_ids()) == _EXAMPLE_IDS
+ 
+ 
+ def test_build_default_is_thin_alias() -> None:
+     assert set(build_default_factor_registry().factor_ids()) == set(
+         build_factor_registry().factor_ids()
+@@ -69,58 +113,58 @@ def test_promoted_library_factors_are_registered(monkeypatch) -> None:
+     assert "stub_promoted" in registry.factor_ids()
+ 
+     registry_without = build_factor_registry(include_promoted=False)
+     assert "stub_promoted" not in registry_without.factor_ids()
+     assert set(registry_without.factor_ids()) == _EXAMPLE_IDS
+ 
+ 
+ def test_approved_candidates_only_when_requested(tmp_path) -> None:
+     _write_candidate(tmp_path, "cand-approved", _CANDIDATE_SRC, approved=True)
+ 
+-    without = build_factor_registry(candidates_dir=tmp_path)
++    without = build_factor_registry(agent_output_dir=tmp_path)
+     assert "wiring_test_factor" not in without.factor_ids()
+ 
+     with_candidates = build_factor_registry(
+-        include_approved_candidates=True, candidates_dir=tmp_path
++        include_approved_candidates=True, agent_output_dir=tmp_path
+     )
+     assert "wiring_test_factor" in with_candidates.factor_ids()
+     assert with_candidates.create("wiring_test_factor") is not None
+ 
+ 
+ def test_pending_candidate_is_not_loaded(tmp_path) -> None:
+     _write_candidate(tmp_path, "cand-pending", _CANDIDATE_SRC, approved=False)
+ 
+     registry = build_factor_registry(
+-        include_approved_candidates=True, candidates_dir=tmp_path
++        include_approved_candidates=True, agent_output_dir=tmp_path
+     )
+     assert "wiring_test_factor" not in registry.factor_ids()
+ 
+ 
+ def test_approved_candidates_requested_without_dir_is_safe(tmp_path) -> None:
+     # No candidates_dir supplied: must not raise and must not load anything.
+     registry = build_factor_registry(
+-        include_approved_candidates=True, candidates_dir=tmp_path / "missing"
++        include_approved_candidates=True, agent_output_dir=tmp_path / "missing"
+     )
+     assert set(registry.factor_ids()) == _EXAMPLE_IDS
+ 
+ 
+ # --- origin provenance metadata (Task P2) --------------------------------
+ 
+ 
+ def test_registry_tracks_origin_per_registration_pass(monkeypatch, tmp_path) -> None:
+     monkeypatch.setattr(
+         library.promoted, "PROMOTED_FACTORS", (_StubPromotedFactor,), raising=True
+     )
+     _write_candidate(tmp_path, "cand-approved", _CANDIDATE_SRC, approved=True)
+ 
+     registry = build_factor_registry(
+-        include_approved_candidates=True, candidates_dir=tmp_path
++        include_approved_candidates=True, agent_output_dir=tmp_path
+     )
+ 
+     origins = registry.origins()
+     for example_id in _EXAMPLE_IDS:
+         assert origins[example_id] == "builtin"
+     assert origins["stub_promoted"] == "promoted"
+     assert origins["wiring_test_factor"] == "candidate"
+ 
+ 
+ def test_default_registry_has_no_candidate_origins() -> None:

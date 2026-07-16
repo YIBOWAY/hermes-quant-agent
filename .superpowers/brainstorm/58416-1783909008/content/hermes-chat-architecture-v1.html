@@ -1,0 +1,78 @@
+<h2>设计第 2 部分：网页如何真正连接 Hermes</h2>
+<p class="subtitle">平台不重新造一个 LLM，也不复活旧 AgentRunner。它只增加一个同源、安全、可审计的桥接层。</p>
+
+<div class="mockup" style="margin-top:24px">
+  <div class="mockup-header">消息、执行事件与审批的数据流</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:minmax(200px,.8fr) 56px minmax(250px,1fr) 56px minmax(250px,1fr) 56px minmax(220px,.9fr);gap:14px;align-items:stretch">
+      <div style="padding:20px;border:1px solid #67528d;border-radius:14px;background:rgba(139,92,246,.10)">
+        <div class="label">用户界面</div>
+        <h3 style="margin-top:8px">Hermes 工作台</h3>
+        <ul style="margin-top:14px;display:grid;gap:10px;padding-left:18px">
+          <li>多轮对话</li>
+          <li>实时 token</li>
+          <li>工具执行进度</li>
+          <li>允许本次 / 拒绝</li>
+          <li>停止任务</li>
+        </ul>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;font-size:30px;color:var(--accent)">⇄</div>
+      <div style="padding:20px;border:2px solid #4d7ac7;border-radius:14px;background:rgba(59,130,246,.08)">
+        <div class="label">平台新增窄接口</div>
+        <h3 style="margin-top:8px">ai-quant-platform BFF</h3>
+        <div style="display:grid;gap:9px;margin-top:14px;font-size:14px">
+          <div style="padding:9px;border-radius:8px;background:var(--surface)">会话创建 / 恢复</div>
+          <div style="padding:9px;border-radius:8px;background:var(--surface)">每轮 run + 幂等 request ID</div>
+          <div style="padding:9px;border-radius:8px;background:var(--surface)">SSE 事件白名单转发</div>
+          <div style="padding:9px;border-radius:8px;background:var(--surface)">审批 / 停止代理</div>
+        </div>
+        <p style="margin-top:13px;color:var(--muted);font-size:13px">浏览器永远拿不到 Hermes Bearer key。</p>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;font-size:30px;color:var(--accent)">⇄</div>
+      <div style="padding:20px;border:2px solid #8b5cf6;border-radius:14px;background:rgba(139,92,246,.09)">
+        <div class="label">独立本机进程</div>
+        <h3 style="margin-top:8px">HQA 专用 Hermes API</h3>
+        <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:9px;font-size:13px">
+          <div style="padding:10px;border-radius:8px;background:var(--surface)">Sessions<br><span style="color:var(--muted)">历史与记忆</span></div>
+          <div style="padding:10px;border-radius:8px;background:var(--surface)">Runs<br><span style="color:var(--muted)">每轮执行</span></div>
+          <div style="padding:10px;border-radius:8px;background:var(--surface)">Events<br><span style="color:var(--muted)">SSE 流</span></div>
+          <div style="padding:10px;border-radius:8px;background:var(--surface)">Approval<br><span style="color:var(--muted)">命令确认</span></div>
+        </div>
+        <p style="margin-top:13px;color:var(--muted);font-size:13px">独立 profile · loopback only · HQA AGENTS + hqa-quant skill</p>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;font-size:30px;color:var(--accent)">→</div>
+      <div style="padding:20px;border:1px solid #356044;border-radius:14px;background:rgba(34,197,94,.08)">
+        <div class="label">确定性能力</div>
+        <h3 style="margin-top:8px">平台研究引擎</h3>
+        <ul style="margin-top:14px;display:grid;gap:10px;padding-left:18px">
+          <li>行情与因子</li>
+          <li>回测与实验</li>
+          <li>候选与审计</li>
+          <li>paper 只读事实</li>
+          <li>结果 artifact</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:28px">
+  <h3>用户发送一条消息后</h3>
+  <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-top:14px">
+    <div style="padding:16px;border:1px solid var(--border);border-radius:12px"><div class="letter">1</div><strong>创建或恢复会话</strong><p style="margin-top:7px;color:var(--muted)">使用真实 Hermes session、记忆和技能。</p></div>
+    <div style="padding:16px;border:1px solid var(--border);border-radius:12px"><div class="letter">2</div><strong>启动一轮 Run</strong><p style="margin-top:7px;color:var(--muted)">同一会话只允许一个 active run。</p></div>
+    <div style="padding:16px;border:1px solid var(--border);border-radius:12px"><div class="letter">3</div><strong>实时展示过程</strong><p style="margin-top:7px;color:var(--muted)">回答、工具调用、进度和结果通过 SSE 返回。</p></div>
+    <div style="padding:16px;border:1px solid var(--border);border-radius:12px"><div class="letter">4</div><strong>需要时暂停</strong><p style="margin-top:7px;color:var(--muted)">危险命令必须“允许本次”或“拒绝”。</p></div>
+    <div style="padding:16px;border:1px solid var(--border);border-radius:12px"><div class="letter">5</div><strong>结果进入工作台</strong><p style="margin-top:7px;color:var(--muted)">会话记录、任务记录和研究产物相互关联。</p></div>
+  </div>
+</div>
+
+<div class="cards" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:26px">
+  <div class="card"><div class="card-body"><div class="label">密钥与网络</div><h3>浏览器不直连 Hermes</h3><p>API key 只存在平台服务端；Hermes 仅监听 127.0.0.1，不开放浏览器 CORS。</p></div></div>
+  <div class="card"><div class="card-body"><div class="label">能力边界</div><h3>首版只开纯对话与只读研究</h3><p>不开放通用 patch、文件写入、cron 管理、delegation 或浏览器自动化。</p></div></div>
+  <div class="card"><div class="card-body"><div class="label">审批边界</div><h3>两类审批绝不混淆</h3><p>Hermes 命令审批不等于 Gate 1 公式确认、Gate 2 源码批准或 Gate 3 promotion diff 审查。</p></div></div>
+</div>
+
+<div style="margin-top:26px;padding:18px;border:1px solid #6b4f24;border-radius:12px;background:rgba(245,158,11,.08)">
+  <strong>降级规则：</strong>Hermes 离线时，今日概览、历史产物和审批事实仍可读；对话框明确显示“连接不可用”，绝不回退到旧 <code>POST /api/agent/tasks</code>。
+</div>
