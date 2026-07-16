@@ -74,10 +74,15 @@ _TRANSITIONS = {
         "expired": frozenset(),
     },
     "stop_target": {
-        "requested": frozenset(("confirmed", "already_terminal", "unknown")),
-        "unknown": frozenset(("confirmed", "already_terminal")),
+        "requested": frozenset(
+            ("confirmed", "already_terminal", "not_applicable", "unknown")
+        ),
+        "unknown": frozenset(
+            ("confirmed", "already_terminal", "not_applicable")
+        ),
         "confirmed": frozenset(),
         "already_terminal": frozenset(),
+        "not_applicable": frozenset(),
     },
     "stop_overall": {
         "requested": frozenset(("reconciling", "stopped", "already_terminal")),

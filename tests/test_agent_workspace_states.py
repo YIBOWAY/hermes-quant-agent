@@ -61,10 +61,16 @@ STATE_EDGES = {
         "expired": (),
     },
     "stop_target": {
-        "requested": ("confirmed", "already_terminal", "unknown"),
-        "unknown": ("confirmed", "already_terminal"),
+        "requested": (
+            "confirmed",
+            "already_terminal",
+            "not_applicable",
+            "unknown",
+        ),
+        "unknown": ("confirmed", "already_terminal", "not_applicable"),
         "confirmed": (),
         "already_terminal": (),
+        "not_applicable": (),
     },
     "stop_overall": {
         "requested": ("reconciling", "stopped", "already_terminal"),
