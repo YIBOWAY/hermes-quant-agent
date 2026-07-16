@@ -1,6 +1,16 @@
 # Agent v0.2 — 完整 `/hermes` Web Chat 实施计划
 
-> **状态（2026-07-16）：CURRENT / PLAN ACCEPTED / IMPLEMENTATION NOT STARTED。** 本计划是 D-32 唯一 active
+> **V0 LIMITED-DEVICE CANDIDATE ADDENDUM（2026-07-16）：** 当前仅在 targeted-only Windows
+> 验证分支记录 Workspace v1 合同候选；full validation 必须回到 primary 环境执行，V0 仍未 DONE。
+> HQA `codex/agent-v0-2-limited-device` 基于
+> `a7428b6219ded4550f4c8951b6fabc4542a1724f`；platform
+> `codex/agent-v0-2-platform-limited-device` 基于
+> `7b73b5f2fe9e80509f4762c3de696d1e2c58fc9d`；Hermes
+> `codex/agent-v0-2-durable-runs` 基于 `a79b818360700d526c0a48107444810e3d6ecc2e`。
+> migration、browser mutation、worker claim/dispatch、provider、Gate、paper/live 与 public composer
+> 等所有 live gates 保持 OFF；本 addendum 不构成任何 live 授权。
+
+> **状态（2026-07-16）：CURRENT / PLAN ACCEPTED / V0 CONTRACT CANDIDATE IN PROGRESS；RUNTIME IMPLEMENTATION NOT STARTED。** 本计划是 D-32 唯一 active
 > implementation plan。此前的 Wave 3 文档保留为已交付事实与问题输入，不再从其中的旧顺序、
 > unchecked checkbox 或“下一步”继续施工。
 >
