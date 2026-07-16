@@ -36,18 +36,6 @@ _AUTHORITY_GRAPH_COLLECTIONS = (
     "result_links",
     "control_command_links",
 )
-_AUTHORIZATION_GRANT_SEAL = object()
-_AUTHORIZATION_GRANT_FIELDS = frozenset(
-    {
-        "actor",
-        "workspace",
-        "request_kind",
-        "action_digest",
-        "target_session_ref",
-        "_authorization_seal",
-        "_issued_binding",
-    }
-)
 
 
 def _fail(code: str) -> None:
@@ -194,16 +182,41 @@ class RequestSecurityEvidence:
         _validate_evidence(self)
 
 
-@dataclass(frozen=True, init=False)
-class AuthorizationGrant:
+@dataclass(frozen=True)
+class AuthorizationDecision:
+    """Non-transferable result of one current authorization call.
+
+    Construction or possession grants no authority. This is only a read model
+    returned by the current authorize_workspace_request call. Every future
+    cache, receipt, or side-effect consumer must call authorize_workspace_request
+    again with policy, evidence, and graph.
+    A consumer must not accept an AuthorizationDecision as authorization proof.
+    """
+
     actor: ActorRef
     workspace: WorkspaceRef
     request_kind: str
     action_digest: Optional[str] = None
     target_session_ref: Optional[str] = None
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> AuthorizationGrant:
-        raise TypeError("authorization grants are issued, not constructed")
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "actor", _copy_actor(self.actor, "validation"))
+        object.__setattr__(
+            self,
+            "workspace",
+            _copy_workspace(self.workspace, "validation"),
+        )
+        if type(self.request_kind) is not str or self.request_kind not in _REQUEST_KINDS:
+            _fail("validation")
+        if self.request_kind == "mutation":
+            if (
+                type(self.action_digest) is not str
+                or _HEX64_RE.fullmatch(self.action_digest) is None
+                or not _is_session_ref(self.target_session_ref)
+            ):
+                _fail("validation")
+        elif self.action_digest is not None or self.target_session_ref is not None:
+            _fail("validation")
 
 
 def _is_session_ref(value: Any) -> bool:
@@ -241,90 +254,6 @@ def _copy_workspace(workspace: Any, error_code: str) -> WorkspaceRef:
 
 def _canonical_actor(actor: ActorRef) -> ActorRef:
     return _copy_actor(actor, "forbidden")
-
-
-def _issue_authorization_grant(
-    actor: ActorRef,
-    workspace: WorkspaceRef,
-    request_kind: str,
-    action_digest: Optional[str] = None,
-    target_session_ref: Optional[str] = None,
-) -> AuthorizationGrant:
-    canonical_actor = _copy_actor(actor, "integrity")
-    canonical_workspace = _copy_workspace(workspace, "integrity")
-    grant = object.__new__(AuthorizationGrant)
-    object.__setattr__(grant, "actor", canonical_actor)
-    object.__setattr__(grant, "workspace", canonical_workspace)
-    object.__setattr__(grant, "request_kind", request_kind)
-    object.__setattr__(grant, "action_digest", action_digest)
-    object.__setattr__(grant, "target_session_ref", target_session_ref)
-    object.__setattr__(grant, "_authorization_seal", _AUTHORIZATION_GRANT_SEAL)
-    object.__setattr__(
-        grant,
-        "_issued_binding",
-        (
-            canonical_actor,
-            canonical_workspace,
-            canonical_actor.owner_user_id,
-            canonical_workspace.workspace_id,
-            request_kind,
-            action_digest,
-            target_session_ref,
-        ),
-    )
-    return validate_authorization_grant(grant)
-
-
-def validate_authorization_grant(grant: Any) -> AuthorizationGrant:
-    """Fail closed unless *grant* is an intact result issued by this module."""
-
-    if type(grant) is not AuthorizationGrant:
-        _fail("integrity")
-    try:
-        stored_values = object.__getattribute__(grant, "__dict__")
-    except (AttributeError, TypeError):
-        _fail("integrity")
-    if type(stored_values) is not dict or set(stored_values) != _AUTHORIZATION_GRANT_FIELDS:
-        _fail("integrity")
-    if stored_values["_authorization_seal"] is not _AUTHORIZATION_GRANT_SEAL:
-        _fail("integrity")
-
-    stored_actor = stored_values["actor"]
-    stored_workspace = stored_values["workspace"]
-    actor = _copy_actor(stored_actor, "integrity")
-    workspace = _copy_workspace(stored_workspace, "integrity")
-    request_kind = stored_values["request_kind"]
-    action_digest = stored_values["action_digest"]
-    target_session_ref = stored_values["target_session_ref"]
-    if type(request_kind) is not str or request_kind not in _REQUEST_KINDS:
-        _fail("integrity")
-    if request_kind == "mutation":
-        if (
-            type(action_digest) is not str
-            or _HEX64_RE.fullmatch(action_digest) is None
-            or not _is_session_ref(target_session_ref)
-        ):
-            _fail("integrity")
-    elif action_digest is not None or target_session_ref is not None:
-        _fail("integrity")
-
-    expected_binding = (
-        actor.owner_user_id,
-        workspace.workspace_id,
-        request_kind,
-        action_digest,
-        target_session_ref,
-    )
-    issued_binding = stored_values["_issued_binding"]
-    if (
-        type(issued_binding) is not tuple
-        or len(issued_binding) != 7
-        or issued_binding[0] is not stored_actor
-        or issued_binding[1] is not stored_workspace
-        or issued_binding[2:] != expected_binding
-    ):
-        _fail("integrity")
-    return grant
 
 
 def _canonical_graph_root(graph: Any) -> tuple[str, WorkspaceRef]:
@@ -378,7 +307,7 @@ def authorize_workspace_request(
     policy: WorkspaceSecurityPolicy,
     evidence: RequestSecurityEvidence,
     graph: WorkspaceGraph,
-) -> AuthorizationGrant:
+) -> AuthorizationDecision:
     """Authorize one request without reading receipts or producing side effects."""
 
     _validate_policy(policy)
@@ -429,7 +358,7 @@ def authorize_workspace_request(
     _enforce_authority_graph_record_ceiling(policy, graph)
     validated_graph = _validated_graph(graph)
     if evidence.request_kind != "mutation":
-        return _issue_authorization_grant(
+        return AuthorizationDecision(
             actor=actor,
             workspace=workspace,
             request_kind=evidence.request_kind,
@@ -452,7 +381,7 @@ def authorize_workspace_request(
     ):
         _fail("forbidden")
 
-    return _issue_authorization_grant(
+    return AuthorizationDecision(
         actor=actor,
         workspace=workspace,
         request_kind=evidence.request_kind,
@@ -462,9 +391,8 @@ def authorize_workspace_request(
 
 
 __all__ = (
-    "AuthorizationGrant",
+    "AuthorizationDecision",
     "RequestSecurityEvidence",
     "WorkspaceSecurityPolicy",
     "authorize_workspace_request",
-    "validate_authorization_grant",
 )

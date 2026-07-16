@@ -23,14 +23,14 @@ class _EqualitySpoof:
 
 def _security_types():
     from hqa.agent_workspace_security import (
-        AuthorizationGrant,
+        AuthorizationDecision,
         RequestSecurityEvidence,
         WorkspaceSecurityPolicy,
         authorize_workspace_request,
     )
 
     return (
-        AuthorizationGrant,
+        AuthorizationDecision,
         RequestSecurityEvidence,
         WorkspaceSecurityPolicy,
         authorize_workspace_request,
@@ -142,7 +142,6 @@ def _assert_error(code: str, operation) -> None:
         "auth": "workspace_auth_failed",
         "conflict": "workspace_conflict",
         "forbidden": "workspace_forbidden",
-        "integrity": "workspace_integrity_failed",
         "quota": "workspace_quota_exceeded",
         "validation": "workspace_validation_failed",
     }[code]
@@ -151,14 +150,14 @@ def _assert_error(code: str, operation) -> None:
 def test_security_contract_values_are_exact_frozen_dataclasses() -> None:
     from hqa.agent_workspace_contract import WorkspaceRef
 
-    AuthorizationGrant, RequestSecurityEvidence, WorkspaceSecurityPolicy, _ = (
+    AuthorizationDecision, RequestSecurityEvidence, WorkspaceSecurityPolicy, _ = (
         _security_types()
     )
     policy = _policy()
     evidence = _evidence("mutation")
-    grant = _authorize(evidence)
+    decision = _authorize(evidence)
 
-    assert all(is_dataclass(value) for value in (policy, evidence, grant))
+    assert all(is_dataclass(value) for value in (policy, evidence, decision))
     assert [field.name for field in fields(WorkspaceSecurityPolicy)] == [
         "accepted_host",
         "accepted_origin",
@@ -178,91 +177,91 @@ def test_security_contract_values_are_exact_frozen_dataclasses() -> None:
         "rate_allowed",
         "target_session_ref",
     ]
-    assert [field.name for field in fields(AuthorizationGrant)] == [
+    assert [field.name for field in fields(AuthorizationDecision)] == [
         "actor",
         "workspace",
         "request_kind",
         "action_digest",
         "target_session_ref",
     ]
-    assert type(grant) is AuthorizationGrant
-    assert grant.actor == evidence.actor
-    assert grant.actor is not evidence.actor
-    assert type(grant.actor.owner_user_id) is str
-    assert grant.workspace == WorkspaceRef(WORKSPACE)
-    assert grant.request_kind == "mutation"
-    assert grant.action_digest == DIGEST
-    assert grant.target_session_ref == "session:managed"
+    assert type(decision) is AuthorizationDecision
+    assert decision.actor == evidence.actor
+    assert decision.actor is not evidence.actor
+    assert type(decision.actor.owner_user_id) is str
+    assert decision.workspace == WorkspaceRef(WORKSPACE)
+    assert decision.request_kind == "mutation"
+    assert decision.action_digest == DIGEST
+    assert decision.target_session_ref == "session:managed"
 
     for value, field_name in (
         (policy, "accepted_host"),
         (evidence, "host"),
-        (grant, "request_kind"),
+        (decision, "request_kind"),
     ):
         with pytest.raises(FrozenInstanceError):
             setattr(value, field_name, "changed")
 
 
-def test_authorization_grant_rejects_direct_public_construction() -> None:
-    from hqa.agent_workspace_contract import WorkspaceRef
+def test_authorization_decision_is_an_explicit_non_transferable_read_model() -> None:
+    import hqa.agent_workspace_security as security
 
-    AuthorizationGrant, _, _, _ = _security_types()
+    AuthorizationDecision, _, _, _ = _security_types()
+    actor = _actor(OWNER)
+    workspace = _workspace(WORKSPACE)
 
+    decision = AuthorizationDecision(
+        actor=actor,
+        workspace=workspace,
+        request_kind="api_read",
+    )
+
+    assert decision.actor == actor
+    assert decision.actor is not actor
+    assert decision.workspace == workspace
+    assert decision.workspace is not workspace
+    contract = AuthorizationDecision.__doc__ or ""
+    assert "Construction or possession grants no authority" in contract
+    assert "only a read model" in contract
+    assert "must call authorize_workspace_request" in contract
+    assert "must not accept an AuthorizationDecision as authorization proof" in contract
+    assert "AuthorizationDecision" in security.__all__
+    assert "AuthorizationGrant" not in security.__all__
+    assert "validate_authorization_grant" not in security.__all__
+    assert not hasattr(security, "AuthorizationGrant")
+    assert not hasattr(security, "validate_authorization_grant")
+
+
+def test_constructed_or_forged_decision_cannot_authorize_a_request() -> None:
+    from inspect import signature
+
+    from hqa.agent_workspace_security import (
+        AuthorizationDecision,
+        authorize_workspace_request,
+    )
+
+    decision = AuthorizationDecision(
+        actor=_actor("owner-2"),
+        workspace=_workspace(WORKSPACE),
+        request_kind="api_read",
+    )
+    object.__setattr__(decision, "request_kind", "mutation")
+
+    assert tuple(signature(authorize_workspace_request).parameters) == (
+        "policy",
+        "evidence",
+        "graph",
+    )
     with pytest.raises(TypeError):
-        AuthorizationGrant(
-            actor=_actor(OWNER),
-            workspace=WorkspaceRef(WORKSPACE),
-            request_kind="api_read",
+        authorize_workspace_request(
+            _policy(),
+            _evidence(),
+            _graph(),
+            decision,  # type: ignore[call-arg]
         )
-
-
-def test_issued_authorization_grant_passes_consumer_validation() -> None:
-    from hqa.agent_workspace_security import validate_authorization_grant
-
-    grant = _authorize(_evidence("mutation"))
-
-    assert validate_authorization_grant(grant) is grant
-
-
-def test_consumer_rejects_mutated_grant_public_binding() -> None:
-    from hqa.agent_workspace_security import validate_authorization_grant
-
-    grant = _authorize(_evidence("mutation"))
-    object.__setattr__(grant, "actor", _actor("owner-2"))
-
-    _assert_error("integrity", lambda: validate_authorization_grant(grant))
-
-
-@pytest.mark.parametrize(
-    ("field_name", "replacement_factory"),
-    [
-        ("actor", lambda: _actor(OWNER)),
-        ("workspace", lambda: _workspace(WORKSPACE)),
-    ],
-)
-def test_consumer_rejects_identity_preserving_grant_replacement(
-    field_name,
-    replacement_factory,
-) -> None:
-    from hqa.agent_workspace_security import validate_authorization_grant
-
-    grant = _authorize(_evidence("mutation"))
-    object.__setattr__(grant, field_name, replacement_factory())
-
-    _assert_error("integrity", lambda: validate_authorization_grant(grant))
-
-
-@pytest.mark.parametrize(
-    "forged_owner",
-    [_StringSubclass(OWNER), _EqualitySpoof(), "owner with spaces"],
-)
-def test_consumer_rejects_mutated_grant_nested_actor(forged_owner) -> None:
-    from hqa.agent_workspace_security import validate_authorization_grant
-
-    grant = _authorize(_evidence("mutation"))
-    object.__setattr__(grant.actor, "owner_user_id", forged_owner)
-
-    _assert_error("integrity", lambda: validate_authorization_grant(grant))
+    _assert_error(
+        "forbidden",
+        lambda: _authorize(_evidence(actor=_actor("owner-2"))),
+    )
 
 
 @pytest.mark.parametrize(
@@ -287,11 +286,11 @@ def test_authorizes_allowed_read_shapes(
         sec_fetch_site=sec_fetch_site,
     )
 
-    grant = _authorize(evidence)
+    decision = _authorize(evidence)
 
-    assert grant.request_kind == request_kind
-    assert grant.action_digest is None
-    assert grant.target_session_ref is None
+    assert decision.request_kind == request_kind
+    assert decision.action_digest is None
+    assert decision.target_session_ref is None
 
 
 @pytest.mark.parametrize(
@@ -308,9 +307,9 @@ def test_each_explicitly_configured_loopback_host_is_accepted_exactly(
     policy = _policy(accepted_host=host, accepted_origin=origin)
     evidence = _evidence(host=host, origin=origin)
 
-    grant = _authorize(evidence, policy=policy)
+    decision = _authorize(evidence, policy=policy)
 
-    assert grant.request_kind == "api_read"
+    assert decision.request_kind == "api_read"
 
 
 @pytest.mark.parametrize(
@@ -376,12 +375,12 @@ def test_request_host_is_not_normalized_or_suffix_matched(host: str) -> None:
 
 
 def test_authority_graph_record_ceiling_allows_exact_total() -> None:
-    grant = _authorize(
+    decision = _authorize(
         _evidence(),
         policy=_policy(authority_graph_record_ceiling=2),
     )
 
-    assert grant.request_kind == "api_read"
+    assert decision.request_kind == "api_read"
 
 
 def test_authority_graph_record_ceiling_rejects_over_limit_as_quota() -> None:
@@ -628,11 +627,11 @@ def test_mutation_rejects_missing_negative_or_oversize_body(
 def test_mutation_accepts_body_at_closed_ceiling_boundaries(
     body_size_bytes: int,
 ) -> None:
-    grant = _authorize(
+    decision = _authorize(
         _evidence("mutation", body_size_bytes=body_size_bytes)
     )
 
-    assert grant.action_digest == DIGEST
+    assert decision.action_digest == DIGEST
 
 
 def test_mutation_rejects_missing_rate_evidence_as_validation() -> None:
@@ -672,7 +671,7 @@ def test_mutation_rejects_illegal_or_missing_target_without_echo(
         assert target_session_ref not in str(caught.value)
 
 
-def test_external_session_write_is_conflict_with_zero_capability() -> None:
+def test_external_session_write_is_conflict_with_zero_authority_effect() -> None:
     from hqa.agent_workspace_contract import WorkspaceContractError
 
     with pytest.raises(WorkspaceContractError) as caught:
@@ -752,10 +751,10 @@ def test_forged_evidence_and_graph_are_revalidated_at_authorization_boundary() -
     assert type(evidence) is RequestSecurityEvidence
 
 
-def test_authorization_has_no_receipt_or_cache_surface() -> None:
-    from hqa.agent_workspace_security import AuthorizationGrant
+def test_authorization_decision_has_no_receipt_or_cache_surface() -> None:
+    from hqa.agent_workspace_security import AuthorizationDecision
 
-    public_names = set(AuthorizationGrant.__dataclass_fields__)
+    public_names = set(AuthorizationDecision.__dataclass_fields__)
     assert "receipt" not in public_names
     assert "cache" not in public_names
     assert "client_action_id" not in public_names
