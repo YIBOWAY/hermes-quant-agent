@@ -7,6 +7,14 @@ import json
 import pytest
 
 
+class _EqualitySpoof:
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    def __ne__(self, other: object) -> bool:
+        return False
+
+
 def _valid_action_documents() -> list[dict[str, object]]:
     payload_digest = "c" * 64
     common = {
@@ -1037,3 +1045,55 @@ def test_non_finite_and_legacy_fork_policy_values_are_rejected() -> None:
     )
     with pytest.raises(ValueError, match="exact fields"):
         parse_user_action_v1(legacy_fork)
+
+
+@pytest.mark.parametrize(
+    ("document_index", "field"),
+    [
+        (1, "source_channel"),
+        (3, "initial_mode"),
+        (7, "expected_status"),
+        (7, "decision"),
+        (9, "expected_status"),
+        (0, "kind"),
+        (0, "schema_version"),
+    ],
+)
+def test_closed_enum_and_discriminator_fields_reject_equality_spoofs(
+    document_index: int, field: str
+) -> None:
+    from hqa.agent_workspace_actions import parse_user_action_v1
+
+    document = _valid_action_documents()[document_index]
+    document[field] = _EqualitySpoof()
+
+    with pytest.raises((TypeError, ValueError)):
+        parse_user_action_v1(document)
+
+
+@pytest.mark.parametrize(
+    ("document_index", "field"),
+    [
+        (1, "source_channel"),
+        (3, "initial_mode"),
+        (7, "expected_status"),
+        (7, "decision"),
+        (9, "expected_status"),
+    ],
+)
+def test_serialization_and_digest_reject_forged_non_json_enum_values(
+    document_index: int, field: str
+) -> None:
+    from hqa.agent_workspace_actions import (
+        action_to_document,
+        canonical_action_digest,
+        parse_user_action_v1,
+    )
+
+    action = parse_user_action_v1(_valid_action_documents()[document_index])
+    object.__setattr__(action, field, _EqualitySpoof())
+
+    with pytest.raises(TypeError, match="strict JSON"):
+        action_to_document(action)
+    with pytest.raises(TypeError, match="strict JSON"):
+        canonical_action_digest(action)

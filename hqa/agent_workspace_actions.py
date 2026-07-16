@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import re
 from typing import Any, Mapping, Optional, Union
 from urllib.parse import quote
@@ -173,6 +174,31 @@ def _validate_note(value: Any, field: str) -> None:
         raise ValueError("{} must be bounded nonempty printable text".format(field))
 
 
+def _validate_strict_json(value: Any) -> None:
+    if value is None or type(value) in (str, int, bool):
+        return
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("action document requires finite strict JSON numbers")
+        return
+    if type(value) is list:
+        for item in value:
+            _validate_strict_json(item)
+        return
+    if type(value) is dict:
+        for key, item in value.items():
+            if type(key) is not str:
+                raise TypeError("action document requires strict JSON object keys")
+            _validate_strict_json(item)
+        return
+    raise TypeError("action document requires strict JSON primitives")
+
+
+def _strict_json_document(document: dict[str, Any]) -> dict[str, Any]:
+    _validate_strict_json(document)
+    return document
+
+
 @dataclass(frozen=True)
 class CreateManagedSession:
     client_action_id: str
@@ -199,7 +225,10 @@ class ForkIntoManagedSession:
     def __post_init__(self) -> None:
         _validate_common(self.client_action_id, self.workspace)
         _validate_ref(self.source_session_ref, "source_session_ref", "session:")
-        if self.source_channel not in ("discord", "historical"):
+        if type(self.source_channel) is not str or self.source_channel not in (
+            "discord",
+            "historical",
+        ):
             raise ValueError("source_channel must be discord or historical")
         _validate_source_cursor(self.fork_point)
         _validate_digest(
@@ -239,7 +268,7 @@ class StartResearch:
             self.managed_session_ref, "managed_session_ref", "session:"
         )
         _validate_payload_binding(self.payload_ref, self.payload_digest)
-        if self.initial_mode != "plan_only":
+        if type(self.initial_mode) is not str or self.initial_mode != "plan_only":
             raise ValueError("initial_mode must be plan_only")
 
 
@@ -312,9 +341,15 @@ class DecideHermesCommandApproval:
         _validate_ref(self.approval_ref, "approval_ref", "approval:")
         _validate_ref(self.run_ref, "run_ref", "run:")
         _validate_digest(self.command_digest, "command_digest")
-        if self.expected_status != "pending":
+        if (
+            type(self.expected_status) is not str
+            or self.expected_status != "pending"
+        ):
             raise ValueError("expected_status must be pending")
-        if self.decision not in ("allow_once", "deny"):
+        if type(self.decision) is not str or self.decision not in (
+            "allow_once",
+            "deny",
+        ):
             raise ValueError("decision must be allow_once or deny")
         object.__setattr__(
             self,
@@ -353,7 +388,10 @@ class ReviewCandidateCAS:
         _validate_common(self.client_action_id, self.workspace)
         _validate_ref(self.candidate_ref, "candidate_ref", "candidate:")
         _validate_digest(self.expected_digest, "expected_digest")
-        if self.expected_status != "pending":
+        if (
+            type(self.expected_status) is not str
+            or self.expected_status != "pending"
+        ):
             raise ValueError("expected_status must be pending")
         _validate_note(self.note, "note")
 
@@ -427,7 +465,7 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
                 "payload_ttl_days": action.payload_ttl_days,
             }
         )
-        return document
+        return _strict_json_document(document)
     if type(action) is ForkIntoManagedSession:
         document.update(
             {
@@ -439,7 +477,7 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
                 "payload_ttl_days": action.payload_ttl_days,
             }
         )
-        return document
+        return _strict_json_document(document)
     if type(action) is ConversationTurn:
         document.update(
             {
@@ -449,7 +487,7 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
                 "payload_digest": action.payload_digest,
             }
         )
-        return document
+        return _strict_json_document(document)
     if type(action) is StartResearch:
         document.update(
             {
@@ -460,7 +498,7 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
                 "initial_mode": action.initial_mode,
             }
         )
-        return document
+        return _strict_json_document(document)
     if type(action) is ContinueResearch:
         document.update(
             {
@@ -471,7 +509,7 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
                 "payload_digest": action.payload_digest,
             }
         )
-        return document
+        return _strict_json_document(document)
     if type(action) is ConfirmResearchPlan:
         document.update(
             {
@@ -481,7 +519,7 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
                 "plan_digest": action.plan_digest,
             }
         )
-        return document
+        return _strict_json_document(document)
     if type(action) is RequestStop:
         document.update(
             {
@@ -492,7 +530,7 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
                 "platform_job_ref": action.platform_job_ref,
             }
         )
-        return document
+        return _strict_json_document(document)
     if type(action) is DecideHermesCommandApproval:
         document.update(
             {
@@ -505,7 +543,7 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
                 "decision": action.decision,
             }
         )
-        return document
+        return _strict_json_document(document)
     if type(action) is ConfirmFormulaSource:
         document.update(
             {
@@ -515,7 +553,7 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
                 "confirmation_note": action.confirmation_note,
             }
         )
-        return document
+        return _strict_json_document(document)
     if type(action) is ReviewCandidateCAS:
         document.update(
             {
@@ -526,7 +564,7 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
                 "note": action.note,
             }
         )
-        return document
+        return _strict_json_document(document)
     if type(action) is PreparePromotionReview:
         document.update(
             {
@@ -539,7 +577,7 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
                 "base_commit": action.base_commit,
             }
         )
-        return document
+        return _strict_json_document(document)
     raise TypeError("unknown UserActionV1 type")
 
 
