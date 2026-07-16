@@ -1,8 +1,8 @@
 # Agent Workspace v1 ADR — LIMITED-DEVICE CANDIDATE
 
-> **状态：CANDIDATE / IN PROGRESS / V0 NOT DONE。** 2026-07-16 在 Windows limited-device 工作树中
-> 只完成 targeted-only 合同文档候选；primary 三仓 full suite、executable contracts、cross-review
-> 与 runtime manifest 待完成。本 ADR 不授权任何 live effect。
+> **状态：LIMITED-DEVICE CANDIDATE IN PROGRESS / PRIMARY VALIDATION PENDING / V0 NOT DONE。**
+> 当前只有 targeted-only 合同文档候选；primary 三仓 full suite、executable contracts、runtime
+> manifest、validation 与 cross-review 均待完成。本 ADR 不授权任何 live effect。
 
 ## 决策
 
@@ -31,9 +31,20 @@ PreparePromotionReview
 ```
 
 `snapshot` 是权威事实的可重建只读投影；`follow` 只跟随 durable observation。route、React hook
-和 worker 不得各自实现恢复状态机。每个 mutation 必须 canonicalize 后绑定
-`client_action_id + action_digest`：同 ID 同 digest 返回原 receipt，同 ID 不同 digest 冲突且零新增
-写入。超时或丢包后只允许按原 identity lookup/reconcile，禁止盲重发。
+和 worker 不得各自实现恢复状态机。`client_action_id` 的 namespace 固定为
+`owner_id + workspace_id + action_kind`；同 namespace 内再绑定 `action_digest`。必须先验证 signed
+actor session 与 Workspace ownership，之后才能 lookup 或返回 cached receipt；同 ID 同 digest 返回
+原 receipt，同 ID 不同 digest 冲突且零新增写入。超时后只按原 identity reconcile，禁止盲重发。
+
+## Workspace ownership 与 session containment
+
+- 每个 Workspace 恰有一个 immutable owner；owner 可拥有多个 Workspace。`act`、`snapshot`、
+  `follow` 在读取 receipt、projection 或 event 前都必须验证 authenticated actor 是该 owner。
+- 每个 `web_managed_session` 恰好 contained by 一个 Workspace，只有该 Workspace owner 可写。
+  Workspace 可链接 external Session 作为只读 observation/lineage source，但链接不转移 ownership 或 writer。
+- fork 的 managed child contained by actor-owned Workspace；parent 保持 external read-only 或原 managed
+  owner 独占。Task/Attempt/Command/Run/Result 只有经 exact refs 属于该 Workspace 才可读写或 follow。
+- `observed_external_session` 在 Web 始终只读；ownership 校验不能把它升级为 managed writer。
 
 ## Action 合同
 
@@ -72,6 +83,9 @@ Agent Workspace 不建第五份业务 journal；snapshot/event/cursor 必须可�
 
 | Source | Cardinality | Target / 含义 |
 |---|---|---|
+| owner principal | 1:N | Workspace；每个 Workspace 恰有 1 个 immutable owner |
+| Workspace | 1:0..N | contained managed Session；每个 managed Session 恰属 1 个 Workspace |
+| Workspace | 1:0..N | linked external Session refs；只读且不转移 writer ownership |
 | `observed_external_session` | 1:1 | Hermes Session；Web read-only |
 | `web_managed_session` | 1:1 | Hermes Session；Web control plane 是唯一 writer |
 | parent Session | 1:0..N | fork 后的 managed child；每个 child 只有 0..1 parent |
@@ -129,9 +143,13 @@ cursor 过期或 source gap 以 `resync_required` recovery detail 触发新 snap
 
 - owner bootstrap 使用 macOS Keychain 或 owner-only `0600` 一次性 token；交换后立即轮换。签名
   key、bearer/provider secret 不进入仓库、日志或浏览器脚本。
-- 平台签发 12 小时 `HttpOnly`、`SameSite=Strict` signed cookie（适用时 `Secure`），并使用独立
-  CSRF token。每个 mutation 同时校验 actor session、Origin/`Sec-Fetch-Site`、CSRF、ownership、
-  action digest、rate/size limit；loopback 不是认证替代品。
+- BFF 只接受配置中 exact loopback Host + port；`127.0.0.1`、`localhost` 或 `[::1]` 仅在逐项配置
+  时有效，禁止 wildcard/suffix match。loopback binding 不是 authentication。
+- sensitive GET、`snapshot` 与 SSE/`follow` 都要求 accepted Host、signed actor session 和 Workspace
+  ownership。浏览器 API 请求的 `Origin` 必须缺失或 exact accepted origin，`Sec-Fetch-Site` 必须是
+  `same-origin`；foreign/inconsistent metadata fail closed，`none` 只允许顶层文档、不得用于 API/SSE。
+- 平台签发 12 小时 `HttpOnly`、`SameSite=Strict` signed cookie（适用时 `Secure`）。mutation 在上述
+  read policy 之外还必须验证独立 CSRF token、action digest 与 rate/size limit。
 - v0.2 防跨站 loopback 诱导、重放、错误 owner 与最小 DOM 暴露；恶意 same-UID 本地进程不在
   可可靠防御范围。limited-device 候选不执行 bootstrap 或签发 cookie。
 
@@ -174,7 +192,7 @@ manifest 缺失、source 不匹配、dirty 未声明、artifact/runtime identity
 
 ## Candidate 验收边界
 
-此候选只证明三份文档在 limited device 上形成一致合同，并不证明 V0 完成。V0 只有在 primary 环境
-完成 executable action/cardinality/auth/retention contracts、三仓 full suite、source/runtime manifest
-核验和独立 cross-review 后才可标记 DONE；在此之前 public composer、`chat_write_ready`、browser
-mutation、worker claim/dispatch、provider、Gate 与 migration live apply 全部保持 OFF。
+此 ADR candidate 已存在，但 executable action/cardinality/auth/retention contracts、runtime manifest、
+primary validation、三仓 full suite 与独立 cross-review 均 pending；V0 不是 DONE。在此之前 public
+composer、`chat_write_ready`、browser mutation、worker claim/dispatch、provider、Gate 与 migration
+live apply 全部保持 OFF。

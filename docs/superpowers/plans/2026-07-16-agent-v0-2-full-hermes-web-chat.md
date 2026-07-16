@@ -10,7 +10,7 @@
 > migration、browser mutation、worker claim/dispatch、provider、Gate、paper/live 与 public composer
 > 等所有 live gates 保持 OFF；本 addendum 不构成任何 live 授权。
 
-> **状态（2026-07-16）：CURRENT / PLAN ACCEPTED / V0 CONTRACT CANDIDATE IN PROGRESS；RUNTIME IMPLEMENTATION NOT STARTED。** 本计划是 D-32 唯一 active
+> **状态（2026-07-16）：CURRENT / PLAN ACCEPTED / V0 LIMITED-DEVICE CANDIDATE IN PROGRESS / PRIMARY VALIDATION PENDING。** 本计划是 D-32 唯一 active
 > implementation plan。此前的 Wave 3 文档保留为已交付事实与问题输入，不再从其中的旧顺序、
 > unchecked checkbox 或“下一步”继续施工。
 >
@@ -259,10 +259,11 @@ interface。fake 不是临时产品路径，也不能通过 feature flag 面向�
 
 ### 5.1 每个 user action
 
-1. 校验 loopback、signed local session、same-origin、`Sec-Fetch-Site`、CSRF 和 actor ownership；
+1. 校验 accepted Host、signed local session、same-origin、`Sec-Fetch-Site`、CSRF 和 actor ownership；
    loopback 本身不等于登录。
-2. canonicalize action，计算 digest；同一 `client_action_id + digest` 返回原 receipt，同 ID 不同
-   digest 返回 409，零新增写入。
+2. 先验证 actor 对 Workspace 的 ownership，再在
+   `owner_id + workspace_id + action_kind + client_action_id` namespace 内 canonicalize action 并计算
+   digest；只有授权后才可返回 cached receipt，同 ID 不同 digest 返回 409 且零新增写入。
 3. 校验 session 类型与 immutable provider policy；`observed_external_session` 拒绝写入，改变
    provider 或从 Discord/历史继续必须 fork 到新的 `web_managed_session`。
 4. 将 prompt 写入 intent payload authority；prompt 不进入 argv、stdout、日志或 PostgreSQL。
@@ -418,9 +419,9 @@ cardinality 和三仓交付边界。
   Gate 1。
 - migration、Hermes mutation、provider call、browser mutation 均为零。
 
-状态：**NOT STARTED（本实施计划及跨文档治理前置已完成；V0 ADR、contract code 与 runtime
-均未开始）。** V0 不是“写完计划”就完成；必须交付 executable model/contract tests 和三仓
-cross-review 才能标 DONE。
+状态：**LIMITED-DEVICE CANDIDATE IN PROGRESS / PRIMARY VALIDATION PENDING。** ADR candidate 已存在，
+但 executable model/contract tests、runtime manifest、primary validation 与三仓 cross-review 均
+pending；V0 不是 DONE。
 
 ### Slice V1 — Stop-the-line launch baseline
 
@@ -731,7 +732,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 
 | Slice | 状态 | 下一准入 |
 |---|---|---|
-| V0 Interface/cardinality/authority freeze | NOT STARTED（plan/docs governance prerequisite complete） | ADR + executable cardinality/action/auth/retention contracts + cross-review |
+| V0 Interface/cardinality/authority freeze | LIMITED-DEVICE CANDIDATE IN PROGRESS / PRIMARY VALIDATION PENDING | ADR candidate exists；executable contracts + runtime manifest + primary validation + cross-review pending；not DONE |
 | V1 Stop-the-line baseline | NOT STARTED | 无隐式 migration；标准 verify/offline build green |
 | V2 Hermes DurableRunAuthority | NOT STARTED | C1/C2 restart/recovery contract green |
 | V3 HQA Intent/WorkflowAuthority | NOT STARTED | Research Task 1:N Attempt + backup/restore green |
