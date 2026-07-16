@@ -415,6 +415,27 @@ def test_event_page_is_frozen_and_requires_strictly_increasing_cursors() -> None
         EventPage(events=("event-1",))  # type: ignore[arg-type]
 
 
+def test_event_page_requires_next_cursor_to_match_the_final_event() -> None:
+    from hqa.agent_workspace_contract import EventPage, WorkspaceCursor, WorkspaceEvent
+
+    event = WorkspaceEvent(
+        workspace_cursor=WorkspaceCursor(value=4),
+        source_authority="postgresql",
+        source_event_id="event-4",
+        source_cursor="4",
+        observed_at="2026-07-16T04:34:56Z",
+        event_type="command.updated",
+        metadata={},
+    )
+    assert EventPage(
+        events=(event,), next_cursor=WorkspaceCursor(value=4)
+    ).next_cursor == WorkspaceCursor(value=4)
+
+    for next_cursor in (None, WorkspaceCursor(value=3), WorkspaceCursor(value=5)):
+        with pytest.raises(ValueError, match="final event cursor"):
+            EventPage(events=(event,), next_cursor=next_cursor)
+
+
 def test_event_page_enforces_exact_resync_recovery_semantics() -> None:
     from hqa.agent_workspace_contract import EventPage, WorkspaceCursor
 
@@ -444,6 +465,31 @@ def test_event_page_enforces_exact_resync_recovery_semantics() -> None:
     for override in invalid_cases:
         with pytest.raises((TypeError, ValueError)):
             EventPage(events=(), **override)
+
+
+def test_resync_event_page_contains_no_events_or_next_cursor() -> None:
+    from hqa.agent_workspace_contract import EventPage, WorkspaceCursor, WorkspaceEvent
+
+    event = WorkspaceEvent(
+        workspace_cursor=WorkspaceCursor(value=1),
+        source_authority="hqa",
+        source_event_id="event-1",
+        source_cursor="1",
+        observed_at="2026-07-16T04:34:56Z",
+        event_type="attempt.updated",
+        metadata={},
+    )
+    invalid_state = (
+        {"events": (event,), "next_cursor": None},
+        {"events": (), "next_cursor": WorkspaceCursor(value=1)},
+    )
+    for state in invalid_state:
+        with pytest.raises(ValueError, match="resync pages cannot contain"):
+            EventPage(
+                **state,
+                resync_required=True,
+                recovery_action="resnapshot_workspace",
+            )
 
 
 def test_workspace_contract_error_has_closed_codes_and_total_recovery_defaults() -> None:

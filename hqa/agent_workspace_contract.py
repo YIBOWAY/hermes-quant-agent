@@ -280,14 +280,21 @@ class EventPage:
         if self.recovery_action is not None:
             _validate_identifier(self.recovery_action, "recovery_action")
         if self.resync_required:
+            if self.events or self.next_cursor is not None:
+                raise ValueError(
+                    "resync pages cannot contain events or a next_cursor"
+                )
             if self.recovery_action != "resnapshot_workspace":
                 raise ValueError(
                     "resync_required pages require resnapshot_workspace recovery"
                 )
-        elif self.recovery_action == "resnapshot_workspace":
-            raise ValueError(
-                "non-resync pages cannot claim resnapshot_workspace recovery"
-            )
+        else:
+            if self.events and self.next_cursor != self.events[-1].workspace_cursor:
+                raise ValueError("next_cursor must match the final event cursor")
+            if self.recovery_action == "resnapshot_workspace":
+                raise ValueError(
+                    "non-resync pages cannot claim resnapshot_workspace recovery"
+                )
 
 
 @dataclass(frozen=True)
