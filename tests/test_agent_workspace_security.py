@@ -109,6 +109,12 @@ def _evidence(request_kind: str = "api_read", **changes):
     return RequestSecurityEvidence(**values)
 
 
+def _actor(owner_user_id: str):
+    from hqa.agent_workspace_contract import ActorRef
+
+    return ActorRef(owner_user_id)
+
+
 def _authorize(evidence, *, policy=None, graph=None):
     _, _, _, authorize_workspace_request = _security_types()
     return authorize_workspace_request(
@@ -172,6 +178,8 @@ def test_security_contract_values_are_exact_frozen_dataclasses() -> None:
     ]
     assert type(grant) is AuthorizationGrant
     assert grant.actor == evidence.actor
+    assert grant.actor is not evidence.actor
+    assert type(grant.actor.owner_user_id) is str
     assert grant.workspace == WorkspaceRef(WORKSPACE)
     assert grant.request_kind == "mutation"
     assert grant.action_digest == DIGEST
@@ -220,7 +228,6 @@ def test_authorizes_allowed_read_shapes(
     [
         ("localhost:8000", "http://localhost:8000"),
         ("[::1]:8000", "http://[::1]:8000"),
-        ("127.0.0.2:8000", "http://127.0.0.2:8000"),
     ],
 )
 def test_each_explicitly_configured_loopback_host_is_accepted_exactly(
@@ -246,6 +253,8 @@ def test_each_explicitly_configured_loopback_host_is_accepted_exactly(
         "*.localhost:8000",
         "localhost.attacker.test:8000",
         "example.test:8000",
+        "127.0.0.2:8000",
+        "127.255.255.255:8000",
         "127.0.0.1:8000\r\nX-Evil: yes",
     ],
 )
@@ -368,6 +377,68 @@ def test_wrong_owner_is_rejected_before_target_lookup_without_leakage(
     assert str(caught.value) == "workspace_forbidden"
     assert "owner-2" not in str(caught.value)
     assert "session:" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "forged_owner",
+    [_StringSubclass(OWNER), _EqualitySpoof(), "owner with spaces"],
+)
+def test_nested_actor_state_is_canonicalized_before_authorization(
+    forged_owner,
+) -> None:
+    evidence = _evidence("mutation")
+    object.__setattr__(evidence.actor, "owner_user_id", forged_owner)
+
+    _assert_error("forbidden", lambda: _authorize(evidence))
+
+
+@pytest.mark.parametrize(
+    ("evidence_factory", "expected_code"),
+    [
+        (
+            lambda: _evidence("mutation", host="localhost:8000"),
+            "forbidden",
+        ),
+        (
+            lambda: _evidence("mutation", signed_actor_session=False),
+            "auth",
+        ),
+        (
+            lambda: _evidence(
+                "mutation",
+                actor=_actor("owner-2"),
+                target_session_ref="malformed target",
+            ),
+            "forbidden",
+        ),
+        (
+            lambda: _evidence(
+                "mutation",
+                origin="https://attacker.test",
+            ),
+            "forbidden",
+        ),
+        (
+            lambda: _evidence("mutation", origin=None),
+            "forbidden",
+        ),
+        (
+            lambda: _evidence("mutation", sec_fetch_site="cross-site"),
+            "forbidden",
+        ),
+    ],
+)
+def test_request_gates_precede_full_authority_graph_validation(
+    evidence_factory,
+    expected_code: str,
+) -> None:
+    graph = _graph()
+    object.__setattr__(graph, "sessions", (_EqualitySpoof(),))
+
+    _assert_error(
+        expected_code,
+        lambda: _authorize(evidence_factory(), graph=graph),
+    )
 
 
 @pytest.mark.parametrize(
@@ -548,7 +619,7 @@ def test_forged_evidence_and_graph_are_revalidated_at_authorization_boundary() -
 
     graph = _graph()
     object.__setattr__(graph, "owner_user_id", "owner-2")
-    _assert_error("validation", lambda: _authorize(_evidence(), graph=graph))
+    _assert_error("forbidden", lambda: _authorize(_evidence(), graph=graph))
 
     assert type(evidence) is RequestSecurityEvidence
 

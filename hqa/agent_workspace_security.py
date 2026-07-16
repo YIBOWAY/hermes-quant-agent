@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import ipaddress
 import re
 from typing import Any, Optional
 
@@ -52,23 +51,14 @@ def _validate_loopback_host(value: Any) -> None:
         if match is None:
             _fail("validation")
         hostname, port_text = match.groups()
-        try:
-            address = ipaddress.ip_address(hostname)
-        except ValueError:
-            _fail("validation")
-        if address.version != 6 or not address.is_loopback:
+        if hostname != "::1":
             _fail("validation")
     else:
         if value.count(":") != 1:
             _fail("validation")
         hostname, port_text = value.rsplit(":", 1)
-        if hostname != "localhost":
-            try:
-                address = ipaddress.ip_address(hostname)
-            except ValueError:
-                _fail("validation")
-            if address.version != 4 or not address.is_loopback:
-                _fail("validation")
+        if hostname not in ("127.0.0.1", "localhost"):
+            _fail("validation")
 
     if not port_text.isascii() or not port_text.isdigit():
         _fail("validation")
@@ -208,6 +198,34 @@ def _is_session_ref(value: Any) -> bool:
     )
 
 
+def _canonical_actor(actor: ActorRef) -> ActorRef:
+    if type(actor.owner_user_id) is not str:
+        _fail("forbidden")
+    try:
+        return ActorRef(actor.owner_user_id)
+    except (TypeError, ValueError):
+        _fail("forbidden")
+
+
+def _canonical_graph_root(graph: Any) -> tuple[str, WorkspaceRef]:
+    if type(graph) is not WorkspaceGraph:
+        _fail("validation")
+    if type(graph.owner_user_id) is not str or type(graph.workspace_ref) is not str:
+        _fail("validation")
+    try:
+        owner = ActorRef(graph.owner_user_id)
+        workspace = WorkspaceRef(graph.workspace_ref)
+    except (TypeError, ValueError):
+        _fail("validation")
+    if (
+        not graph.workspace_ref.startswith("workspace:")
+        or graph.workspace_ref == "workspace:"
+        or _IDENTIFIER_RE.fullmatch(graph.workspace_ref) is None
+    ):
+        _fail("validation")
+    return owner.owner_user_id, workspace
+
+
 def _validated_graph(graph: Any) -> WorkspaceGraph:
     if type(graph) is not WorkspaceGraph:
         _fail("validation")
@@ -227,15 +245,21 @@ def authorize_workspace_request(
 
     _validate_policy(policy)
     _validate_evidence(evidence)
-    validated_graph = _validated_graph(graph)
 
     if evidence.host != policy.accepted_host:
         _fail("forbidden")
     if not evidence.signed_actor_session:
         _fail("auth")
-    if evidence.actor.owner_user_id != validated_graph.owner_user_id:
+    actor = _canonical_actor(evidence.actor)
+    root_owner, workspace = _canonical_graph_root(graph)
+    if actor.owner_user_id != root_owner:
         _fail("forbidden")
     if evidence.origin is not None and evidence.origin != policy.accepted_origin:
+        _fail("forbidden")
+    if (
+        evidence.request_kind == "mutation"
+        and evidence.origin != policy.accepted_origin
+    ):
         _fail("forbidden")
     if evidence.request_kind == "top_level_document":
         if evidence.sec_fetch_site not in ("none", "same-origin"):
@@ -243,16 +267,14 @@ def authorize_workspace_request(
     elif evidence.sec_fetch_site != "same-origin":
         _fail("forbidden")
 
-    workspace = WorkspaceRef(validated_graph.workspace_ref)
+    validated_graph = _validated_graph(graph)
     if evidence.request_kind != "mutation":
         return AuthorizationGrant(
-            actor=evidence.actor,
+            actor=actor,
             workspace=workspace,
             request_kind=evidence.request_kind,
         )
 
-    if evidence.origin != policy.accepted_origin:
-        _fail("forbidden")
     if evidence.csrf_verified is not True:
         _fail("forbidden")
     if (
@@ -291,7 +313,7 @@ def authorize_workspace_request(
         _fail("forbidden")
 
     return AuthorizationGrant(
-        actor=evidence.actor,
+        actor=actor,
         workspace=workspace,
         request_kind=evidence.request_kind,
         action_digest=evidence.action_digest,
