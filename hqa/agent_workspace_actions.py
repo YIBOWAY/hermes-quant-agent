@@ -97,11 +97,14 @@ def _validate_common(client_action_id: Any, workspace: Any) -> None:
 
 
 def _parse_workspace(value: Any) -> WorkspaceRef:
-    if not isinstance(value, Mapping):
+    if type(value) is not dict:
         raise TypeError("workspace must be a JSON object")
-    if set(value) != {"workspace_id"}:
+    workspace = dict(value)
+    if any(type(key) is not str for key in workspace):
+        raise ValueError("workspace object keys must be exact strings")
+    if set(workspace) != {"workspace_id"}:
         raise ValueError("workspace requires exact fields")
-    return WorkspaceRef(workspace_id=value["workspace_id"])
+    return WorkspaceRef(workspace_id=workspace["workspace_id"])
 
 
 def _validate_digest(value: Any, field: str) -> None:
@@ -155,13 +158,15 @@ def _normalize_timestamp(value: Any) -> str:
     parsed_value = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
         parsed = datetime.fromisoformat(parsed_value)
-    except ValueError as exc:
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("expected_expires_at must be timezone-aware")
+        return parsed.astimezone(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%S.%fZ"
+        )
+    except (ValueError, OverflowError, OSError) as exc:
         raise ValueError(
             "expected_expires_at must be a canonical timezone-aware timestamp"
         ) from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError("expected_expires_at must be timezone-aware")
-    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _validate_note(value: Any, field: str) -> None:
@@ -449,7 +454,7 @@ _ACTION_TYPES = (
 )
 
 
-def action_to_document(action: _UserAction) -> dict[str, Any]:
+def _action_to_raw_document(action: _UserAction) -> dict[str, Any]:
     if type(action) not in _ACTION_TYPES:
         raise TypeError("unknown UserActionV1 type")
     document = {
@@ -581,6 +586,15 @@ def action_to_document(action: _UserAction) -> dict[str, Any]:
     raise TypeError("unknown UserActionV1 type")
 
 
+def _revalidate_action(action: _UserAction) -> _UserAction:
+    return parse_user_action_v1(_action_to_raw_document(action))
+
+
+def action_to_document(action: _UserAction) -> dict[str, Any]:
+    validated_action = _revalidate_action(action)
+    return _action_to_raw_document(validated_action)
+
+
 def canonical_action_digest(action: _UserAction) -> str:
     canonical_json = json.dumps(
         action_to_document(action),
@@ -592,8 +606,11 @@ def canonical_action_digest(action: _UserAction) -> str:
 
 
 def parse_user_action_v1(document: Mapping[str, Any]) -> _UserAction:
-    if not isinstance(document, Mapping):
-        raise TypeError("UserActionV1 document must be a mapping")
+    if type(document) is not dict:
+        raise TypeError("UserActionV1 document must be a built-in dict")
+    document = dict(document)
+    if any(type(key) is not str for key in document):
+        raise ValueError("UserActionV1 document keys must be exact strings")
     if "kind" not in document:
         raise ValueError("UserActionV1 document requires exact fields")
     kind = document.get("kind")
@@ -699,6 +716,7 @@ def parse_user_action_v1(document: Mapping[str, Any]) -> _UserAction:
 
 
 def route_for_action(action: _UserAction) -> str:
+    action = _revalidate_action(action)
     if type(action) is CreateManagedSession:
         return "/api/hermes/managed-sessions"
     if type(action) is ForkIntoManagedSession:

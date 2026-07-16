@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import FrozenInstanceError, dataclass, fields, is_dataclass, replace
 import hashlib
 import json
@@ -13,6 +14,39 @@ class _EqualitySpoof:
 
     def __ne__(self, other: object) -> bool:
         return False
+
+
+class _SpoofStringKey:
+    def __init__(self, target: str) -> None:
+        self.target = target
+
+    def __hash__(self) -> int:
+        return hash(self.target)
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+
+class _StringSubclass(str):
+    pass
+
+
+class _DictSubclass(dict):
+    pass
+
+
+class _CustomMapping(Mapping):
+    def __init__(self, document: dict[object, object]) -> None:
+        self._document = document
+
+    def __getitem__(self, key: object) -> object:
+        return self._document[key]
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        return iter(self._document)
+
+    def __len__(self) -> int:
+        return len(self._document)
 
 
 def _valid_action_documents() -> list[dict[str, object]]:
@@ -1097,3 +1131,270 @@ def test_serialization_and_digest_reject_forged_non_json_enum_values(
         action_to_document(action)
     with pytest.raises(TypeError, match="strict JSON"):
         canonical_action_digest(action)
+
+
+@pytest.mark.parametrize(
+    ("document_index", "field", "forged_value"),
+    [
+        (7, "decision", "allow_permanently"),
+        (7, "expected_status", "approved"),
+        (9, "expected_status", "approved"),
+        (3, "initial_mode", "other"),
+        (1, "source_channel", "managed"),
+        (0, "payload_ttl_days", True),
+        (5, "plan_version", True),
+        (2, "payload_digest", "d" * 64),
+        (4, "task_ref", "task:bad/path"),
+        (9, "expected_digest", "A" * 64),
+        (8, "confirmation_note", "   "),
+        (8, "confirmation_note", "line\nbreak"),
+        (10, "base_commit", "HEAD"),
+    ],
+)
+def test_every_public_action_boundary_revalidates_json_valid_forged_fields(
+    document_index: int, field: str, forged_value: object
+) -> None:
+    from hqa.agent_workspace_actions import (
+        action_to_document,
+        canonical_action_digest,
+        parse_user_action_v1,
+        route_for_action,
+    )
+
+    action = parse_user_action_v1(_valid_action_documents()[document_index])
+    object.__setattr__(action, field, forged_value)
+
+    for boundary in (action_to_document, canonical_action_digest, route_for_action):
+        with pytest.raises((TypeError, ValueError)):
+            boundary(action)
+
+
+def test_wire_parser_requires_exact_builtin_dicts_and_string_keys() -> None:
+    from hqa.agent_workspace_actions import parse_user_action_v1
+    from hqa.agent_workspace_contract import WorkspaceRef
+
+    valid = _valid_action_documents()[0]
+    for invalid_document in (
+        _DictSubclass(valid),
+        _CustomMapping(dict(valid)),
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            parse_user_action_v1(invalid_document)  # type: ignore[arg-type]
+
+    for key in (_StringSubclass("kind"), _SpoofStringKey("kind")):
+        invalid_key_document = dict(valid)
+        kind = invalid_key_document.pop("kind")
+        invalid_key_document[key] = kind  # type: ignore[index]
+        with pytest.raises((TypeError, ValueError)):
+            parse_user_action_v1(invalid_key_document)
+
+    workspace = {"workspace_id": "workspace:alpha"}
+    for invalid_workspace in (
+        _DictSubclass(workspace),
+        _CustomMapping(workspace),
+        WorkspaceRef(workspace_id="workspace:alpha"),
+    ):
+        document = dict(valid, workspace=invalid_workspace)
+        with pytest.raises((TypeError, ValueError)):
+            parse_user_action_v1(document)
+
+    for key in (
+        _StringSubclass("workspace_id"),
+        _SpoofStringKey("workspace_id"),
+    ):
+        invalid_workspace_key = {key: "workspace:alpha"}
+        document = dict(valid, workspace=invalid_workspace_key)
+        with pytest.raises((TypeError, ValueError)):
+            parse_user_action_v1(document)
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "0001-01-01T00:00:00+14:00",
+        "9999-12-31T23:59:59-14:00",
+    ],
+)
+def test_timestamp_utc_normalization_overflow_is_a_controlled_value_error(
+    timestamp: str,
+) -> None:
+    from hqa.agent_workspace_actions import parse_user_action_v1
+
+    approval = _valid_action_documents()[7]
+    with pytest.raises(ValueError, match="canonical timezone-aware timestamp"):
+        parse_user_action_v1(dict(approval, expected_expires_at=timestamp))
+
+
+@pytest.mark.parametrize(
+    ("document", "expected_digest"),
+    [
+        (
+            {
+                "schema_version": 1,
+                "kind": "conversation.turn",
+                "client_action_id": "action:test-1",
+                "workspace": {"workspace_id": "workspace:alpha"},
+                "managed_session_ref": "session:managed.1",
+                "payload_ref": "payload:sha256:" + "c" * 64,
+                "payload_digest": "c" * 64,
+            },
+            "cc0149daefe9354779611f064c285b2dd653f53e7a0273938176ab97752d7f8e",
+        ),
+        (
+            {
+                "schema_version": 1,
+                "kind": "gate1.formula_source.confirm",
+                "client_action_id": "action:test-1",
+                "workspace": {"workspace_id": "workspace:alpha"},
+                "task_ref": "task:research.1",
+                "reviewed_source_sha256": "f" * 64,
+                "confirmation_note": "人工确认精确公式来源。",
+            },
+            "9feb7fa3262cadafa88d56095c083df4354517c31dd6482b9ea02cffe0371601",
+        ),
+        (
+            {
+                "schema_version": 1,
+                "kind": "hermes.command_approval.decide",
+                "client_action_id": "action:test-1",
+                "workspace": {"workspace_id": "workspace:alpha"},
+                "approval_ref": "approval:challenge.1",
+                "run_ref": "run:hermes.1",
+                "command_digest": "e" * 64,
+                "expected_status": "pending",
+                "expected_expires_at": "2026-07-16T20:30:40+08:00",
+                "decision": "deny",
+            },
+            "e3582b42fbe7b743955fae2feff3a7d818aacaf605bf4afb8a3010a48bf7fd37",
+        ),
+    ],
+)
+def test_canonical_action_digest_matches_hard_coded_golden_vectors(
+    document: dict[str, object], expected_digest: str
+) -> None:
+    from hqa.agent_workspace_actions import (
+        canonical_action_digest,
+        parse_user_action_v1,
+    )
+
+    action = parse_user_action_v1(document)
+    assert canonical_action_digest(action) == expected_digest
+
+
+@pytest.mark.parametrize(
+    ("document_index", "overrides"),
+    [
+        (0, {"client_action_id": "action:test-2"}),
+        (0, {"workspace": {"workspace_id": "workspace:beta"}}),
+        (0, {"provider_policy_digest": "b" * 64}),
+        (0, {"payload_ttl_days": 8}),
+        (1, {"source_session_ref": "session:source.2"}),
+        (1, {"source_channel": "discord"}),
+        (1, {"fork_point": "message/2"}),
+        (1, {"new_provider_policy_digest": "a" * 64}),
+        (1, {"payload_ttl_days": 29}),
+        (2, {"managed_session_ref": "session:managed.2"}),
+        (
+            2,
+            {
+                "payload_ref": "payload:sha256:" + "d" * 64,
+                "payload_digest": "d" * 64,
+            },
+        ),
+        (3, {"managed_session_ref": "session:managed.2"}),
+        (
+            3,
+            {
+                "payload_ref": "payload:sha256:" + "d" * 64,
+                "payload_digest": "d" * 64,
+            },
+        ),
+        (4, {"managed_session_ref": "session:managed.2"}),
+        (4, {"task_ref": "task:research.2"}),
+        (
+            4,
+            {
+                "payload_ref": "payload:sha256:" + "d" * 64,
+                "payload_digest": "d" * 64,
+            },
+        ),
+        (5, {"task_ref": "task:research.2"}),
+        (5, {"plan_version": 2}),
+        (5, {"plan_digest": "e" * 64}),
+        (6, {"run_ref": "run:hermes.2"}),
+        (6, {"task_ref": "task:research.1"}),
+        (6, {"attempt_ref": "attempt:research.1"}),
+        (6, {"platform_job_ref": "job:platform.1"}),
+        (7, {"approval_ref": "approval:challenge.2"}),
+        (7, {"run_ref": "run:hermes.2"}),
+        (7, {"command_digest": "d" * 64}),
+        (7, {"expected_expires_at": "2026-07-16T12:30:41Z"}),
+        (7, {"decision": "allow_once"}),
+        (8, {"task_ref": "task:research.2"}),
+        (8, {"reviewed_source_sha256": "e" * 64}),
+        (8, {"confirmation_note": "Reviewed different exact source."}),
+        (9, {"candidate_ref": "candidate:factor.2"}),
+        (9, {"expected_digest": "2" * 64}),
+        (9, {"note": "Review different exact candidate."}),
+        (10, {"candidate_ref": "candidate:factor.2"}),
+        (10, {"expected_digest": "3" * 64}),
+        (10, {"final_backtest_receipt_ref": "receipt:backtest.2"}),
+        (10, {"base_commit": "4" * 40}),
+    ],
+)
+def test_every_significant_valid_field_change_changes_the_action_digest(
+    document_index: int, overrides: dict[str, object]
+) -> None:
+    from hqa.agent_workspace_actions import (
+        canonical_action_digest,
+        parse_user_action_v1,
+    )
+
+    original_document = _valid_action_documents()[document_index]
+    changed_document = dict(original_document, **overrides)
+    original = parse_user_action_v1(original_document)
+    changed = parse_user_action_v1(changed_document)
+
+    assert canonical_action_digest(changed) != canonical_action_digest(original)
+
+
+def test_parsed_action_is_independent_of_later_input_document_mutation() -> None:
+    from hqa.agent_workspace_actions import action_to_document, parse_user_action_v1
+
+    document = _valid_action_documents()[2]
+    workspace = document["workspace"]
+    assert type(workspace) is dict
+    action = parse_user_action_v1(document)
+    expected = action_to_document(action)
+
+    document["client_action_id"] = "action:mutated"
+    document["payload_digest"] = "d" * 64
+    workspace["workspace_id"] = "workspace:mutated"
+    document.clear()
+
+    assert action_to_document(action) == expected
+
+
+@pytest.mark.parametrize(
+    ("document_index", "field", "valid_prefix"),
+    [
+        (1, "source_session_ref", "session:source"),
+        (2, "managed_session_ref", "session:managed"),
+        (2, "payload_ref", "payload:sha256:" + "c" * 64),
+        (4, "task_ref", "task:research"),
+        (6, "run_ref", "run:hermes"),
+        (7, "approval_ref", "approval:challenge"),
+        (9, "candidate_ref", "candidate:factor"),
+        (10, "final_backtest_receipt_ref", "receipt:backtest"),
+    ],
+)
+@pytest.mark.parametrize("reserved", ["%2F", "%", "?", "#", "中"])
+def test_wire_references_reject_reserved_or_unicode_path_content(
+    document_index: int, field: str, valid_prefix: str, reserved: str
+) -> None:
+    from hqa.agent_workspace_actions import parse_user_action_v1
+
+    document = _valid_action_documents()[document_index]
+    document[field] = valid_prefix + reserved + "suffix"
+    with pytest.raises((TypeError, ValueError)):
+        parse_user_action_v1(document)
