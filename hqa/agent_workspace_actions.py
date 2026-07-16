@@ -1,0 +1,702 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import hashlib
+import json
+import re
+from typing import Any, Mapping, Optional, Union
+from urllib.parse import quote
+
+from hqa.agent_workspace_contract import WorkspaceRef
+
+
+_ACTION_KINDS = frozenset(
+    {
+        "managed_session.create",
+        "managed_session.fork",
+        "conversation.turn",
+        "research.start",
+        "research.continue",
+        "research.plan.confirm",
+        "run.stop.request",
+        "hermes.command_approval.decide",
+        "gate1.formula_source.confirm",
+        "gate2.candidate.review",
+        "gate3.promotion_review.prepare",
+    }
+)
+_COMMON_DOCUMENT_FIELDS = frozenset(
+    {"schema_version", "kind", "client_action_id", "workspace"}
+)
+_ACTION_FIELDS = {
+    "managed_session.create": _COMMON_DOCUMENT_FIELDS
+    | {"provider_policy_digest", "payload_ttl_days"},
+    "managed_session.fork": _COMMON_DOCUMENT_FIELDS
+    | {
+        "source_session_ref",
+        "source_channel",
+        "fork_point",
+        "new_provider_policy_digest",
+        "payload_ttl_days",
+    },
+    "conversation.turn": _COMMON_DOCUMENT_FIELDS
+    | {"managed_session_ref", "payload_ref", "payload_digest"},
+    "research.start": _COMMON_DOCUMENT_FIELDS
+    | {
+        "managed_session_ref",
+        "payload_ref",
+        "payload_digest",
+        "initial_mode",
+    },
+    "research.continue": _COMMON_DOCUMENT_FIELDS
+    | {"managed_session_ref", "task_ref", "payload_ref", "payload_digest"},
+    "research.plan.confirm": _COMMON_DOCUMENT_FIELDS
+    | {"task_ref", "plan_version", "plan_digest"},
+    "run.stop.request": _COMMON_DOCUMENT_FIELDS
+    | {"run_ref", "task_ref", "attempt_ref", "platform_job_ref"},
+    "hermes.command_approval.decide": _COMMON_DOCUMENT_FIELDS
+    | {
+        "approval_ref",
+        "run_ref",
+        "command_digest",
+        "expected_status",
+        "expected_expires_at",
+        "decision",
+    },
+    "gate1.formula_source.confirm": _COMMON_DOCUMENT_FIELDS
+    | {"task_ref", "reviewed_source_sha256", "confirmation_note"},
+    "gate2.candidate.review": _COMMON_DOCUMENT_FIELDS
+    | {"candidate_ref", "expected_digest", "expected_status", "note"},
+    "gate3.promotion_review.prepare": _COMMON_DOCUMENT_FIELDS
+    | {
+        "candidate_ref",
+        "expected_digest",
+        "final_backtest_receipt_ref",
+        "base_commit",
+    },
+}
+_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}\Z")
+_HEX64_RE = re.compile(r"[0-9a-f]{64}\Z")
+_HEX40_RE = re.compile(r"[0-9a-f]{40}\Z")
+_RFC3339_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+    r"(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})\Z"
+)
+
+
+def _validate_common(client_action_id: Any, workspace: Any) -> None:
+    if (
+        type(client_action_id) is not str
+        or _IDENTIFIER_RE.fullmatch(client_action_id) is None
+    ):
+        raise ValueError("client_action_id must be a bounded identifier")
+    if type(workspace) is not WorkspaceRef:
+        raise TypeError("workspace must be a WorkspaceRef")
+
+
+def _parse_workspace(value: Any) -> WorkspaceRef:
+    if not isinstance(value, Mapping):
+        raise TypeError("workspace must be a JSON object")
+    if set(value) != {"workspace_id"}:
+        raise ValueError("workspace requires exact fields")
+    return WorkspaceRef(workspace_id=value["workspace_id"])
+
+
+def _validate_digest(value: Any, field: str) -> None:
+    if type(value) is not str or _HEX64_RE.fullmatch(value) is None:
+        raise ValueError("{} must be a lowercase SHA-256 digest".format(field))
+
+
+def _validate_payload_ttl_days(value: Any) -> None:
+    if type(value) is not int or not 1 <= value <= 30:
+        raise ValueError("payload_ttl_days must be an integer from 1 through 30")
+
+
+def _validate_ref(value: Any, field: str, prefix: str) -> None:
+    if (
+        type(value) is not str
+        or not value.startswith(prefix)
+        or len(value) == len(prefix)
+        or _IDENTIFIER_RE.fullmatch(value) is None
+    ):
+        raise ValueError("{} must be a bounded {} reference".format(field, prefix))
+
+
+def _validate_optional_ref(value: Any, field: str, prefix: str) -> None:
+    if value is not None:
+        _validate_ref(value, field, prefix)
+
+
+def _validate_source_cursor(value: Any) -> None:
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > 2_000
+        or not value.isprintable()
+    ):
+        raise ValueError("fork_point must be a bounded printable source cursor")
+
+
+def _validate_payload_binding(payload_ref: Any, payload_digest: Any) -> None:
+    _validate_digest(payload_digest, "payload_digest")
+    if type(payload_ref) is not str or payload_ref != (
+        "payload:sha256:" + payload_digest
+    ):
+        raise ValueError("payload_ref must exactly match payload_digest")
+
+
+def _normalize_timestamp(value: Any) -> str:
+    if type(value) is not str or _RFC3339_RE.fullmatch(value) is None:
+        raise ValueError(
+            "expected_expires_at must be a canonical timezone-aware timestamp"
+        )
+    parsed_value = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(parsed_value)
+    except ValueError as exc:
+        raise ValueError(
+            "expected_expires_at must be a canonical timezone-aware timestamp"
+        ) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("expected_expires_at must be timezone-aware")
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _validate_note(value: Any, field: str) -> None:
+    if (
+        type(value) is not str
+        or not value.strip()
+        or len(value) > 2_000
+        or not value.isprintable()
+    ):
+        raise ValueError("{} must be bounded nonempty printable text".format(field))
+
+
+@dataclass(frozen=True)
+class CreateManagedSession:
+    client_action_id: str
+    workspace: WorkspaceRef
+    provider_policy_digest: str
+    payload_ttl_days: int
+
+    def __post_init__(self) -> None:
+        _validate_common(self.client_action_id, self.workspace)
+        _validate_digest(self.provider_policy_digest, "provider_policy_digest")
+        _validate_payload_ttl_days(self.payload_ttl_days)
+
+
+@dataclass(frozen=True)
+class ForkIntoManagedSession:
+    client_action_id: str
+    workspace: WorkspaceRef
+    source_session_ref: str
+    source_channel: str
+    fork_point: str
+    new_provider_policy_digest: str
+    payload_ttl_days: int
+
+    def __post_init__(self) -> None:
+        _validate_common(self.client_action_id, self.workspace)
+        _validate_ref(self.source_session_ref, "source_session_ref", "session:")
+        if self.source_channel not in ("discord", "historical"):
+            raise ValueError("source_channel must be discord or historical")
+        _validate_source_cursor(self.fork_point)
+        _validate_digest(
+            self.new_provider_policy_digest, "new_provider_policy_digest"
+        )
+        _validate_payload_ttl_days(self.payload_ttl_days)
+
+
+@dataclass(frozen=True)
+class ConversationTurn:
+    client_action_id: str
+    workspace: WorkspaceRef
+    managed_session_ref: str
+    payload_ref: str
+    payload_digest: str
+
+    def __post_init__(self) -> None:
+        _validate_common(self.client_action_id, self.workspace)
+        _validate_ref(
+            self.managed_session_ref, "managed_session_ref", "session:"
+        )
+        _validate_payload_binding(self.payload_ref, self.payload_digest)
+
+
+@dataclass(frozen=True)
+class StartResearch:
+    client_action_id: str
+    workspace: WorkspaceRef
+    managed_session_ref: str
+    payload_ref: str
+    payload_digest: str
+    initial_mode: str
+
+    def __post_init__(self) -> None:
+        _validate_common(self.client_action_id, self.workspace)
+        _validate_ref(
+            self.managed_session_ref, "managed_session_ref", "session:"
+        )
+        _validate_payload_binding(self.payload_ref, self.payload_digest)
+        if self.initial_mode != "plan_only":
+            raise ValueError("initial_mode must be plan_only")
+
+
+@dataclass(frozen=True)
+class ContinueResearch:
+    client_action_id: str
+    workspace: WorkspaceRef
+    managed_session_ref: str
+    task_ref: str
+    payload_ref: str
+    payload_digest: str
+
+    def __post_init__(self) -> None:
+        _validate_common(self.client_action_id, self.workspace)
+        _validate_ref(
+            self.managed_session_ref, "managed_session_ref", "session:"
+        )
+        _validate_ref(self.task_ref, "task_ref", "task:")
+        _validate_payload_binding(self.payload_ref, self.payload_digest)
+
+
+@dataclass(frozen=True)
+class ConfirmResearchPlan:
+    client_action_id: str
+    workspace: WorkspaceRef
+    task_ref: str
+    plan_version: int
+    plan_digest: str
+
+    def __post_init__(self) -> None:
+        _validate_common(self.client_action_id, self.workspace)
+        _validate_ref(self.task_ref, "task_ref", "task:")
+        if type(self.plan_version) is not int or self.plan_version < 1:
+            raise ValueError("plan_version must be a positive integer")
+        _validate_digest(self.plan_digest, "plan_digest")
+
+
+@dataclass(frozen=True)
+class RequestStop:
+    client_action_id: str
+    workspace: WorkspaceRef
+    run_ref: str
+    task_ref: Optional[str]
+    attempt_ref: Optional[str]
+    platform_job_ref: Optional[str]
+
+    def __post_init__(self) -> None:
+        _validate_common(self.client_action_id, self.workspace)
+        _validate_ref(self.run_ref, "run_ref", "run:")
+        _validate_optional_ref(self.task_ref, "task_ref", "task:")
+        _validate_optional_ref(self.attempt_ref, "attempt_ref", "attempt:")
+        _validate_optional_ref(
+            self.platform_job_ref, "platform_job_ref", "job:"
+        )
+
+
+@dataclass(frozen=True)
+class DecideHermesCommandApproval:
+    client_action_id: str
+    workspace: WorkspaceRef
+    approval_ref: str
+    run_ref: str
+    command_digest: str
+    expected_status: str
+    expected_expires_at: str
+    decision: str
+
+    def __post_init__(self) -> None:
+        _validate_common(self.client_action_id, self.workspace)
+        _validate_ref(self.approval_ref, "approval_ref", "approval:")
+        _validate_ref(self.run_ref, "run_ref", "run:")
+        _validate_digest(self.command_digest, "command_digest")
+        if self.expected_status != "pending":
+            raise ValueError("expected_status must be pending")
+        if self.decision not in ("allow_once", "deny"):
+            raise ValueError("decision must be allow_once or deny")
+        object.__setattr__(
+            self,
+            "expected_expires_at",
+            _normalize_timestamp(self.expected_expires_at),
+        )
+
+
+@dataclass(frozen=True)
+class ConfirmFormulaSource:
+    client_action_id: str
+    workspace: WorkspaceRef
+    task_ref: str
+    reviewed_source_sha256: str
+    confirmation_note: str
+
+    def __post_init__(self) -> None:
+        _validate_common(self.client_action_id, self.workspace)
+        _validate_ref(self.task_ref, "task_ref", "task:")
+        _validate_digest(
+            self.reviewed_source_sha256, "reviewed_source_sha256"
+        )
+        _validate_note(self.confirmation_note, "confirmation_note")
+
+
+@dataclass(frozen=True)
+class ReviewCandidateCAS:
+    client_action_id: str
+    workspace: WorkspaceRef
+    candidate_ref: str
+    expected_digest: str
+    expected_status: str
+    note: str
+
+    def __post_init__(self) -> None:
+        _validate_common(self.client_action_id, self.workspace)
+        _validate_ref(self.candidate_ref, "candidate_ref", "candidate:")
+        _validate_digest(self.expected_digest, "expected_digest")
+        if self.expected_status != "pending":
+            raise ValueError("expected_status must be pending")
+        _validate_note(self.note, "note")
+
+
+@dataclass(frozen=True)
+class PreparePromotionReview:
+    client_action_id: str
+    workspace: WorkspaceRef
+    candidate_ref: str
+    expected_digest: str
+    final_backtest_receipt_ref: str
+    base_commit: str
+
+    def __post_init__(self) -> None:
+        _validate_common(self.client_action_id, self.workspace)
+        _validate_ref(self.candidate_ref, "candidate_ref", "candidate:")
+        _validate_digest(self.expected_digest, "expected_digest")
+        _validate_ref(
+            self.final_backtest_receipt_ref,
+            "final_backtest_receipt_ref",
+            "receipt:",
+        )
+        if (
+            type(self.base_commit) is not str
+            or _HEX40_RE.fullmatch(self.base_commit) is None
+        ):
+            raise ValueError("base_commit must be a lowercase 40-hex commit")
+
+
+_UserAction = Union[
+    CreateManagedSession,
+    ForkIntoManagedSession,
+    ConversationTurn,
+    StartResearch,
+    ContinueResearch,
+    ConfirmResearchPlan,
+    RequestStop,
+    DecideHermesCommandApproval,
+    ConfirmFormulaSource,
+    ReviewCandidateCAS,
+    PreparePromotionReview,
+]
+_ACTION_TYPES = (
+    CreateManagedSession,
+    ForkIntoManagedSession,
+    ConversationTurn,
+    StartResearch,
+    ContinueResearch,
+    ConfirmResearchPlan,
+    RequestStop,
+    DecideHermesCommandApproval,
+    ConfirmFormulaSource,
+    ReviewCandidateCAS,
+    PreparePromotionReview,
+)
+
+
+def action_to_document(action: _UserAction) -> dict[str, Any]:
+    if type(action) not in _ACTION_TYPES:
+        raise TypeError("unknown UserActionV1 type")
+    document = {
+        "schema_version": 1,
+        "client_action_id": action.client_action_id,
+        "workspace": {"workspace_id": action.workspace.workspace_id},
+    }
+    if type(action) is CreateManagedSession:
+        document.update(
+            {
+                "kind": "managed_session.create",
+                "provider_policy_digest": action.provider_policy_digest,
+                "payload_ttl_days": action.payload_ttl_days,
+            }
+        )
+        return document
+    if type(action) is ForkIntoManagedSession:
+        document.update(
+            {
+                "kind": "managed_session.fork",
+                "source_session_ref": action.source_session_ref,
+                "source_channel": action.source_channel,
+                "fork_point": action.fork_point,
+                "new_provider_policy_digest": action.new_provider_policy_digest,
+                "payload_ttl_days": action.payload_ttl_days,
+            }
+        )
+        return document
+    if type(action) is ConversationTurn:
+        document.update(
+            {
+                "kind": "conversation.turn",
+                "managed_session_ref": action.managed_session_ref,
+                "payload_ref": action.payload_ref,
+                "payload_digest": action.payload_digest,
+            }
+        )
+        return document
+    if type(action) is StartResearch:
+        document.update(
+            {
+                "kind": "research.start",
+                "managed_session_ref": action.managed_session_ref,
+                "payload_ref": action.payload_ref,
+                "payload_digest": action.payload_digest,
+                "initial_mode": action.initial_mode,
+            }
+        )
+        return document
+    if type(action) is ContinueResearch:
+        document.update(
+            {
+                "kind": "research.continue",
+                "managed_session_ref": action.managed_session_ref,
+                "task_ref": action.task_ref,
+                "payload_ref": action.payload_ref,
+                "payload_digest": action.payload_digest,
+            }
+        )
+        return document
+    if type(action) is ConfirmResearchPlan:
+        document.update(
+            {
+                "kind": "research.plan.confirm",
+                "task_ref": action.task_ref,
+                "plan_version": action.plan_version,
+                "plan_digest": action.plan_digest,
+            }
+        )
+        return document
+    if type(action) is RequestStop:
+        document.update(
+            {
+                "kind": "run.stop.request",
+                "run_ref": action.run_ref,
+                "task_ref": action.task_ref,
+                "attempt_ref": action.attempt_ref,
+                "platform_job_ref": action.platform_job_ref,
+            }
+        )
+        return document
+    if type(action) is DecideHermesCommandApproval:
+        document.update(
+            {
+                "kind": "hermes.command_approval.decide",
+                "approval_ref": action.approval_ref,
+                "run_ref": action.run_ref,
+                "command_digest": action.command_digest,
+                "expected_status": action.expected_status,
+                "expected_expires_at": action.expected_expires_at,
+                "decision": action.decision,
+            }
+        )
+        return document
+    if type(action) is ConfirmFormulaSource:
+        document.update(
+            {
+                "kind": "gate1.formula_source.confirm",
+                "task_ref": action.task_ref,
+                "reviewed_source_sha256": action.reviewed_source_sha256,
+                "confirmation_note": action.confirmation_note,
+            }
+        )
+        return document
+    if type(action) is ReviewCandidateCAS:
+        document.update(
+            {
+                "kind": "gate2.candidate.review",
+                "candidate_ref": action.candidate_ref,
+                "expected_digest": action.expected_digest,
+                "expected_status": action.expected_status,
+                "note": action.note,
+            }
+        )
+        return document
+    if type(action) is PreparePromotionReview:
+        document.update(
+            {
+                "kind": "gate3.promotion_review.prepare",
+                "candidate_ref": action.candidate_ref,
+                "expected_digest": action.expected_digest,
+                "final_backtest_receipt_ref": (
+                    action.final_backtest_receipt_ref
+                ),
+                "base_commit": action.base_commit,
+            }
+        )
+        return document
+    raise TypeError("unknown UserActionV1 type")
+
+
+def canonical_action_digest(action: _UserAction) -> str:
+    canonical_json = json.dumps(
+        action_to_document(action),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
+def parse_user_action_v1(document: Mapping[str, Any]) -> _UserAction:
+    if not isinstance(document, Mapping):
+        raise TypeError("UserActionV1 document must be a mapping")
+    if "kind" not in document:
+        raise ValueError("UserActionV1 document requires exact fields")
+    kind = document.get("kind")
+    if type(kind) is not str or kind not in _ACTION_KINDS:
+        raise ValueError("unknown UserActionV1 kind")
+    if set(document) != _ACTION_FIELDS[kind]:
+        raise ValueError("UserActionV1 document requires exact fields")
+    if type(document.get("schema_version")) is not int or document.get(
+        "schema_version"
+    ) != 1:
+        raise ValueError("schema_version must be the integer 1")
+    common = {
+        "client_action_id": document["client_action_id"],
+        "workspace": _parse_workspace(document["workspace"]),
+    }
+    if document["kind"] == "managed_session.create":
+        return CreateManagedSession(
+            **common,
+            provider_policy_digest=document["provider_policy_digest"],
+            payload_ttl_days=document["payload_ttl_days"],
+        )
+    if document["kind"] == "managed_session.fork":
+        return ForkIntoManagedSession(
+            **common,
+            source_session_ref=document["source_session_ref"],
+            source_channel=document["source_channel"],
+            fork_point=document["fork_point"],
+            new_provider_policy_digest=document["new_provider_policy_digest"],
+            payload_ttl_days=document["payload_ttl_days"],
+        )
+    if document["kind"] == "conversation.turn":
+        return ConversationTurn(
+            **common,
+            managed_session_ref=document["managed_session_ref"],
+            payload_ref=document["payload_ref"],
+            payload_digest=document["payload_digest"],
+        )
+    if document["kind"] == "research.start":
+        return StartResearch(
+            **common,
+            managed_session_ref=document["managed_session_ref"],
+            payload_ref=document["payload_ref"],
+            payload_digest=document["payload_digest"],
+            initial_mode=document["initial_mode"],
+        )
+    if document["kind"] == "research.continue":
+        return ContinueResearch(
+            **common,
+            managed_session_ref=document["managed_session_ref"],
+            task_ref=document["task_ref"],
+            payload_ref=document["payload_ref"],
+            payload_digest=document["payload_digest"],
+        )
+    if document["kind"] == "research.plan.confirm":
+        return ConfirmResearchPlan(
+            **common,
+            task_ref=document["task_ref"],
+            plan_version=document["plan_version"],
+            plan_digest=document["plan_digest"],
+        )
+    if document["kind"] == "run.stop.request":
+        return RequestStop(
+            **common,
+            run_ref=document["run_ref"],
+            task_ref=document["task_ref"],
+            attempt_ref=document["attempt_ref"],
+            platform_job_ref=document["platform_job_ref"],
+        )
+    if document["kind"] == "hermes.command_approval.decide":
+        return DecideHermesCommandApproval(
+            **common,
+            approval_ref=document["approval_ref"],
+            run_ref=document["run_ref"],
+            command_digest=document["command_digest"],
+            expected_status=document["expected_status"],
+            expected_expires_at=document["expected_expires_at"],
+            decision=document["decision"],
+        )
+    if document["kind"] == "gate1.formula_source.confirm":
+        return ConfirmFormulaSource(
+            **common,
+            task_ref=document["task_ref"],
+            reviewed_source_sha256=document["reviewed_source_sha256"],
+            confirmation_note=document["confirmation_note"],
+        )
+    if document["kind"] == "gate2.candidate.review":
+        return ReviewCandidateCAS(
+            **common,
+            candidate_ref=document["candidate_ref"],
+            expected_digest=document["expected_digest"],
+            expected_status=document["expected_status"],
+            note=document["note"],
+        )
+    if document["kind"] == "gate3.promotion_review.prepare":
+        return PreparePromotionReview(
+            **common,
+            candidate_ref=document["candidate_ref"],
+            expected_digest=document["expected_digest"],
+            final_backtest_receipt_ref=document["final_backtest_receipt_ref"],
+            base_commit=document["base_commit"],
+        )
+    raise ValueError("unknown UserActionV1 kind")
+
+
+def route_for_action(action: _UserAction) -> str:
+    if type(action) is CreateManagedSession:
+        return "/api/hermes/managed-sessions"
+    if type(action) is ForkIntoManagedSession:
+        return "/api/hermes/sessions/{}/forks-to-managed".format(
+            quote(action.source_session_ref, safe="")
+        )
+    if type(action) is ConversationTurn:
+        return "/api/hermes/managed-sessions/{}/turns".format(
+            quote(action.managed_session_ref, safe="")
+        )
+    if type(action) is StartResearch:
+        return "/api/hermes/research-tasks"
+    if type(action) is ContinueResearch:
+        return "/api/hermes/research-tasks/{}/attempts".format(
+            quote(action.task_ref, safe="")
+        )
+    if type(action) is ConfirmResearchPlan:
+        return "/api/hermes/research-tasks/{}/plan-confirmations".format(
+            quote(action.task_ref, safe="")
+        )
+    if type(action) is RequestStop:
+        return "/api/hermes/runs/{}/stop-requests".format(
+            quote(action.run_ref, safe="")
+        )
+    if type(action) is DecideHermesCommandApproval:
+        return "/api/hermes/command-approvals/{}/decisions".format(
+            quote(action.approval_ref, safe="")
+        )
+    if type(action) is ConfirmFormulaSource:
+        return "/api/hermes/gate1/formula-confirmations"
+    if type(action) is ReviewCandidateCAS:
+        return "/api/hermes/gate2/candidates/{}/reviews".format(
+            quote(action.candidate_ref, safe="")
+        )
+    if type(action) is PreparePromotionReview:
+        return "/api/hermes/gate3/candidates/{}/promotion-preparations".format(
+            quote(action.candidate_ref, safe="")
+        )
+    raise TypeError("unknown UserActionV1 type")
