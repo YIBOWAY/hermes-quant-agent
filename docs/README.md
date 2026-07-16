@@ -3,7 +3,7 @@
 这份文件只回答三个问题：**现在按哪份计划做、实际做到哪里、其他文档该怎么读**。
 长期方向、历史实现细节和特定日期审计分别留在 roadmap、plan 和 audit 中。
 
-> 事实快照：2026-07-15。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
+> 事实快照：2026-07-16。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
 > 必须重新检查 git、进程、HTTP smoke 和测试。
 
 ## 当前执行入口
@@ -12,7 +12,7 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 是当前产品主线。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`](superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md) | 3A、3B DONE；3C 仅 reconcile-only 框架；3D chat BLOCKED；3E-A 只读 Unified Results 已实现并完成本机验收，完整 3E/cutover 仍关闭；3F 只有默认 OFF 的 Agent Studio 页面级机制。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`](superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md) | 3A、3B DONE；3C runtime 仍仅 reconcile-only，3C.1 workflow identity/payload/exact binding 已完成代码与隔离 PostgreSQL 验收、live migration 006 待单独授权；3D chat BLOCKED；3E-A 只读 Unified Results 已完成，完整 3E/cutover 仍关闭；3F 只有默认 OFF 的 Agent Studio 页面级机制。 |
 | 本机 Hermes 集成决策 | [`design/2026-07-15-local-hermes-integration-decision.md`](design/2026-07-15-local-hermes-integration-decision.md) | 正式方向是 platform BFF → PostgreSQL durable ledger → deterministic HQA worker → official Hermes API；禁止 Hermes/LLM cron 空轮询。 |
 | 当前 Hermes 合同 | [`contracts/hermes-api-server-0.18.2.md`](contracts/hermes-api-server-0.18.2.md) | official API Server 的 health/capabilities/sessions/detail/messages 只读合同；chat/run/stream/approval/stop 全部 fail-closed。 |
 | 旧 TUI 合同 | [`contracts/hermes-gateway-0.18.2.md`](contracts/hermes-gateway-0.18.2.md) | 历史 WebSocket JSON-RPC 快照；当前 checkout/source 已漂移，不再匹配安装，不能用于准入。 |
@@ -26,8 +26,10 @@
 ## 一句话项目阶段
 
 **Phase 1a-4 / 9H 已收口；当前处于 D-31 Wave 3，真实 Hermes 已接通到“已有会话只读”层，
-平台 durable ledger/outbox 与 reconcile-only worker 底座也已落地，3E-A 只读 Unified
-Results 已完成实现和本机验收，但网页仍不能向 Hermes 提交对话。** 3D 受九项 live gateway
+平台 durable ledger/outbox 与 reconcile-only worker 底座也已落地；3C.1 的 HQA
+Task/Attempt、不可变 payload 与 exact command binding 已通过代码和隔离数据库验收，但尚未在
+live 数据库激活；3E-A 只读 Unified Results 已完成实现和本机验收，但网页仍不能向 Hermes
+提交对话。** 3D 受九项 live gateway
 blocker 阻断；完整 3E/cutover 与 3F 旧页退场也没有获得放行。
 
 ## D-31 当前事实
@@ -41,7 +43,7 @@ blocker 阻断；完整 3E/cutover 与 3F 旧页退场也没有获得放行。
 | Hermes official API session read | **DONE（代码 + 本机只读验收）** | 平台 BFF 能读真实 session list/detail/messages；浏览器不持有 Hermes key。 |
 | 3B durable ledger/outbox | **DONE（live DB 验收）** | migration 005 已 apply 并重复验证幂等；schema v1、五表、四个 append-only trigger，health `schema_ready=true`。 |
 | 3C deterministic worker | **FRAMEWORK DONE / reconcile-only** | 安装 wrapper `--once` 与 live `LISTEN/NOTIFY` 两周期通过；零 Hermes mutation/provider。 |
-| HQA Task/Attempt + payload authority | **NOT IMPLEMENTED** | 尚无 research Task/Attempt ledger、不可变 prompt/provider-policy payload store 或 command exact binding；这是 dispatch 前置条件。 |
+| 3C.1 Task/Attempt + payload + exact binding | **CODE ACCEPTED / LIVE NOT ACTIVATED** | HQA append-only journal、projection/replay/CAS、content-addressed owner-only payload、跨权威 saga/reverse audit，以及平台 migration 006/bound-command primitive 已通过全量/目标/隔离 PostgreSQL 验收；live `quantplatform` 尚未 apply 006，worker 仍不 claim。 |
 | Browser Gate 2 mutation | **ROLLED BACK / OFF** | 初版会 refetch digest/status，违反 HQA Gate 1 exact binding 与 Gate 2 no-refetch；Approvals 当前只读。 |
 | Hermes chat/stream/resume/stop | **BLOCKED（九项 live blocker）** | 平台 ledger 不等于 upstream request recovery、Run/event/provider/approval/stop 语义已具备。 |
 | Unified Results 3E-A | **DONE（只读实现 + 本机验收）** | 统一索引、动态详情、权威源回链和 exact Run-link 投影已交付；不复制领域真相。独立 Hermes research Run 结果与 full cutover 仍受 3D/用户验收门阻断，`unifiedResultsCutoverAccepted=false`。 |
@@ -109,8 +111,9 @@ session ID / payload / 响应大小和时限都 fail-closed。平台和 Hermes �
 ### 已落地的 durable 底座（写端仍关闭）
 
 下图是目标链路。当前已落地 PostgreSQL ledger、GET-only session BFF 与 worker
-notify/scan/expired-lease reconcile；authenticated mutation、payload/Task binding、claim/dispatch
-及 HTTP/SSE 写边均未准入。
+notify/scan/expired-lease reconcile；3C.1 payload/Task binding 已完成代码与隔离数据库验收，
+但 live migration 006 尚未获单独授权。authenticated mutation、claim/dispatch 及 HTTP/SSE
+写边均未准入。
 
 ```text
 Browser -> same-origin BFF
@@ -124,9 +127,9 @@ claim/lease/heartbeat 是已测试的 ledger primitives，尚未由 runnable wor
 command。**禁止让 Hermes/LLM cron 空转询问“有没有任务”**。空队列不创建 Run、不调用 provider。
 
 这条链路定义三个明确的权威边界：PostgreSQL 唯一拥有 transport command/event/outbox/lease
-和 exact Run link；Hermes 唯一拥有 Session/Run/messages/actual provider evidence；**计划中的**
-HQA Task/Attempt ledger 将唯一拥有 research plan/Attempt/Gate/result refs，但该 ledger/CLI
-当前尚未实现。HQA connector 是 PostgreSQL command
+和 exact Run link；Hermes 唯一拥有 Session/Run/messages/actual provider evidence；HQA
+Task/Attempt ledger 唯一拥有 research plan/Attempt/Gate/result refs。HQA ledger/CLI 已在代码中
+实现，需待 migration 006 的单独 live 授权和激活验收后才成为当前运行事实。HQA connector 是 PostgreSQL command
 的消费者，不保存第二份 BridgeRequest command journal。
 
 connector 的物理入口是
@@ -157,6 +160,15 @@ live gateway 仍报告九项 3D blocker：提交非幂等、请求不可恢复�
 Run 状态不持久、provider policy 不可变、无 actual provider 证据、approval 无 exact binding、
 stop 不可对账。因此 3D 保持 **BLOCKED**。
 
+### 3C.1 代码验收与 live 激活边界（2026-07-16）
+
+- HQA 已实现 `hqa-research-task prepare|submit|show|events|reconcile-binding|reconcile-payloads|audit-authorities`；prompt 仅经 strict JSON stdin 进入 owner-only、content-addressed payload authority，不进入 argv、journal、projection、stdout 或平台 binding。
+- 平台 migration 006 新增独立 workflow-binding schema，并以单事务写入 bound command、exact binding、version-1 event、outbox 与 `NOTIFY`；claim 在最终更新时重验 binding 和 expiry。
+- reverse authority audit 使用平台 read-only、repeatable-read NDJSON inventory，能够区分 consistent、awaiting binding、platform-only、缺失与 exact conflict；不会凭一侧猜回另一侧事实。
+- HQA 全量验收为 `816 passed, 2 skipped`；平台目标 PostgreSQL、CLI/unit、Ruff 与独立对抗复核均通过。跨仓隔离数据库实跑覆盖 `uninitialized`、`platform_only` 与真实 saga `consistent`，且没有 prompt/provider/model 泄漏或 Hermes/provider mutation。
+- live `quantplatform` 预检确认 migration 006 尚未存在，现有 Hermes command/event/outbox/run-link 均为零行。apply 前备份 `data/_runtime/db_backups/quantplatform-pre-006-20260716T051758Z.dump`（平台仓库内，SHA-256 `fc70a22f2aae6070d7de4256372e5d4fce7078a4a006dfd64fd6960136785c79`）已完成并通过独立临时库 restore 验证；**这不等于已获授权或已应用 migration 006**。
+- live 激活仍需用户对 migration 006 的单独授权；随后才可做 apply/幂等重放/readiness、HQA authority backup/restore drill 和服务/浏览器验收。即使 006 激活，现有 worker 仍只 reconcile，不会 claim/dispatch。
+
 ## 接下来按什么顺序做
 
 1. **Slice 3A：DONE。** official API session-read BFF 已交付并本机只读验收。
@@ -164,11 +176,14 @@ stop 不可对账。因此 3D 保持 **BLOCKED**。
 3. **Slice 3C：FRAMEWORK DONE / reconcile-only。** ledger claim/lease/heartbeat primitives
    已验收；worker runtime 仅 LISTEN/NOTIFY、periodic scan 与 expired-lease reconcile，
    不 claim queued command，Hermes mutation 仍关闭。
-4. **Slice 3D：BLOCKED。** 九项 live gateway blocker、认证/CSRF、安全 review 和用户批准均不能
+4. **Slice 3C.1：CODE ACCEPTED / LIVE NOT ACTIVATED。** 先取得 migration 006 单独授权，
+   完成 live apply/readiness 与 HQA authority backup/restore drill；未完成前不创建真实任务，
+   完成后也仍不自动开放 worker claim 或 Hermes 写端。
+5. **Slice 3D：BLOCKED。** 九项 live gateway blocker、认证/CSRF、安全 review 和用户批准均不能
    用平台本地 ledger 代替。
-5. **Slice 3E-A：DONE。** 只读统一索引/详情、权威回链与 exact provenance 已完成实现和
+6. **Slice 3E-A：DONE。** 只读统一索引/详情、权威回链与 exact provenance 已完成实现和
    本机验收；独立 Hermes research Run 结果及 full cutover 仍受 3D 和用户验收门阻断。
-6. **Slice 3F：MECHANISM ONLY / DEFAULT OFF。** Agent Studio 已有页面级独立回滚开关，
+7. **Slice 3F：MECHANISM ONLY / DEFAULT OFF。** Agent Studio 已有页面级独立回滚开关，
    但 exact-bound audit parity 和用户 cutover 批准未完成；Factor Lab、Backtester、
    Experiments 在写任务有替代入口前保留。领域 API/CLI/engine 不删除。
 

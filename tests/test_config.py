@@ -22,6 +22,10 @@ def test_repo_and_platform_paths():
         == config.REPO_DIR / "artifacts" / "hermes-feed" / "manifest.v1.json"
     )
     assert config.OPTIONS_SCAN_DIR == config.AIQP_DIR / "data" / "options_scans"
+    assert (
+        config.RESEARCH_WORKFLOW_DIR
+        == config.REPO_DIR / "data" / "_runtime" / "research-workflows"
+    )
 
 
 def test_expected_safety_baseline():
@@ -48,6 +52,19 @@ def test_prediction_dir_env_override(monkeypatch, tmp_path):
     try:
         importlib.reload(config)
         assert config.PREDICTION_DIR == tmp_path / "predictions"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
+
+
+def test_research_workflow_dir_env_override(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "HQA_RESEARCH_WORKFLOW_DIR",
+        str(tmp_path / "research-workflows"),
+    )
+    try:
+        importlib.reload(config)
+        assert config.RESEARCH_WORKFLOW_DIR == tmp_path / "research-workflows"
     finally:
         monkeypatch.undo()
         importlib.reload(config)

@@ -64,6 +64,12 @@ OPTIONS_SCAN_DIR = Path(
 RUNTIME_DIR = Path(
     os.environ.get("HQA_RUNTIME_DIR", str(REPO_DIR / "data" / "_runtime"))
 )
+RESEARCH_WORKFLOW_DIR = Path(
+    os.environ.get(
+        "HQA_RESEARCH_WORKFLOW_DIR",
+        str(RUNTIME_DIR / "research-workflows"),
+    )
+)
 FACTOR_GATE1_DIR = Path(
     os.environ.get("HQA_FACTOR_GATE1_DIR", str(RUNTIME_DIR / "factor-gate1"))
 )

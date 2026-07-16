@@ -19,7 +19,10 @@ command/event/outbox/run-link ledger with claim/lease/heartbeat primitives (3B),
 and a deterministic connector notify/scan/expired-lease reconcile runtime (3C).
 The runtime does not claim queued commands and remains reconcile-only: real Hermes
 chat/provider Run submission and approval mutations
-are still blocked. The read-only Unified Results catalog and details are
+are still blocked. Slice 3C.1 now has a code-accepted append-only Task/Attempt
+authority, immutable content-addressed payloads, exact cross-authority bindings,
+and reverse audit; platform migration 006 has not been applied to the live database,
+so this foundation is not yet an activated write path. The read-only Unified Results catalog and details are
 delivered and locally accepted as 3E-A, while independent Hermes Run results and
 full results cutover are not. Agent Studio has only a reversible page-scoped
 redirect mechanism that defaults off; exact-bound audit parity, user cutover

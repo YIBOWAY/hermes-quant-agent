@@ -89,7 +89,7 @@ response store，可持久读取 Responses API 对象。
 |---|---|---|
 | transport command、幂等键、event/outbox、lease、exact run link | platform PostgreSQL | HQA 内存、浏览器或 Hermes 标题匹配 |
 | Session、Run、messages、actual provider/model/usage | Hermes | 平台的 requested provider 或全局配置 |
-| research plan、Attempt、Gate、result refs | planned HQA task ledger（当前未实现） | platform command state |
+| research plan、Attempt、Gate、result refs 与 immutable payload | HQA append-only Task/Attempt/plan/payload authority（代码已验收；live activation pending） | platform command state；平台只保存 exact immutable metadata binding，不保存 prompt |
 | factor/backtest/experiment/candidate 领域详情 | platform authoritative artifact/API | Unified Results 摘要副本 |
 
 ## 正式网络面
@@ -133,8 +133,9 @@ UX/adapter 参考，不宜直接当本项目的生产真相层。
 9. authenticated same-origin BFF、CSRF、审计与字段最小化。
 
 上面 1–8 中与 Hermes capability/recovery 相关的缺口属于 upstream blocker；平台本身还必须
-独立补齐 authenticated mutation BFF、CSRF、prompt retention boundary、dispatch adapter、
-HQA Task/Attempt binding、composer/resume/stop UI、独立安全审查和用户 cutover 批准。两组
+独立补齐 authenticated mutation BFF、CSRF、prompt retention boundary、workflow-binding live
+readiness/BFF integration、dispatch adapter、composer/resume/stop UI、独立安全审查和用户
+cutover 批准。两组
 条件都是必要条件，九个 upstream blocker 清零也**不会自动**让网页 chat 变成 ready。
 
 平台本地 ledger 解决的是“平台有没有耐久保存意图”，不能伪造 Hermes upstream 是否接收、
@@ -147,14 +148,16 @@ HQA Task/Attempt binding、composer/resume/stop UI、独立安全审查和用户
 | official API session list/detail/messages | DONE，真实本机只读已验收 |
 | PostgreSQL command/event/outbox/run-link ledger | DONE，正式 migration 与 live DB 已验收 |
 | deterministic worker + LISTEN/NOTIFY + scan fallback | FRAMEWORK DONE，reconcile-only；ledger 有 claim/lease/heartbeat primitives，当前 worker 只做 notify/scan/expired-lease reconcile，不 claim queued command |
+| 3C.1 HQA Task/Attempt/payload + exact cross-authority binding/audit | CODE ACCEPTED，隔离 PostgreSQL 实跑通过；platform migration 006 尚未 live apply，浏览器 BFF/worker 尚未消费 |
 | chat/SSE/resume/provider evidence | BLOCKED，live capability gate 仍失败 |
 | Unified Results | Wave 3E-A 只读目录、真实数据与 UI 验收 DONE；完整 cutover 仍未批准，独立 Hermes Run 证据仍等 3D |
 | legacy page retirement | Agent Studio 已具独立可回滚开关但默认 OFF；另三页仍有写任务，不能一次切掉 |
 
-## 下一安全切片（尚未实现）
+## 3C.1 已代码交付；下一步是 live acceptance
 
-在任何 queued-command claim/dispatch 之前，先交付 **Slice 3C.1 — workflow identity、payload
-与 exact binding foundation**，并继续保持零 Hermes/provider mutation：
+在任何 queued-command claim/dispatch 之前，**Slice 3C.1 — workflow identity、payload 与 exact
+binding foundation** 已完成代码、故障注入、全量/目标测试和隔离 PostgreSQL 验收，并继续保持
+零 Hermes/provider mutation：
 
 1. HQA append-only Task/Attempt ledger 与窄 CLI（stable event ID、expected-version CAS、
    projection/replay、损坏与未知 schema fail closed）；
@@ -164,7 +167,13 @@ HQA Task/Attempt binding、composer/resume/stop UI、独立安全审查和用户
 4. PostgreSQL 与 HQA 两个单写权威之间可在每个 crash point 恢复的幂等 saga/reconcile；
 5. 在 3C.1 验收期间 browser POST、worker claim、Hermes mutation 和 provider call 全部保持 0。
 
-随后才是 upstream recovery 合同、authenticated mutation BFF/CSRF、dispatch worker + supervisor、
+当前尚未完成的是 live acceptance：在已校验备份的基础上取得 migration 006 单独授权，执行
+apply 与幂等重放、readiness/零行复核和 reverse authority audit，再完成 HQA authority
+backup/restore drill。该步骤只激活 workflow identity/binding 权威，不会自动启用 browser POST、
+worker claim 或 Hermes/provider mutation。
+
+随后才是 deterministic claim worker、upstream recovery 合同、authenticated mutation BFF/CSRF、
+dispatch supervision、
 composer/SSE/resume/stop、独立 Hermes Run Results，最后逐页 cutover。
 
 ## 调研来源

@@ -24,7 +24,10 @@ Rules for AI agents working in this repository.
   digest/status violated Gate 1 binding/no-refetch. Wave 3A and 3B are DONE;
   3B's ledger has delivered claim/lease/heartbeat primitives; 3C's runnable worker
   has delivered only notify/periodic-scan/expired-lease reconciliation and does not
-  claim queued commands, with zero Hermes mutation/provider use. Wave 3D chat remains BLOCKED. Wave
+  claim queued commands, with zero Hermes mutation/provider use. 3C.1's HQA
+  Task/Attempt/payload authority, exact binding, and reverse audit are code-accepted,
+  but platform migration 006 is not live-applied; this must not enable claim or
+  dispatch. Wave 3D chat remains BLOCKED. Wave
   3E-A has delivered and locally accepted the read-only Unified Results catalog,
   details and exact-link projection; independent Hermes research Run results and
   full results cutover remain blocked. Wave 3F has only a page-scoped,

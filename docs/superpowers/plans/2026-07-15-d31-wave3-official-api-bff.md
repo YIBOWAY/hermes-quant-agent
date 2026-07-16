@@ -2,7 +2,10 @@
 
 > **状态（2026-07-16）：PARTIAL。** Slice 3A「official API session-read BFF」已交付；3B
 > durable ledger/outbox 已完成数据库实装，3C deterministic worker 框架也已完成本机
-> reconcile-only 验收。平台提交 `efb10d5`、`9bc940f`、`b00a654`、`337e9d2` 已推送。3D 仍被九项 live gateway
+> reconcile-only 验收。3C.1 workflow identity、payload authority、exact binding 与双向 authority
+> audit 已完成代码、全量测试、对抗复核和隔离 PostgreSQL 验收；live migration 006 尚待单独
+> 授权，worker 仍不 claim/dispatch。平台既有提交 `efb10d5`、`9bc940f`、`b00a654`、`337e9d2`
+> 已推送。3D 仍被九项 live gateway
 > blocker 阻断。3E-A 只读 Unified Results 索引、详情、权威回链与 exact Run-link 投影已
 > 完成实现和本机验收；独立 Hermes research Run 结果与 full cutover 仍关闭。3F 仅交付
 > Agent Studio 页面级、可回滚且默认 OFF 的 redirect 机制；exact-bound audit parity、用户
@@ -23,6 +26,7 @@ Browser
   -> ai-quant-platform same-origin BFF
       -> read: Hermes official API 127.0.0.1:8642
       -> durable intent: PostgreSQL command + outbox + event ledger (3B DONE)
+          -> exact Task/Attempt/payload binding (3C.1 code accepted; live 006 pending)
           -> HQA deterministic connector worker (3C reconcile-only)
               -> Hermes official API HTTP/SSE mutation (3D BLOCKED)
 ```
@@ -318,16 +322,17 @@ chat/run/approval/stop endpoint。
 | 3A official API session-read BFF | **DONE（代码 + 本机只读验收）** |
 | 3B durable ledger/outbox | **DONE（migration 005 + live DB 验收）** |
 | 3C connector worker | **FRAMEWORK DONE / reconcile-only；Hermes mutation BLOCKED** |
+| 3C.1 workflow identity/payload/exact binding | **CODE ACCEPTED / ISOLATED DB ACCEPTED；live migration 006 pending authorization** |
 | 3D chat/stream/resume | **BLOCKED（live gateway 九项）** |
 | 3E-A read-only Unified Results | **DONE（实现 + 本机真实数据/UI 验收）** |
 | 完整 3E / results cutover | **BLOCKED（Hermes Run evidence + user cutover approval）** |
 | 3F legacy retirement | **MECHANISM ONLY：Agent Studio redirect 默认 OFF；exact-bound audit parity/user approval 未完成；另三页 BLOCKED on write parity** |
 
-## 下一安全切片（未实施）：3C.1 workflow identity / payload / exact binding
+## 当前安全切片：3C.1 workflow identity / payload / exact binding
 
-最终 workflow review 证实当前没有 HQA Task/Attempt ledger、不可变 payload authority 或
+最终 workflow review 曾证实基线没有 HQA Task/Attempt ledger、不可变 payload authority 或
 command → Task/Attempt exact binding，因此不能直接从 reconcile-only 跳到 queued-command
-dispatch。下一实施计划应先覆盖：
+dispatch。当前工作树已经覆盖：
 
 1. HQA append-only Task/Attempt journal、stable event ID、expected-version CAS、原子 projection
    与 replay；
@@ -336,11 +341,91 @@ dispatch。下一实施计划应先覆盖：
 4. PostgreSQL command authority 与 HQA task authority 间 crash-safe、幂等 saga/reconcile；
 5. 全阶段保持无 browser POST、worker 不 claim、Hermes/provider mutation 为 0。
 
-3C.1 验收后，仍须等待 upstream persistent idempotency/Run recovery/event replay/provider
+### 3C.1 当前验收结论（2026-07-16）
+
+- **代码与 hermetic 验收：ACCEPT。** HQA append-only journal/projection/replay/CAS、owner-only
+  content-addressed payload、strict JSON stdin、跨权威 forward saga/reverse audit 已实现；HQA
+  full suite 为 `816 passed, 2 skipped`，独立 reviewer 未发现 P0–P2。
+- **平台与隔离 PostgreSQL：ACCEPT。** additive migration 006、bound-command 原子 primitive、
+  binding-aware claim、schema readiness、read-only repeatable-read inventory 与 CLI 已通过目标
+  PostgreSQL/CLI/unit/Ruff/对抗验收；migration 005 bytes 保持不变。
+- **跨仓实跑：ACCEPT。** 隔离数据库验证了 empty/uninitialized、orphan platform-only 与真实
+  saga consistent 三类收敛；没有把 prompt/provider/model 写入平台或审计输出，也没有调用
+  Hermes/provider。
+- **live activation：PENDING AUTHORIZATION。** `quantplatform` 预检显示 migration 006 尚未存在，
+  既有 Hermes commands/events/outbox/run-links 均为零。pre-006 备份已完成 checksum 和独立临时库
+  restore 验证（`data/_runtime/db_backups/quantplatform-pre-006-20260716T051758Z.dump`，SHA-256
+  `fc70a22f2aae6070d7de4256372e5d4fce7078a4a006dfd64fd6960136785c79`），但迁移尚未 apply；
+  现阶段不得把 3C.1 表述为 live 已启用。
+- **dispatch/chat：仍关闭。** 006 即使获准并激活，也只建立 Task/payload/exact-binding 权威；
+  runnable worker 仍仅 notify/scan/expired-lease reconcile，3D 的 upstream recovery 与安全门不变。
+
+### 3C.1 已冻结的写入顺序
+
+3C.1 不允许先创建普通 `queued` command、再补 HQA binding。现有 claim primitive 会选择
+任意到期的 `queued` command；这种顺序会留下 payload/Task 尚不存在但 command 已可领取的
+窗口。正式 saga 固定为：
+
+```text
+HQA immutable payload + Task/Attempt prepare
+  -> PostgreSQL one transaction:
+       bound command + exact binding + version-1 event + outbox + NOTIFY
+  -> HQA transport-binding observed event
+  -> exact forward reconcile
+```
+
+- HQA prepare 后、PostgreSQL commit 前失败：保留 `awaiting_transport_binding`，只按原
+  `workflow_saga_id` 与 `client_request_id` 幂等重试；不创建新 Task/Attempt。
+- PostgreSQL commit 回包丢失：按 owner/session/client request/saga 查回并逐字段比较；禁止
+  换 request ID 或盲目重建。
+- PostgreSQL commit 后、HQA observed 前失败：向前补写 observed event；不删除已提交 command。
+- HQA 已 observed 但任一 canonical authority 后来缺失：视为 restore/data-loss，fail closed
+  并从备份恢复；不得从另一侧猜回缺失的 command、prompt 或 plan。
+- 跨 PostgreSQL 调用时不得持有 HQA 文件锁；saga 进度只从两个 canonical authority 推导，
+  不再建立第三份 journal。
+
+### 3C.1 exact facts
+
+HQA prepare receipt 与 PostgreSQL binding 必须共同锚定：固定本机 owner、platform session、
+client request、command kind/request digest、稳定 Task/Attempt、prepared Task version/event、
+plan version/digest、逻辑 payload ref/content digest/UTC expiry、requested provider-policy digest
+和 workflow preparation digest。PostgreSQL 生成 `command_id` 后再计算最终 binding digest；
+`created_at`、`updated_at`、`recorded_at` 等运行时间不进入摘要，但不可变
+`payload_expires_at` 必须进入摘要。
+
+payload ref 只允许 `hqa-payload:sha256:<64 lowercase hex>`，不能包含绝对路径、URL、
+`..` 或可变别名。payload/journal/lock/projection 均须 owner-only、no-follow、regular-file、
+inode identity 与 digest 验证；prompt 只经 JSON stdin 进入 HQA，不能进入 argv、projection、
+journal、stdout 或错误消息。provider policy 只保存 provider/model/显式 fallback 标识，不保存
+token、OAuth、Bearer 或 API key。
+
+### 3C.1 验收门
+
+1. 相同 operation/request/saga + 相同 exact facts 幂等 no-op；任一字段变化明确 conflict，零
+   额外写入；expected-version CAS 不允许 last-write-wins。
+2. HQA torn journal、未知 schema、重复 JSON key、NaN、非法 UTF-8、hash-chain/sequence
+   损坏、symlink/权限/owner/hardlink 异常全部 fail closed；projection 只可由完整 journal replay。
+3. migration 006 必须 additive、可重复 apply，并使用独立 workflow-binding schema version；
+   不改写已 live apply 的 migration 005 或把其 meta 直接升级为 2。
+4. command、binding、version-1 event、outbox、NOTIFY 同事务；任一步故障四类业务事实全部回滚。
+5. unbound、payload 已删除或到期的 command 即使 `queued` 也不可 claim；runnable worker 本切片
+   仍只执行 notify/scan/expired-lease reconcile。
+6. 故障注入覆盖 payload publish、journal append/fsync、projection replace、PostgreSQL 每个
+   insert、commit-ack 丢失、HQA observed 与 payload deletion 的恢复点；重复 reconcile 收敛
+   且第二次 no-op。
+7. 本机验收前后 browser Hermes POST、worker claim、Hermes Session/Run、provider 调用均为
+   零增量；`chat_write=false`、`mutation_enabled=false` 与全部交易安全开关不变。
+
+门 1–7 已由代码、故障注入、全量/目标测试与隔离数据库实跑覆盖；live 环境仍需单独完成：
+用户授权 migration 006 → apply 与幂等重放 → readiness/零行复核 → HQA authority backup/restore
+drill → 服务和浏览器只读回归。该运行门没有被代码验收替代。
+
+3C.1 live 激活后，仍须等待 upstream persistent idempotency/Run recovery/event replay/provider
 evidence，并依次完成 authenticated mutation BFF/CSRF、dispatch supervision 与故障注入，才可
 进入 3D composer/SSE/resume/stop。
 
 因此当前产品阶段应表述为：**D-31 已有真实 Hermes 会话只读连接和平台 durable
-ledger/reconcile worker 底座，3E-A 只读 Unified Results 也已完成，但完整 Hermes 对话工作台、
+ledger/reconcile worker 底座；3C.1 已完成代码与隔离数据库验收、live 006 待授权；3E-A 只读
+Unified Results 也已完成，但完整 Hermes 对话工作台、
 独立 Hermes Run 结果、results cutover 与旧页退场仍未接通。3D composer 继续被九项 live
 blocker 明确阻断；3F 的 Agent Studio 机制默认 OFF，不能表述为已切流。**
