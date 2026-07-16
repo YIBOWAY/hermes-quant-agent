@@ -74,6 +74,8 @@ Browser
   落到 authenticated same-origin + CSRF 边界。
 - `/hermes/sessions` 展示真实已持久化会话；详情页只展示有限的 user/assistant 文本，
   composer 继续禁用。
+- 会话详情打开时自动定位最新消息；返回入口、标题和精确 session ID 在滚动时保持固定，
+  返回入口具备最小 44px 点击区，并有不依赖本机实时会话数量的 48 条消息确定性回归夹具。
 - session ID、upstream payload、响应大小/时间/条数、epoch 时间和错误 envelope 均做
   fail-closed 验证；upstream 不可用不会退回旧 agent task 或写路径。
 - approvals 恢复为只读证据面；没有浏览器 Gate 2 mutation。
