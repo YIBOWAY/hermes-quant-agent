@@ -11,21 +11,27 @@ Rules for AI agents working in this repository.
 - The product roadmap is `docs/design/2026-07-01-roadmap-phases-0b-4.md`.
   The completed Phase 1a-4 v2 implementation record is
   `docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md`; Slices 9A through 9H
-  are all delivered. The current delivery record is
-  `docs/superpowers/plans/2026-07-12-full-9h-automation-notifications.md`.
-  D-31 status (2026-07-15 evidence): the old TUI gateway contract has drifted and
+  are all delivered. The current implementation/delivery record is
+  `docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`; the full
+  9H record is completed historical delivery evidence, not the active queue.
+  D-31 status (2026-07-16 evidence): the old TUI gateway contract has drifted and
   is fail-closed; the official API Server session-read contract and platform
-  server-side GET-only BFF are delivered for real session list/detail/messages only.
+  server-side GET-only BFF are delivered for real session list/detail/messages.
   Candidate integrity is delivered, one authorized migration apply completed,
   and Scene-B completed Gate 1, Gate 2, Futu final receipt, human Gate 3 commit
   `524e791`, registry promotion, and cleanup. The professional frontend/read-only
   shell is delivered. Browser Gate 2 mutation was rolled back because refetching
-  digest/status violated Gate 1 binding/no-refetch. Real Hermes chat/provider Run
-  evidence, Hermes approval mutations, durable ledger/outbox/worker, unified
-  results, and legacy-page retirement remain intentionally blocked or planned.
-  The current plan is
-  `docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`. Do not infer work from
-  an older plan or backlog. The platform frontend plan is the Slice 0-8
+  digest/status violated Gate 1 binding/no-refetch. Wave 3A and 3B are DONE;
+  3B's ledger has delivered claim/lease/heartbeat primitives; 3C's runnable worker
+  has delivered only notify/periodic-scan/expired-lease reconciliation and does not
+  claim queued commands, with zero Hermes mutation/provider use. Wave 3D chat remains BLOCKED. Wave
+  3E-A has delivered and locally accepted the read-only Unified Results catalog,
+  details and exact-link projection; independent Hermes research Run results and
+  full results cutover remain blocked. Wave 3F has only a page-scoped,
+  reversible Agent Studio redirect mechanism that defaults OFF; exact-bound audit
+  parity, user cutover approval, the other three legacy pages, and all global
+  legacy redirects remain blocked. Do not infer work from an older plan or
+  backlog. The platform frontend plan is the Slice 0-8
   delivery record, not the active backlog. The 2026-07-07 Phase 1a-4
   implementation plan is superseded material and must not be followed task-by-task.
 - Treat `ai-quant-platform/docs/phases/phase_15_iteration_roadmap.md` as

@@ -1,10 +1,13 @@
 # D-31 Wave 3 — Official API BFF、持久任务桥、统一 Results 与旧页退场
 
-> **状态（2026-07-15）：PARTIAL。** Slice 3A「official API session-read BFF」已交付；3B
+> **状态（2026-07-16）：PARTIAL。** Slice 3A「official API session-read BFF」已交付；3B
 > durable ledger/outbox 已完成数据库实装，3C deterministic worker 框架也已完成本机
-> reconcile-only 验收。平台提交 `efb10d5`、`9bc940f` 已推送。3D 仍被九项 live gateway
-> blocker 阻断；`chat_write`、Hermes approval mutation、unified Results 和 legacy redirects
-> 继续关闭。下一项可独立、安全推进的是只读 3E，而不是打开 composer。
+> reconcile-only 验收。平台提交 `efb10d5`、`9bc940f`、`b00a654`、`337e9d2` 已推送。3D 仍被九项 live gateway
+> blocker 阻断。3E-A 只读 Unified Results 索引、详情、权威回链与 exact Run-link 投影已
+> 完成实现和本机验收；独立 Hermes research Run 结果与 full cutover 仍关闭。3F 仅交付
+> Agent Studio 页面级、可回滚且默认 OFF 的 redirect 机制；exact-bound audit parity、用户
+> cutover 批准、另三页退场与全局 legacy redirects 均未完成。`chat_write` 与 Hermes approval
+> mutation 继续关闭。
 
 ## 目标
 
@@ -19,9 +22,9 @@ BFF；PostgreSQL 保存平台拥有的命令/关联/事件投影；HQA 的确定
 Browser
   -> ai-quant-platform same-origin BFF
       -> read: Hermes official API 127.0.0.1:8642
-      -> future write intent: PostgreSQL command + outbox + event ledger
-          -> HQA deterministic connector worker
-              -> Hermes official API HTTP/SSE
+      -> durable intent: PostgreSQL command + outbox + event ledger (3B DONE)
+          -> HQA deterministic connector worker (3C reconcile-only)
+              -> Hermes official API HTTP/SSE mutation (3D BLOCKED)
 ```
 
 关键点：**轮询的是确定性数据库队列/状态，不是让 Hermes 或 LLM 定时问“有没有任务”。**
@@ -117,7 +120,7 @@ Browser
 
 ### 2026-07-15 交付与运行证据
 
-- 平台实现已由提交 `efb10d5`、`9bc940f` 推送到远端开发分支。
+- 平台实现已由提交 `efb10d5`、`9bc940f`、`b00a654`、`337e9d2` 推送到远端开发分支。
 - 对 live `quantplatform` 应用前先生成
   `data/_runtime/db_backups/quantplatform-pre-wave3-20260715T182203+0800.dump`；SHA-256 为
   `3bbf5f3be83e6aeb348c83986e42cfed49e844e467b51305abf87a39d3733a3b`。
@@ -136,8 +139,12 @@ Browser
 
 - 优先用 PostgreSQL `LISTEN/NOTIFY` 唤醒；同时保留低频 periodic scan，解决通知不是持久队列、
   worker 重启或通知丢失的问题。
-- 多 worker 使用短事务 `FOR UPDATE SKIP LOCKED` claim，写入 lease/heartbeat；网络调用在事务外。
-- 指数退避 + jitter；明确区分可重试、永久失败与 `outcome_unknown`。
+- 3B ledger repository 已实现并测试短事务 `FOR UPDATE SKIP LOCKED` claim、lease 和
+  heartbeat primitives；当前 3C runnable worker **不调用这些 claim/heartbeat 方法**，
+  `run_once` 仅执行 expired-lease reconcile 与可选 GET-only capability probe。
+- 未来获批的 dispatch worker 才会 claim queued command，并确保网络调用在事务外。
+- **未来 dispatch capability（当前未实现）**：指数退避 + jitter，并明确区分可重试、
+  永久失败与 `outcome_unknown`。现有 `run_once` 不消费 `next_attempt_at`。
 - lease 到期只允许重新进入 reconcile；不能在 upstream 是否已执行不明时盲目重提。
 - worker 是纯确定性程序，不调用 LLM 来决定“取哪个任务、是否重试、状态是什么”。
 
@@ -170,8 +177,9 @@ chat/run/approval/stop endpoint。
   event、outbox、run-link 行。
 - worker 统计与数据库事实共同确认 `hermes_mutation_count=0`；没有 prompt、Hermes Run、
   approval/stop mutation 或 provider 消耗。
-- 因而 3C 的准确状态是“确定性 claim/lease/reconcile 框架已交付”，不是“真实 Hermes 写端
-  已接通”。在下列准入门满足前，worker 必须继续 reconcile-only。
+- 因而 3C 的准确状态是“ledger claim/lease primitives + worker notify/scan/reconcile runtime
+  已交付”，不是“当前 worker 会 claim command”，更不是“真实 Hermes 写端已接通”。在下列
+  准入门满足前，worker 必须继续 reconcile-only。
 
 ### Hermes 写端准入门
 
@@ -189,7 +197,8 @@ chat/run/approval/stop endpoint。
 
 ### Provider 语义
 
-- worker 的 claim、heartbeat、poll/reconcile 与 session GET 不消耗 provider。
+- ledger 的 claim/heartbeat primitives、worker 的 poll/reconcile 与 session GET 都不消耗
+  provider；当前 worker 只执行后两类动作。
 - 真正被准入的 prompt/run 才会消耗 Hermes 当前配置的 Codex/Grok 等 provider；Run 必须记录
   requested 与 actual provider/model、fallback from/to/reason 和 usage，不能只显示全局配置。
 
@@ -219,7 +228,7 @@ chat/run/approval/stop endpoint。
 3B/3C 只解决平台侧耐久意图与确定性 worker 底座，不能伪造这些 upstream 语义；因此 3D
 保持 **BLOCKED**，不能用轮询、内存 ID 或重试 prompt 绕过。
 
-## Slice 3E — Unified Results
+## Slice 3E — Unified Results（3E-A DONE；完整 cutover BLOCKED）
 
 在不删除领域 API/CLI/artifact 的前提下，建立一个统一结果索引和详情抽屉：
 
@@ -233,18 +242,32 @@ chat/run/approval/stop endpoint。
 验收必须先形成四个旧页面的 parity matrix，并让用户能从 Hermes 完成其仍有价值的只读查看、
 筛选、追溯与跳转任务。
 
-### 2026-07-15 parity 审计结论
+### 2026-07-15 实施前 parity 审计结论
 
-3E 可在不等待 chat 写端的前提下，以纯只读切片推进：
+审计确认 3E-A 可在不等待 chat 写端的前提下，以纯只读切片推进：
 
-- 当前 `/hermes/results` 只是 9H/HQA artifact 展示面；通用 recent-runs 又只覆盖
+- 3E-A 实施前的 `/hermes/results` 只是 9H/HQA artifact 展示面；通用 recent-runs 又只覆盖
   backtest/factor/paper/replication，不能给其中任一现有 API 换名后冒充统一结果中心。
 - 新索引必须按引用聚合各自权威源：run repository、独立 experiment 目录、repo-anchored
   CandidatePool 和 HQA ArtifactCatalog；只保存跨系统 ID、状态、freshness、provenance 与深链，
   不复制领域详情。
 - 最小详情覆盖 factor run、backtest、experiment、candidate 和六类 HQA artifact，并为
   missing/corrupt/degraded/empty/upstream-unavailable 提供显式状态。
-- 在 3E 真实数据 E2E 与用户验收完成前，`unifiedResults=false`，旧页继续提供原能力。
+- 在 full cutover 单独获批前，旧页继续提供原能力。
+
+### 3E-A 交付与剩余边界（2026-07-15）
+
+- 平台已提供只读 `/api/hermes/results` 统一索引与按 kind/resource ID 的动态详情；前端
+  `/hermes/results`、详情页和 Today 预览均读取该 catalog。
+- 索引按引用聚合 platform run、experiment、repo-anchored candidate 和六类 HQA artifact
+  权威源；领域 payload 不被复制为第二事实源。缺失、损坏、降级、未知总数与 source
+  unavailable 都显式 fail-closed。
+- `hermes_run_links` 只按数据库中的 exact resource identity 关联；没有 link 时不按标题、
+  ticker 或时间相似度猜测。列表/详情保持有界读取，不执行研究、回测、paper mutation 或交易。
+- 后端、前端和真实本机数据/UI 路径已验收，故 **3E-A DONE**。但这不包含独立 Hermes
+  research Run 结果；该来源仍依赖 3D 的可靠 Run/event/provider 证据合同。
+- 只读 catalog 可见不等于产品完成切流：`unifiedResultsCutoverAccepted=false`。完整 3E、旧页
+  替代与用户 cutover 批准仍关闭。
 
 ## Slice 3F — Legacy page retirement
 
@@ -255,13 +278,15 @@ chat/run/approval/stop endpoint。
 3. 先从导航移除并加可回滚 redirect；保留后端 API/CLI 与深链兼容观察期。
 4. 观察期无回退后才删除旧页面组件；绝不删除因子/回测/实验领域引擎。
 
-在 3E 验收前，`legacyRedirects=false`；soft banner 不能冒充旧页已退场。
+全局 `legacyRedirects=false`；soft banner 和 3E-A 只读 catalog 都不能冒充旧页已退场。
 
 本次 parity 审计把 3F 拆成页面级 Gate：
 
-- **Agent Studio** 已是只读过渡页；Hermes Approvals 补齐任意 candidate 的 source preview、
-  audit/reviews、digest/integrity/binding 和 promoted registry 上下文后，可独立移除导航并可逆
-  redirect 到 `/hermes/approvals`。
+- **Agent Studio** 已是只读过渡页；当前代码已有独立、可回滚的导航移除与
+  `/hermes/approvals` redirect 机制，由 `QS_HERMES_AGENT_STUDIO_REDIRECT_ENABLED` 控制并
+  默认 OFF。Hermes Approvals 已补 source preview、digest/integrity/binding、exact review 与
+  promoted registry 上下文，但未绑定的 global/legacy audit 日志被安全地排除；在 exact
+  digest-bound audit parity 与用户 cutover 批准完成前，该开关不得作为默认运行配置。
 - **Factor Lab、Backtester、Experiments** 仍分别承载因子执行、回测执行和实验 sweep 等真实
   写任务。chat 写端关闭且没有另一获批结构化执行入口时，这三页不可退休；3E 只能先接管其
   历史查看与详情入口。
@@ -294,9 +319,28 @@ chat/run/approval/stop endpoint。
 | 3B durable ledger/outbox | **DONE（migration 005 + live DB 验收）** |
 | 3C connector worker | **FRAMEWORK DONE / reconcile-only；Hermes mutation BLOCKED** |
 | 3D chat/stream/resume | **BLOCKED（live gateway 九项）** |
-| 3E unified Results | **PLANNED；可作为下一只读切片独立推进** |
-| 3F legacy retirement | **PARTIAL GATE：Agent Studio 可先行；另三页 BLOCKED on write parity + user approval** |
+| 3E-A read-only Unified Results | **DONE（实现 + 本机真实数据/UI 验收）** |
+| 完整 3E / results cutover | **BLOCKED（Hermes Run evidence + user cutover approval）** |
+| 3F legacy retirement | **MECHANISM ONLY：Agent Studio redirect 默认 OFF；exact-bound audit parity/user approval 未完成；另三页 BLOCKED on write parity** |
+
+## 下一安全切片（未实施）：3C.1 workflow identity / payload / exact binding
+
+最终 workflow review 证实当前没有 HQA Task/Attempt ledger、不可变 payload authority 或
+command → Task/Attempt exact binding，因此不能直接从 reconcile-only 跳到 queued-command
+dispatch。下一实施计划应先覆盖：
+
+1. HQA append-only Task/Attempt journal、stable event ID、expected-version CAS、原子 projection
+   与 replay；
+2. content-addressed prompt/provider-policy payload envelope、TTL/删除/审计与 secret boundary；
+3. command、task、attempt、plan version/hash 的 exact binding digest；
+4. PostgreSQL command authority 与 HQA task authority 间 crash-safe、幂等 saga/reconcile；
+5. 全阶段保持无 browser POST、worker 不 claim、Hermes/provider mutation 为 0。
+
+3C.1 验收后，仍须等待 upstream persistent idempotency/Run recovery/event replay/provider
+evidence，并依次完成 authenticated mutation BFF/CSRF、dispatch supervision 与故障注入，才可
+进入 3D composer/SSE/resume/stop。
 
 因此当前产品阶段应表述为：**D-31 已有真实 Hermes 会话只读连接和平台 durable
-ledger/reconcile worker 底座，但完整 Hermes 对话工作台仍未接通；下一安全开发切片是只读
-3E unified Results。3D composer 仍被九项 live blocker 明确阻断。**
+ledger/reconcile worker 底座，3E-A 只读 Unified Results 也已完成，但完整 Hermes 对话工作台、
+独立 Hermes Run 结果、results cutover 与旧页退场仍未接通。3D composer 继续被九项 live
+blocker 明确阻断；3F 的 Agent Studio 机制默认 OFF，不能表述为已切流。**

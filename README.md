@@ -14,11 +14,19 @@ market foresight, the mini 9H read-only Hermes artifact shelf, and Slice 9G's
 auditable opportunity ledger. Full 9H adds the four-job
 read-only automation loop, strict weekly/opportunity/freshness projections,
 durable notification receipts, feed schema 1.1 and the visible `/hermes` cards.
-The first D-31 wave has also delivered the fail-closed Hermes capability
-contract, candidate integrity/Gate 3, and the professional read-only Hermes
-default shell. Real Hermes chat/provider use, Hermes approval mutations,
-unified-results parity, and retirement of the four legacy research pages are
-not implemented yet. The platform frontend plan is the Slice 0-8 delivery
+D-31 has since delivered the official API GET-only session BFF (3A), PostgreSQL
+command/event/outbox/run-link ledger with claim/lease/heartbeat primitives (3B),
+and a deterministic connector notify/scan/expired-lease reconcile runtime (3C).
+The runtime does not claim queued commands and remains reconcile-only: real Hermes
+chat/provider Run submission and approval mutations
+are still blocked. The read-only Unified Results catalog and details are
+delivered and locally accepted as 3E-A, while independent Hermes Run results and
+full results cutover are not. Agent Studio has only a reversible page-scoped
+redirect mechanism that defaults off; exact-bound audit parity, user cutover
+approval, and retirement of all four legacy research pages remain open. Read the
+current [Wave 3 plan](docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md)
+and the accepted [local Hermes integration decision](docs/design/2026-07-15-local-hermes-integration-decision.md)
+before changing the bridge. The platform frontend plan is the Slice 0-8 delivery
 record, not an executable queue. Platform Phase 15 is reference only.
 
 - **Safety watchdog** (`hqa.doctor_watchdog`) — `[SILENT]`; JSON-first safety

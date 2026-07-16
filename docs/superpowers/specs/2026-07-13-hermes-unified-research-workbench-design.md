@@ -179,6 +179,10 @@ market-foresight proposal 属于“市场预测提案”，只读且 proposal-on
 
 ### 5.1 拓扑
 
+> 下图是**目标拓扑，不是当前运行链路**。截至 2026-07-16，PostgreSQL ledger 和 GET-only
+> session BFF 已落地；worker 只做 notify/scan/expired-lease reconcile，authenticated mutation
+> BFF、HQA Task/Attempt ledger、payload authority、dispatch 和 HTTP/SSE 写边都尚未实现。
+
 ```text
 Browser
   -> ai-quant-platform same-origin BFF
@@ -200,7 +204,7 @@ Browser
 - BFF 做鉴权边界、capability 归一化、事件白名单和错误映射，不实现第二个 Agent；
 - PostgreSQL command ledger 负责浏览器传输命令的客户端幂等、版本 CAS、lease、outbox 和
   exact Run link；HQA connector 只消费这份队列，不再维护第二份 BridgeRequest 幂等账本；
-- HQA 提供窄的 versioned task CLI：BFF、connector 和 Hermes skill 都只能通过该入口写
+- 目标方案要求 HQA 提供窄的 versioned task CLI（当前尚未实现）：BFF、connector 和 Hermes skill 都只能通过该入口写
   research task ledger；CLI 内部负责跨进程文件锁、expected-version CAS、稳定 event ID 和
   原子 projection；
 - BFF 可在 Hermes 离线时通过 HQA 的只读 `list/show/events --json` 或严格校验的原子
@@ -322,7 +326,8 @@ attempt，或进入正式 Gate；旧手工表单不作为旁路保留。
 > 采用 PostgreSQL durable queue。PostgreSQL 是 transport command、`client_request_id` 幂等、
 > command event/outbox、delivery lease 和 exact run link 的唯一权威；HQA 不再另写一份
 > BridgeRequest command journal。Hermes 仍是 Session/Run/messages/provider evidence 的唯一
-> 权威，HQA task ledger 仍是 research plan/Attempt/Gate/result refs 的唯一权威。旧文中把
+> 权威；计划中的 HQA task ledger 将成为 research plan/Attempt/Gate/result refs 的唯一权威，
+> 但该 ledger/CLI 当前尚不存在。旧文中把
 > request digest/idempotency/run correlation 交给 HQA bridge journal 的描述由本 amendment
 > 明确 supersede，避免双写、双主和崩溃后不确定重发。
 
@@ -332,7 +337,7 @@ attempt，或进入正式 Gate；旧手工表单不作为旁路保留。
 |---|---|---|
 | Hermes | Session/Run store | 消息上下文、Hermes Run 原始状态/事件、实际 provider/model、command approval。 |
 | 平台 PostgreSQL command ledger | transactional command/event/outbox | platform session、transport request digest/client idempotency、command version/lease/outbox、Hermes run exact correlation。 |
-| HQA task ledger | append-only research ledger | 研究计划版本、步骤、attempt、Gate refs、result refs、派生任务阶段。 |
+| HQA task ledger（planned / not implemented） | append-only research ledger | 研究计划版本、步骤、attempt、Gate refs、result refs、派生任务阶段。 |
 | 平台 | 现有 repositories/artifacts/locks/git diff | 因子、回测、实验、日报、candidate 源码、领域 review、promotion diff。 |
 
 command ledger 只拥有传输意图、投递状态和精确关联，不拥有对话正文、研究结果或领域审批。
@@ -348,8 +353,9 @@ session policy 和每个 Run 的**实际 provider/model**才是运行事实。HQ
 implementation，负责同事务 create、expected-version CAS、lease fencing 和 append-only event。
 BFF 不直接拼 SQL，HQA connector 不在本地文件复制 command authority。
 
-HQA 仍提供窄的 versioned CLI/模块作为 research task ledger 的唯一 mutation
-implementation。BFF、Hermes skill、connector 和人工 CLI 都必须调用该入口，不得自行 append
+HQA 后续必须实现窄的 versioned CLI/模块，作为 research task ledger 的唯一 mutation
+implementation；**当前仓库没有这套 Task/Attempt ledger 或 CLI**。落地后，BFF、Hermes skill、
+connector 和人工 CLI 都必须调用该入口，不得自行 append
 task 文件。入口负责：
 
 - 使用 OS 级跨进程锁串行化 journal 写入；
@@ -358,7 +364,7 @@ task 文件。入口负责：
 - 原子更新只读 projection；
 - 损坏、未知 schema、版本冲突时 fail closed。
 
-BFF 读取任务时调用固定参数的 HQA `list/show/events --json`，或读取由 HQA 原子发布并经
+BFF 未来读取任务时调用固定参数的 HQA `list/show/events --json`，或读取由 HQA 原子发布并经
 严格 schema 校验的 projection；即使 Hermes 离线，这条只读路径仍然可用。跨仓调用必须
 使用配置的绝对 executable path、参数数组和 JSON stdin，不经过 shell 字符串拼接。
 
@@ -733,8 +739,18 @@ installed Hermes evidence.
 5. 后续 HQA Task/统一结果、受控研究/三 Gate、逐页切流、硬化删除仍按各自前置证据
    just-in-time 写独立 implementation plan。
 
-当前状态是“D-31 已批准；gateway capability 合同已冻结且 chat 写端 fail-closed；
-candidate integrity/Gate 3 已代码交付；professional frontend F2 只读壳与可回滚默认
-首页已代码交付”，不是任何新 chat/execution 生产能力已交付。能力提示仍是静态
-`blocked_in_this_slice`。指纹与缺失语义以 `docs/contracts/hermes-gateway-0.18.2.md`
-与 `config/hermes-gateway-capabilities.v1.json` 为准。
+当前状态是“D-31 已批准并部分交付”：candidate integrity/Gate 3 与 professional frontend
+F2 只读壳已交付；3A official API session-read BFF 和 3B durable ledger DONE，ledger 已有
+claim/lease/heartbeat primitives；3C runnable worker 只交付 notify/periodic-scan/expired-lease
+reconcile，不 claim queued command 且保持 reconcile-only；3D chat/stream/resume/stop 仍被九项
+live blocker 阻断。3E-A 只读 Unified Results 索引、动态详情、权威源回链和 exact Run-link
+投影已完成实现及本机验收，但独立 Hermes research Run 结果与 full cutover 仍关闭，
+`unifiedResultsCutoverAccepted=false`。3F 仅有 Agent Studio 页面级、可回滚且默认 OFF 的
+redirect 机制；exact digest-bound audit parity、用户 cutover 批准、另三页退场与全局
+`legacyRedirects` 均未完成。这仍不是任何新 chat/execution 生产能力已交付。
+
+当前 transport/缺失语义以 `docs/contracts/hermes-api-server-0.18.2.md` 和
+`docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md` 为准；正式本机连接选择见
+`docs/design/2026-07-15-local-hermes-integration-decision.md`。旧
+`docs/contracts/hermes-gateway-0.18.2.md` 与
+`config/hermes-gateway-capabilities.v1.json` 只保留历史诊断价值，不能用于写端准入。
