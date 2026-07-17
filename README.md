@@ -27,6 +27,14 @@ a later v0.2 review found its `UNIQUE(task_id)` incompatible with multi-Attempt
 research. Because the current runner replays old SQL, the selected fix is to revise
 the never-live 006 and redo its full evidence—not assume a later 007 can repair it—
 before any live authorization.
+Slice V0 (interface/cardinality/authority freeze) is HQA-side DONE and merged into
+`codex/full-9h`: the five `hqa/agent_workspace_*` contract modules (act/snapshot/follow,
+closed `UserActionV1` union, authority matrix, error taxonomy, retention) ship with 622
+contract tests green, plus a fail-closed fix for the event-timestamp normalizer. V0
+overall stays NOT DONE — three-repo manifest consistency, primary validation and
+cross-review are pending (see
+[`docs/audits/2026-07-17-v0-three-repo-cross-review.md`](docs/audits/2026-07-17-v0-three-repo-cross-review.md));
+all live write gates remain OFF.
 This foundation is not yet an activated write path. The read-only Unified Results catalog and details are
 delivered and locally accepted as 3E-A, while independent Hermes Run results and
 full results cutover are not. Agent Studio has only a reversible page-scoped

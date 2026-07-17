@@ -7,7 +7,7 @@
 **V0 = HQA-side DONE / 三仓 PENDING → 整体 NOT DONE。**
 
 - **HQA 侧合同候选已交付且自洽**：5 个 `hqa/agent_workspace_*` 合同模块（~2541 行）+ 5 个测试模块（**622 个测试全绿**），并经一轮 11-agent 对抗性评审（五维全部 `on-track-with-gaps`、零核心 invariant 违例、唯一确认的硬伤 astimezone `OverflowError` 已于 `5775d9a` 修复并附回归测试）。
-- **三仓 manifest 一致性尚未闭环**：ADR 假设三仓都落在各自 candidate 分支、冻结在指定 base。现实是**三个 candidate 分支都不存在**；platform 恰在冻结 commit 但位于别的分支且工作区 dirty；Hermes 的冻结 base 不在本地 checkout 历史中。按 ADR 自己的 fail-closed 规则（source 不匹配 / dirty 未声明 / identity 漂移 → 全部 write readiness 与 live Gate fail closed），platform 与 Hermes 两条腿今天都会 fail-closed。
+- **三仓 manifest 一致性尚未闭环**：ADR 假设三仓都落在各自 candidate 分支、冻结在指定 base。现实是**三个 candidate 分支都不存在**；platform 恰在冻结 commit 但位于别的分支且工作区 dirty；Hermes 的冻结 base 不在本地 checkout 历史中。按 ADR 自己的 fail-closed 规则（source 不匹配 / dirty 未声明 / identity 漂移 → 全部 write readiness 与 live Gate fail closed），截至 2026-07-17，platform 与 Hermes 两条腿都会 fail-closed。
 
 这与 ADR 自述 "V0 NOT DONE / PRIMARY VALIDATION PENDING" 一致——它是诚实的，不是阻塞 HQA 合同本身正确性的信号。**DurableRunAuthority（Hermes 腿）是 V2 工作，本就不属于 V0。**
 

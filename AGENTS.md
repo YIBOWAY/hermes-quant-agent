@@ -41,7 +41,16 @@ Rules for AI agents working in this repository.
   and redoing its full evidence; the current replay-all runner cannot safely use
   a later 007 as a patch. First freeze the v0.2 cardinality, disable implicit startup
   migration, and repeat isolated PostgreSQL/independent review. None of this may
-  enable claim or dispatch. Wave 3D chat remains BLOCKED. Wave
+  enable claim or dispatch.
+- Slice V0 (interface/cardinality/authority freeze) is HQA-side DONE and merged
+  into `codex/full-9h`: the five `hqa/agent_workspace_*` contract modules
+  (act/snapshot/follow surface, closed `UserActionV1` union, authority matrix,
+  error taxonomy, retention) are delivered with 622 contract tests green. V0
+  overall stays NOT DONE: three-repo manifest consistency, primary validation
+  and cross-review are pending. Current evidence and the three-repo audit are
+  `docs/audits/2026-07-17-v0-three-repo-cross-review.md`; keep `chat_write_ready`,
+  browser mutation, worker claim/dispatch and public composer OFF. Wave
+  3D chat remains BLOCKED. Wave
   3E-A has delivered and locally accepted the read-only Unified Results catalog,
   details and exact-link projection; independent Hermes research Run results and
   full results cutover remain blocked. Wave 3F has only a page-scoped,
