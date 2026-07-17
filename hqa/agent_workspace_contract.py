@@ -157,13 +157,13 @@ def _normalize_observed_at(value: Any) -> str:
     parsed_value = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
         parsed = datetime.fromisoformat(parsed_value)
-    except ValueError as exc:
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("observed_at must be timezone-aware")
+        return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    except (ValueError, OverflowError, OSError) as exc:
         raise ValueError(
             "observed_at must be a canonical timezone-aware timestamp"
         ) from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError("observed_at must be timezone-aware")
-    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 @dataclass

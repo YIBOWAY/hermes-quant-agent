@@ -294,6 +294,24 @@ def test_workspace_event_normalizes_timestamp_to_utc_fixed_microseconds() -> Non
     assert fractional.observed_at == "2026-07-16T04:34:56.123000Z"
 
 
+@pytest.mark.parametrize(
+    "extreme",
+    (
+        "0001-01-01T00:00:00+14:00",  # underflows below datetime.min after astimezone(UTC)
+        "9999-12-31T23:59:59-14:00",  # overflows above datetime.max after astimezone(UTC)
+    ),
+)
+def test_normalize_observed_at_extreme_offsets_raise_value_error_not_overflow(
+    extreme: str,
+) -> None:
+    # Regression: astimezone(UTC) on a regex-valid but extreme offset must fail
+    # closed with ValueError; it must NOT let a raw OverflowError escape the
+    # boundary (callers only guard TypeError/ValueError).
+    from hqa.agent_workspace_contract import _normalize_observed_at
+
+    with pytest.raises(ValueError):
+        _normalize_observed_at(extreme)
+
 def test_workspace_event_metadata_rejects_hostile_values_under_allowed_keys() -> None:
     from hqa.agent_workspace_contract import WorkspaceCursor, WorkspaceEvent
 
