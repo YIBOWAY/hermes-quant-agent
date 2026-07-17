@@ -1,16 +1,14 @@
 # Agent v0.2 — 完整 `/hermes` Web Chat 实施计划
 
-> **V0 LIMITED-DEVICE CANDIDATE ADDENDUM（2026-07-16）：** 当前仅在 targeted-only Windows
-> 验证分支记录 Workspace v1 合同候选；full validation 必须回到 primary 环境执行，V0 仍未 DONE。
-> HQA `codex/agent-v0-2-limited-device` 基于
-> `a7428b6219ded4550f4c8951b6fabc4542a1724f`；platform
-> `codex/agent-v0-2-platform-limited-device` 基于
-> `7b73b5f2fe9e80509f4762c3de696d1e2c58fc9d`；Hermes
-> `codex/agent-v0-2-durable-runs` 基于 `a79b818360700d526c0a48107444810e3d6ecc2e`。
+> **V0 ADDENDUM（2026-07-17 更新）：** HQA 侧 Workspace v1 合同已交付（5 模块 + 622 测试全绿），
+> 但三仓 source/runtime manifest 一致性、primary validation 与三仓 cross-review 仍 pending，V0 仍
+> 未 DONE。HQA frozen base `a7428b6219ded4550f4c8951b6fabc4542a1724f`；platform
+> `7b73b5f2fe9e80509f4762c3de696d1e2c58fc9d`；Hermes `a79b818360700d526c0a48107444810e3d6ecc2e`。
+> 三仓现状核查见 `../../audits/2026-07-17-v0-three-repo-cross-review.md`。
 > migration、browser mutation、worker claim/dispatch、provider、Gate、paper/live 与 public composer
 > 等所有 live gates 保持 OFF；本 addendum 不构成任何 live 授权。
 
-> **状态（2026-07-16）：CURRENT / PLAN ACCEPTED / V0 LIMITED-DEVICE CANDIDATE IN PROGRESS / PRIMARY VALIDATION PENDING。** 本计划是 D-32 唯一 active
+> **状态（2026-07-17）：CURRENT / PLAN ACCEPTED / V0 HQA-side DONE / 三仓 PENDING → V0 NOT DONE。** 本计划是 D-32 唯一 active
 > implementation plan。此前的 Wave 3 文档保留为已交付事实与问题输入，不再从其中的旧顺序、
 > unchecked checkbox 或“下一步”继续施工。
 >
@@ -419,9 +417,27 @@ cardinality 和三仓交付边界。
   Gate 1。
 - migration、Hermes mutation、provider call、browser mutation 均为零。
 
-状态：**LIMITED-DEVICE CANDIDATE IN PROGRESS / PRIMARY VALIDATION PENDING。** ADR candidate 已存在，
-但 executable model/contract tests、runtime manifest、primary validation 与三仓 cross-review 均
-pending；V0 不是 DONE。
+状态：**HQA-side DONE / 三仓 PENDING → V0 不是 DONE。** HQA 侧 executable model/contract tests 已
+交付（5 模块 + 622 测试全绿）；三仓 source/runtime manifest 一致性、primary validation 与三仓
+cross-review 均 pending。
+
+**V0 交付记录（§8.2，2026-07-17）：**
+
+- **HQA commit/branch**：`codex/full-9h` @ `5775d9a`（`3a95dd0` 已 fully merged，`merge-base = 3a95dd0`；
+  其上修复 `5775d9a` = contract.py astimezone `OverflowError` fail-closed + 回归测试）。frozen base
+  `a7428b6219ded4550f4c8951b6fabc4542a1724f`。
+- **工作树**：HQA 干净。platform（`audit-remediation-2026-06-23` @ `7b73b5f2`）dirty（options 数据/代码，
+  与 V0 无关，未处置）；Hermes（`main` @ `9baa7d467`）干净但落后 origin/main 385 提交。
+- **新增 contract/schema version**：5 个 `hqa/agent_workspace_*` 合同模块（`UserActionV1` / WorkspaceSnapshot /
+  cardinality / 错误分类 / retention），无 migration schema 变更（006 修订属 V1+，本 Slice 未触碰 SQL）。
+- **测试命令与结果**：`python -m pytest tests/test_agent_workspace_*.py` → **622 passed**；全量
+  `python -m pytest tests/`（JUnit 统计）→ **1442 tests / 1439 passed / 1 failed / 2 skipped**；唯一失败
+  `test_hermes_read_bridge::test_loopback_ws_roundtrip_session_list` 为沙箱禁 socket bind 的环境限制（基线同样失败，非回归）。
+- **三仓 cross-review**：见 `../../audits/2026-07-17-v0-three-repo-cross-review.md`（只读核查；platform 恰在
+  冻结 commit 但分支名不符且 dirty、Hermes candidate 分支与冻结 base 未落地 → 三仓一致性未闭环）。
+- **未触发**：migration / Hermes mutation / provider / paper / live / broker / Gate / redirect / browser
+  mutation / live apply 均未触发；零 live effect。
+- **未清零 blocker**：三仓 candidate 分支/manifest 一致性 + primary validation 签名（见上"关闭 V0 还需"）。
 
 ### Slice V1 — Stop-the-line launch baseline
 
@@ -732,7 +748,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 
 | Slice | 状态 | 下一准入 |
 |---|---|---|
-| V0 Interface/cardinality/authority freeze | LIMITED-DEVICE CANDIDATE IN PROGRESS / PRIMARY VALIDATION PENDING | ADR candidate exists；executable contracts + runtime manifest + primary validation + cross-review pending；not DONE |
+| V0 Interface/cardinality/authority freeze | HQA-side DONE / 三仓 PENDING → not DONE | executable contracts 已交付（5 模块+622 测试绿）；三仓 manifest 一致性 + primary validation + cross-review 见 `../../audits/2026-07-17-v0-three-repo-cross-review.md` |
 | V1 Stop-the-line baseline | NOT STARTED | 无隐式 migration；标准 verify/offline build green |
 | V2 Hermes DurableRunAuthority | NOT STARTED | C1/C2 restart/recovery contract green |
 | V3 HQA Intent/WorkflowAuthority | NOT STARTED | Research Task 1:N Attempt + backup/restore green |
@@ -745,9 +761,11 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 ## 9. 当前立即执行顺序
 
 1. 完成本计划、roadmap D-32、`docs/README.md`、`AGENTS.md` 和 predecessor banner 的同步复核。
-2. 执行 V0 的 executable contract 子步骤：把已选的“修订未 live 006”方案、ordinary
+2. V0 的 executable contract 子步骤 **已在 HQA 侧交付**（“修订未 live 006”方案、ordinary
    turn/research cardinality、三种 Gate 类型、external/managed session、owner auth/retention、
-   `act/snapshot/follow` 和三仓 source/runtime manifest 固化成 ADR + model tests。
+   `act/snapshot/follow` 已固化成 ADR + 5 模块 + 622 model/contract 测试）。仍 pending 的是三仓
+   source/runtime manifest 一致性、primary validation 与三仓 cross-review（见
+   `../../audits/2026-07-17-v0-three-repo-cross-review.md`）。
 3. 执行 V1，第一项必须是 migration auto-apply stop-line；在它修复前不得启动带 DB 的平台 API
    来“顺便看看”。
 4. V2 Hermes durable contract 与 V3 HQA lifecycle 可在接口冻结后并行；两者均只用 hermetic

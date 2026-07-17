@@ -1,8 +1,9 @@
 # Agent Workspace v1 ADR — LIMITED-DEVICE CANDIDATE
 
-> **状态：LIMITED-DEVICE CANDIDATE IN PROGRESS / PRIMARY VALIDATION PENDING / V0 NOT DONE。**
-> 当前只有 targeted-only 合同文档候选；primary 三仓 full suite、executable contracts、runtime
-> manifest、validation 与 cross-review 均待完成。本 ADR 不授权任何 live effect。
+> **状态：HQA-side DONE / 三仓 PENDING → V0 NOT DONE（2026-07-17 更新）。**
+> HQA 侧 executable action/cardinality/auth/retention 合同已交付（5 个 `hqa/agent_workspace_*` 模块
+> ~2541 行 + 622 个合同测试全绿）。三仓 source/runtime manifest 一致性、primary validation 与三仓
+> cross-review 仍 pending；本 ADR 不授权任何 live effect。
 
 ## 决策
 
@@ -192,7 +193,8 @@ manifest 缺失、source 不匹配、dirty 未声明、artifact/runtime identity
 
 ## Candidate 验收边界
 
-此 ADR candidate 已存在，但 executable action/cardinality/auth/retention contracts、runtime manifest、
-primary validation、三仓 full suite 与独立 cross-review 均 pending；V0 不是 DONE。在此之前 public
+此 ADR candidate 的 HQA 侧 executable action/cardinality/auth/retention 合同已交付并测试全绿（622
+tests）；但三仓 source/runtime manifest 一致性、primary validation 与三仓 cross-review 均 pending
+（见 `../audits/2026-07-17-v0-three-repo-cross-review.md`）；V0 不是 DONE。在此之前 public
 composer、`chat_write_ready`、browser mutation、worker claim/dispatch、provider、Gate 与 migration
 live apply 全部保持 OFF。

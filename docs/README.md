@@ -12,8 +12,8 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。**V0 LIMITED-DEVICE CANDIDATE IN PROGRESS / PRIMARY VALIDATION PENDING**，公共写端仍 OFF。 |
-| V0 Workspace v1 candidate ADR | [`design/2026-07-16-agent-workspace-v1-adr.md`](design/2026-07-16-agent-workspace-v1-adr.md) | **LIMITED-DEVICE CANDIDATE IN PROGRESS / PRIMARY VALIDATION PENDING / V0 NOT DONE**；executable contracts、runtime manifest、validation 与 cross-review 待完成。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。**V0 HQA-side DONE / 三仓 PENDING → V0 NOT DONE**，公共写端仍 OFF。 |
+| V0 Workspace v1 candidate ADR | [`design/2026-07-16-agent-workspace-v1-adr.md`](design/2026-07-16-agent-workspace-v1-adr.md) | **HQA-side DONE / 三仓 PENDING → V0 NOT DONE**；HQA 侧 executable contracts 已交付（5 模块+622 测试绿），三仓 manifest/primary validation/cross-review 待完成（见 `audits/2026-07-17-v0-three-repo-cross-review.md`）。 |
 | Wave 3 前序交付记录 | [`superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`](superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md) | 3A/3B、reconcile-only 3C、3C.1 code acceptance、3E-A 与 3F mechanism 的历史交付证据和 blocker 输入；不是当前执行队列。 |
 | 本机 Hermes 集成决策 | [`design/2026-07-15-local-hermes-integration-decision.md`](design/2026-07-15-local-hermes-integration-decision.md) | 正式方向是 platform BFF → PostgreSQL durable ledger → deterministic HQA worker → official Hermes API；禁止 Hermes/LLM cron 空轮询。 |
 | 当前 Hermes 合同 | [`contracts/hermes-api-server-0.18.2.md`](contracts/hermes-api-server-0.18.2.md) | official API Server 的 health/capabilities/sessions/detail/messages 只读合同；chat/run/stream/approval/stop 全部 fail-closed。 |
@@ -182,9 +182,10 @@ stop 不可对账。因此 3D 保持 **BLOCKED**。
 
 ## 接下来按什么顺序做
 
-1. **V0 Interface/cardinality/authority freeze：LIMITED-DEVICE CANDIDATE IN PROGRESS /
-   PRIMARY VALIDATION PENDING。** ADR candidate 已存在；executable contracts、runtime manifest、
-   primary validation 与三仓 cross-review 均 pending，V0 不是 DONE，当前零 live mutation。
+1. **V0 Interface/cardinality/authority freeze：HQA-side DONE / 三仓 PENDING → V0 不是 DONE。**
+   HQA 侧 executable contracts 已交付（5 模块 + 622 测试全绿）；三仓 manifest 一致性、primary
+   validation 与三仓 cross-review 均 pending（见 `audits/2026-07-17-v0-three-repo-cross-review.md`），
+   当前零 live mutation。
 2. **V1 Stop-the-line baseline。** 第一项修复默认 auto migration；随后清零 standard
    verify/offline build、transcript/DLP、APR/sample provenance 等 launch 基线。
 3. **V2 Hermes DurableRunAuthority 与 V3 HQA WorkflowAuthority。** 接口冻结后可并行；一个
