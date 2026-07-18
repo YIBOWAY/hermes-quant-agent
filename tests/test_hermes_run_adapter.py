@@ -237,12 +237,14 @@ class TestFakeLifecycleAndSemantics:
 
 
 class TestScriptedFaults:
-    def test_restart_survives_durable_state(self) -> None:
-        fake = ScriptedFakeHermesAdapter()
+    def test_restart_survives_durable_state(self, tmp_path) -> None:
+        # Real restart boundary: durable snapshot + a fresh process that loads it.
+        path = str(tmp_path / "authority.json")
+        fake = ScriptedFakeHermesAdapter(path)
         handle = fake.submit_or_get(idempotency_key=_KEY, request_body=_BODY)
         fake.drive_to_terminal(handle.run_id)
-        fake.inject(ScriptedFault.RESTART)
-        assert fake.get_status(handle.run_id).run_id == handle.run_id
+        fake2 = ScriptedFakeHermesAdapter(path)  # new process loads from disk
+        assert fake2.get_status(handle.run_id).run_id == handle.run_id
 
     def test_event_gap_fault_is_scriptable(self) -> None:
         fake = ScriptedFakeHermesAdapter()

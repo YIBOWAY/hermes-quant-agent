@@ -21,6 +21,7 @@ unit tests; tests inject hermetic fakes or a loopback ``http.server``.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import uuid
@@ -43,6 +44,8 @@ _HTTP_STATUS_BY_CODE = {
     "invalid_cursor": 400,
     "invalid_endpoint": 400,
     "non_loopback_endpoint": 400,
+    "unauthorized_fallback": 409,
+    "restart_without_durable_state": 500,
     "transport_error": 502,
 }
 
@@ -191,13 +194,96 @@ class _ApprovalGrant:
 
 
 class _InMemoryRunAuthority:
-    """The nine durable-run semantics, in-memory, for the scripted fake."""
+    """The nine durable-run semantics, in-memory, for the scripted fake.
 
-    def __init__(self) -> None:
+    Optionally backed by a JSON snapshot file (``snapshot_path``). When set,
+    every mutation persists the full durable state, and a fresh authority can
+    be rebuilt from the same path — this is how the scripted fake models a
+    real restart boundary for the acceptance tests (durable state survives;
+    in-process memory does not).
+    """
+
+    def __init__(self, snapshot_path: Optional[str] = None) -> None:
         self._lock = threading.Lock()
         self._runs: Dict[str, _RunRecord] = {}
         self._by_idempotency_key: Dict[str, str] = {}
         self._approvals: Dict[str, _ApprovalGrant] = {}
+        self._snapshot_path = snapshot_path
+
+    # -- persistence (durable restart boundary) ------------------------------
+    def _persist(self) -> None:
+        if not self._snapshot_path:
+            return
+        payload = {
+            "runs": [
+                {
+                    "run_id": r.run_id,
+                    "idempotency_key": r.idempotency_key,
+                    "digest": r.digest,
+                    "status": r.status,
+                    "session_id": r.session_id,
+                    "requested_policy": r.requested_policy,
+                    "actual_policy": r.actual_policy,
+                    "fallback_reason": r.fallback_reason,
+                    "usage": r.usage,
+                    "created_at": r.created_at,
+                    "updated_at": r.updated_at,
+                    "events": [
+                        {
+                            "seq": e.seq,
+                            "event_type": e.event_type,
+                            "run_id": e.run_id,
+                            "payload": dict(e.payload),
+                            "event_id": e.event_id,
+                        }
+                        for e in r.events
+                    ],
+                }
+                for r in self._runs.values()
+            ],
+            "approvals": [
+                {
+                    "challenge_id": g.challenge_id,
+                    "run_id": g.run_id,
+                    "action_digest": g.action_digest,
+                    "expires_at": g.expires_at,
+                    "consumed": g.consumed,
+                }
+                for g in self._approvals.values()
+            ],
+        }
+        with open(self._snapshot_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+
+    @classmethod
+    def load(cls, snapshot_path: str) -> "_InMemoryRunAuthority":
+        authority = cls(snapshot_path=snapshot_path)
+        with open(snapshot_path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        for rd in payload.get("runs", []):
+            record = _RunRecord(rd["run_id"], rd["idempotency_key"], rd["digest"])
+            record.status = rd["status"]
+            record.session_id = rd.get("session_id")
+            record.requested_policy = rd.get("requested_policy")
+            record.actual_policy = rd.get("actual_policy")
+            record.fallback_reason = rd.get("fallback_reason")
+            record.usage = rd.get("usage")
+            record.created_at = rd.get("created_at", record.created_at)
+            record.updated_at = rd.get("updated_at", record.updated_at)
+            record.events = [
+                StreamEvent(
+                    seq=e["seq"], event_type=e["event_type"], run_id=e["run_id"],
+                    payload=dict(e.get("payload") or {}), event_id=e.get("event_id"),
+                )
+                for e in rd.get("events", [])
+            ]
+            authority._runs[record.run_id] = record
+            authority._by_idempotency_key[record.idempotency_key] = record.run_id
+        for gd in payload.get("approvals", []):
+            grant = _ApprovalGrant(gd["challenge_id"], gd["run_id"], gd["action_digest"], gd["expires_at"])
+            grant.consumed = gd.get("consumed", False)
+            authority._approvals[grant.challenge_id] = grant
+        return authority
 
     # -- identity (semantic 1) ------------------------------------------------
     def submit_or_get(self, *, idempotency_key: Optional[str], request_body: Mapping[str, Any]) -> RunHandle:
@@ -215,13 +301,37 @@ class _InMemoryRunAuthority:
                 return RunHandle(run_id=record.run_id, created=False, idempotency_key=key)
             run_id = f"run_{uuid.uuid4().hex}"
             record = _RunRecord(run_id, key, digest)
+            # Capture the requested provider policy at submit (immutable), so the
+            # evidence plane can show requested -> actual divergence (plan §V2 508).
+            requested = request_body.get("model") if isinstance(request_body, Mapping) else None
+            record.requested_policy = {"model": requested} if requested is not None else dict(request_body or {})
             self._runs[run_id] = record
             self._by_idempotency_key[key] = run_id
+            self._persist()
             return RunHandle(run_id=run_id, created=True, idempotency_key=key)
 
     # -- status / evidence (semantics 2, 3, 5) --------------------------------
     def get_run(self, run_id: str) -> Optional[_RunRecord]:
         return self._runs.get(run_id)
+
+    def record_outcome(
+        self,
+        run_id: str,
+        *,
+        actual_policy: Optional[Mapping[str, Any]] = None,
+        fallback_reason: Optional[str] = None,
+        usage: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        with self._lock:
+            record = self.require_run(run_id)
+            if actual_policy is not None:
+                record.actual_policy = actual_policy
+            if fallback_reason is not None:
+                record.fallback_reason = fallback_reason
+            if usage is not None:
+                record.usage = usage
+            record.updated_at = time.time()
+            self._persist()
 
     def require_run(self, run_id: str) -> _RunRecord:
         record = self._runs.get(run_id)
@@ -237,6 +347,7 @@ class _InMemoryRunAuthority:
                 return
             record.status = status
             record.updated_at = time.time()
+            self._persist()
 
     # -- events (semantic 4) --------------------------------------------------
     def append_event(self, run_id: str, event_type: str, payload: Mapping[str, Any]) -> StreamEvent:
@@ -248,6 +359,7 @@ class _InMemoryRunAuthority:
                 payload=dict(payload), event_id=f"evt_{uuid.uuid4().hex}",
             )
             record.events.append(event)
+            self._persist()
             return event
 
     def replay_events(self, run_id: str, *, since_seq: int = 0) -> List[StreamEvent]:
@@ -265,6 +377,7 @@ class _InMemoryRunAuthority:
                 expires_at=time.time() + ttl_seconds,
             )
             self._approvals[challenge.challenge_id] = challenge
+            self._persist()
             return ApprovalChallenge(
                 challenge_id=challenge.challenge_id,
                 action_digest=challenge.action_digest,
@@ -281,6 +394,7 @@ class _InMemoryRunAuthority:
             if grant.expires_at <= time.time():
                 return False
             grant.consumed = True
+            self._persist()
             return True
 
     # -- reconcile (semantic 9) ------------------------------------------------
@@ -292,6 +406,8 @@ class _InMemoryRunAuthority:
                     record.status = "stopped"
                     record.updated_at = time.time()
                     count += 1
+            if count:
+                self._persist()
             return count
 
 
@@ -301,7 +417,6 @@ class _InMemoryRunAuthority:
 
 
 class ScriptedFault(Enum):
-    RESTART = "restart"
     EVENT_GAP = "event_gap"
     QUOTA_FALLBACK = "quota_fallback"
     APPROVAL_STALE = "approval_stale"
@@ -319,13 +434,44 @@ class ScriptedFakeHermesAdapter(HermesRunPort):
 
     Re-implements the nine durable-run semantics faithfully (they mirror the
     reviewed Hermes ``DurableRunAuthority``) and adds scripting hooks +
-    fault injection for contract and acceptance tests. Pure in-memory; no
+    fault injection for contract and acceptance tests.
+
+    Pass ``snapshot_path`` to make the authority durable across a real restart
+    boundary: mutations persist to a JSON snapshot and :meth:`restart` rebuilds
+    a FRESH in-memory authority from that snapshot (durable state survives;
+    in-process memory does not). Pure in-memory when no path is given. No
     network, no threads started. NOT a product path.
     """
 
-    def __init__(self) -> None:
-        self._authority = _InMemoryRunAuthority()
+    def __init__(
+        self,
+        snapshot_path: Optional[str] = None,
+        *,
+        authorized_fallback_chain: Optional[List[str]] = None,
+    ) -> None:
+        self._snapshot_path = snapshot_path
+        self._authority = (
+            _InMemoryRunAuthority.load(snapshot_path)
+            if snapshot_path and os.path.exists(snapshot_path)
+            else _InMemoryRunAuthority(snapshot_path)
+        )
         self._faults: set[ScriptedFault] = set()
+        # The pre-authorized fallback chain (acceptance #5). A fallback is only
+        # honoured when its target model is on this chain; anything else fails
+        # explicitly rather than silently succeeding.
+        self._authorized_fallback_chain: List[str] = list(authorized_fallback_chain or ["fallback-model"])
+
+    # -- restart boundary (acceptance #1 / #3) --------------------------------
+    def restart(self) -> None:
+        """Model a real process restart: drop in-process memory and rebuild a
+        fresh authority from the durable snapshot. Requires ``snapshot_path``;
+        ephemeral fakes have nothing durable to recover from."""
+        if not self._snapshot_path:
+            raise HermesRunError(
+                "restart_without_durable_state",
+                "restart() requires a snapshot_path-backed fake",
+            )
+        self._authority = _InMemoryRunAuthority.load(self._snapshot_path)
 
     # -- scripting hooks (not part of the port) ------------------------------
     def inject(self, fault: ScriptedFault) -> None:
@@ -334,15 +480,29 @@ class ScriptedFakeHermesAdapter(HermesRunPort):
     def clear_faults(self) -> None:
         self._faults.clear()
 
-    def drive_to_terminal(self, run_id: str, *, outcome: str = "succeeded") -> None:
-        """Advance a run through a normal lifecycle to a terminal state."""
+    def drive_to_terminal(self, run_id: str, *, outcome: str = "succeeded", fallback_model: Optional[str] = None) -> None:
+        """Advance a run through a normal lifecycle to a terminal state.
+
+        When the QUOTA_FALLBACK fault is active, the run falls back — but ONLY
+        to a target on the pre-authorized chain (acceptance #5). An unauthorized
+        fallback target fails the run explicitly instead of silently succeeding.
+        """
         a = self._authority
         a.set_status(run_id, "running")
         a.append_event(run_id, "message.delta", {"delta": "working"})
         if ScriptedFault.QUOTA_FALLBACK in self._faults:
-            record = a.require_run(run_id)
-            record.fallback_reason = "quota_exceeded:fallback_to_authorized_model"
-            record.actual_policy = {"model": "fallback-model", "provider": "fallback"}
+            target = fallback_model or "fallback-model"
+            if target not in self._authorized_fallback_chain:
+                # Unauthorized fallback: explicit failure, reason recorded.
+                a.append_event(run_id, "run.failed", {"error": f"fallback target not pre-authorized: {target}"})
+                a.record_outcome(run_id, fallback_reason=f"unauthorized_fallback:{target}")
+                a.set_status(run_id, "failed")
+                return
+            a.record_outcome(
+                run_id,
+                actual_policy={"model": target, "provider": "fallback"},
+                fallback_reason=f"quota_exceeded:fallback_to_authorized_model:{target}",
+            )
         if outcome == "succeeded":
             a.append_event(run_id, "run.completed", {"output": "done", "usage": {}})
             a.set_status(run_id, "succeeded")
@@ -356,9 +516,9 @@ class ScriptedFakeHermesAdapter(HermesRunPort):
     def mark_running(self, run_id: str) -> None:
         self._authority.set_status(run_id, "running")
 
-    def raise_approval(self, run_id: str, *, action: Optional[Mapping[str, Any]] = None) -> ApprovalChallenge:
+    def raise_approval(self, run_id: str, *, action: Optional[Mapping[str, Any]] = None, ttl_seconds: float = 300.0) -> ApprovalChallenge:
         digest = _canonical_digest(action or {"command": "rm -rf /tmp/x", "pattern_keys": ["shell-c"]})
-        return self._authority.issue_approval(run_id, action_digest=digest)
+        return self._authority.issue_approval(run_id, action_digest=digest, ttl_seconds=ttl_seconds)
 
     def reconcile(self) -> int:
         return self._authority.reconcile()
@@ -370,6 +530,11 @@ class ScriptedFakeHermesAdapter(HermesRunPort):
             # A real run starts producing events once accepted; emit the first
             # lifecycle event so the event plane has a durable record.
             self._authority.append_event(handle.run_id, "message.delta", {"delta": "started"})
+            if ScriptedFault.ACCEPT_THEN_DROP in self._faults:
+                # The run IS durably persisted, but the ack is lost before it
+                # reaches the caller — the client never learns the run_id and
+                # must recover by request identity (acceptance #1).
+                raise HermesRunError("transport_error", "ack lost before delivery")
         return handle
 
     def get_status(self, run_id: str) -> RunStatusSnapshot:
