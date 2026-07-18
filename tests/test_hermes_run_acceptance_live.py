@@ -1102,13 +1102,21 @@ class TestLiveApprovalAndStop:
         mock_llm.set_mode("text")
         handle = adapter.submit_or_get(idempotency_key=_KEY, request_body=_BODY)
         # Let it reach a terminal state first, then stop is pure idempotent replay.
-        _wait_status(adapter, handle.run_id)
+        terminal = _wait_status(adapter, handle.run_id)
 
         first = adapter.stop(handle.run_id)
-        # After terminal, stop returns stopped + idempotent_replay (V2.8).
-        assert first.status in {"stopped", "stopping", "cancelled", "completed", "succeeded"}
+        # V2.14 / plan A6: idempotent stop reports the *actual* terminal fact
+        # (succeeded/failed/stopped) — never coerce a succeeded run to stopped.
+        assert first.status in {
+            "stopped",
+            "stopping",
+            "cancelled",
+            "completed",
+            "succeeded",
+            "failed",
+        }
         second = adapter.stop(handle.run_id)
-        assert second.status == first.status or second.status == "stopped"
+        assert second.status == first.status
         # At least one of the stops must advertise the replay (the post-terminal one).
         assert first.idempotent_replay or second.idempotent_replay
 
@@ -1120,8 +1128,15 @@ class TestLiveApprovalAndStop:
         )
         third = adapter2.stop(handle.run_id)
         assert third.idempotent_replay is True
-        assert third.status == "stopped"
-        # White-box: run is terminal stopped/succeeded, never lost.
+        # After restart the store is authority; response must match store status,
+        # not a hardcoded "stopped" (B2 honesty).
         (row,) = hermes.wb_runs()
         assert row["status"] in {"stopped", "succeeded", "failed"}
         assert row["run_id"] == handle.run_id
+        assert third.status == row["status"]
+        # Terminal fact unchanged by repeated stop across restart.
+        assert row["status"] in {"succeeded", "failed", "stopped"}
+        # If the run completed happily, stop must keep saying succeeded.
+        if terminal in {"completed", "succeeded"}:
+            assert third.status == "succeeded"
+            assert row["status"] == "succeeded"
