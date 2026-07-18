@@ -24,6 +24,8 @@ import pytest
 
 from hqa.hermes_run_adapter import (
     ApprovalChallenge,
+    DURABLE_CAPABILITY_KEYS,
+    DurableRunAvailability,
     HermesRunError,
     HermesRunPort,
     OfficialHermesHttpAdapter,
@@ -34,6 +36,7 @@ from hqa.hermes_run_adapter import (
     StopResult,
     StreamEvent,
     UrllibLoopbackHttpTransport,
+    evaluate_durable_run_availability,
 )
 
 _BODY = {"input": "hello"}
@@ -469,3 +472,148 @@ class _ScriptedUpstreamServer:
                 f"id: {e.seq}\nevent: {e.event_type}\ndata: {json.dumps(frame)}\n\n".encode()
             )
         h.wfile.write(b": stream closed\n\n")
+
+
+# ---------------------------------------------------------------------------
+# V2 close-out — durable availability gate (plan §V2 line 528).
+# Production adapter must report unavailable and keep dispatch closed when
+# durable is dormant (live install flag OFF) or any probe is ungrounded.
+# ---------------------------------------------------------------------------
+
+
+def _full_grounded_durable() -> dict:
+    return {
+        key: {"supported": True, "grounded": True, "evidence": f"test.{key}"}
+        for key in DURABLE_CAPABILITY_KEYS
+    }
+
+
+class TestEvaluateDurableRunAvailability:
+    def test_full_grounded_is_available(self) -> None:
+        caps = {
+            "object": "hermes.api_server.capabilities",
+            "contract_version": 1,
+            "durable": _full_grounded_durable(),
+        }
+        result = evaluate_durable_run_availability(caps)
+        assert result.available is True
+        assert result.blockers == ()
+        assert result.contract_version == 1
+
+    def test_absent_durable_block_is_unavailable(self) -> None:
+        """Live install with flag OFF omits the durable block entirely."""
+        caps = {
+            "object": "hermes.api_server.capabilities",
+            "features": {"run_submission": True},
+        }
+        result = evaluate_durable_run_availability(caps)
+        assert result.available is False
+        assert "durable_block_absent" in result.blockers
+
+    def test_ungrounded_probe_is_unavailable(self) -> None:
+        durable = _full_grounded_durable()
+        durable["event_replay"] = {
+            "supported": True,
+            "grounded": False,
+            "evidence": "probe_raised",
+        }
+        caps = {"contract_version": 1, "durable": durable}
+        result = evaluate_durable_run_availability(caps)
+        assert result.available is False
+        assert "ungrounded:event_replay" in result.blockers
+
+    def test_supported_false_is_unavailable(self) -> None:
+        durable = _full_grounded_durable()
+        durable["idempotency"] = {
+            "supported": False,
+            "grounded": False,
+            "evidence": "off",
+        }
+        caps = {"contract_version": 1, "durable": durable}
+        result = evaluate_durable_run_availability(caps)
+        assert result.available is False
+        assert any(b.startswith("unsupported:") or b.startswith("ungrounded:") for b in result.blockers)
+
+    def test_missing_probe_key_is_unavailable(self) -> None:
+        durable = _full_grounded_durable()
+        del durable["run_evidence"]
+        caps = {"contract_version": 1, "durable": durable}
+        result = evaluate_durable_run_availability(caps)
+        assert result.available is False
+        assert "missing_probe:run_evidence" in result.blockers
+
+    def test_contract_version_absent_is_blocker(self) -> None:
+        caps = {"durable": _full_grounded_durable()}
+        result = evaluate_durable_run_availability(caps)
+        assert result.available is False
+        assert "contract_version_absent" in result.blockers
+
+    def test_garbage_input_is_unavailable_not_raise(self) -> None:
+        assert evaluate_durable_run_availability(None).available is False  # type: ignore[arg-type]
+        assert evaluate_durable_run_availability("nope").available is False  # type: ignore[arg-type]
+        assert evaluate_durable_run_availability([]).available is False  # type: ignore[arg-type]
+
+    def test_require_available_raises_durable_unavailable(self) -> None:
+        result = DurableRunAvailability(available=False, blockers=("durable_block_absent",))
+        with pytest.raises(HermesRunError) as exc:
+            result.require_available()
+        assert exc.value.code == "durable_unavailable"
+        assert exc.value.http_status == 503
+        assert "dispatch closed" in exc.value.message
+
+
+class TestPortDurableAvailabilityGate:
+    def test_fake_reports_available(self) -> None:
+        fake = ScriptedFakeHermesAdapter()
+        avail = fake.durable_availability()
+        assert avail.available is True
+        assert avail.blockers == ()
+        # require_durable_available is a no-raise on the fake (broker on).
+        assert fake.require_durable_available().available is True
+
+    def test_http_adapter_dormant_payload_closes_dispatch(self) -> None:
+        """Simulate live install: capabilities without durable block.
+
+        OfficialHermesHttpAdapter must surface durable_unavailable so the
+        platform keeps dispatch closed (plan §V2 line 528).
+        """
+
+        class _DormantTransport:
+            def get_json(self, path: str, *, headers=None):
+                assert path == "/v1/capabilities"
+                # Shape matches live :8642 with flag OFF (no durable, no contract_version).
+                return {
+                    "object": "hermes.api_server.capabilities",
+                    "platform": "hermes-agent",
+                    "features": {"run_submission": True, "run_events_sse": True},
+                }
+
+        adapter = OfficialHermesHttpAdapter(transport=_DormantTransport())  # type: ignore[arg-type]
+        avail = adapter.durable_availability()
+        assert avail.available is False
+        assert "durable_block_absent" in avail.blockers
+        with pytest.raises(HermesRunError) as exc:
+            adapter.require_durable_available()
+        assert exc.value.code == "durable_unavailable"
+        assert exc.value.http_status == 503
+
+    def test_http_adapter_partial_grounding_closes_dispatch(self) -> None:
+        class _PartialTransport:
+            def get_json(self, path: str, *, headers=None):
+                durable = _full_grounded_durable()
+                durable["approval_cas"] = {
+                    "supported": True,
+                    "grounded": False,
+                    "evidence": "store.get_approval_challenge_raised",
+                }
+                return {
+                    "object": "hermes.api_server.capabilities",
+                    "contract_version": 1,
+                    "durable": durable,
+                }
+
+        adapter = OfficialHermesHttpAdapter(transport=_PartialTransport())  # type: ignore[arg-type]
+        with pytest.raises(HermesRunError) as exc:
+            adapter.require_durable_available()
+        assert exc.value.code == "durable_unavailable"
+        assert "ungrounded:approval_cas" in exc.value.message

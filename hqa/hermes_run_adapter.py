@@ -47,7 +47,22 @@ _HTTP_STATUS_BY_CODE = {
     "unauthorized_fallback": 409,
     "restart_without_durable_state": 500,
     "transport_error": 502,
+    # Plan §V2 line 528: any acceptance/capability failure → adapter reports
+    # unavailable and dispatch stays closed. 503 = fail-closed, not retry-as-ok.
+    "durable_unavailable": 503,
 }
+
+# The six behavioral durable probes Hermes emits under capabilities.durable
+# when the broker is enabled (V2.9). All six must be supported+grounded for
+# the production adapter to be considered available for dispatch.
+DURABLE_CAPABILITY_KEYS: Tuple[str, ...] = (
+    "idempotency",
+    "event_replay",
+    "approval_cas",
+    "idempotent_stop",
+    "restart_reconcile",
+    "run_evidence",
+)
 
 
 class HermesRunError(RuntimeError):
@@ -63,6 +78,104 @@ class HermesRunError(RuntimeError):
         self.code = code
         self.message = message
         self.http_status = http_status if http_status is not None else _HTTP_STATUS_BY_CODE.get(code, 500)
+
+
+# ---------------------------------------------------------------------------
+# Durable-run availability gate (plan §V2 line 528)
+# ---------------------------------------------------------------------------
+#
+# "任一项失败，production adapter 只能报告 unavailable，后续 dispatch 继续关闭。"
+# The platform must NOT dispatch /v1/runs work unless the upstream durable
+# broker is both present and behaviorally grounded. Live install keeps the
+# flag OFF/dormant by design (V2.12); this gate is what keeps dispatch closed
+# until a separately-authorized canary turns the flag ON and the six probes
+# report grounded=True.
+
+
+@dataclass(frozen=True)
+class DurableRunAvailability:
+    """Result of evaluating a ``/v1/capabilities`` payload for durable runs.
+
+    ``available`` is True only when every probe in ``DURABLE_CAPABILITY_KEYS``
+    is present with ``supported is True`` and ``grounded is True``. Anything
+    else (missing durable block, flag OFF, probe exception → grounded=False,
+    transport-shaped garbage) yields ``available=False`` with a non-empty
+    ``blockers`` tuple. Callers MUST treat ``available=False`` as
+    "adapter unavailable; do not dispatch".
+    """
+
+    available: bool
+    blockers: Tuple[str, ...]
+    contract_version: Optional[int] = None
+    durable: Optional[Mapping[str, Any]] = None
+
+    def require_available(self) -> None:
+        """Raise ``HermesRunError(durable_unavailable)`` if not available."""
+        if not self.available:
+            detail = ",".join(self.blockers) if self.blockers else "unknown"
+            raise HermesRunError(
+                "durable_unavailable",
+                f"durable run authority unavailable; dispatch closed ({detail})",
+            )
+
+
+def evaluate_durable_run_availability(
+    capabilities: Mapping[str, Any],
+) -> DurableRunAvailability:
+    """Fail-closed evaluation of a Hermes capabilities payload.
+
+    Pure function — no I/O. Accepts the raw JSON object returned by
+    ``GET /v1/capabilities`` (or the fake's equivalent). Never raises on
+    malformed input; folds every defect into ``blockers``.
+    """
+    blockers: List[str] = []
+    if not isinstance(capabilities, Mapping):
+        return DurableRunAvailability(
+            available=False,
+            blockers=("capabilities_not_object",),
+        )
+
+    durable = capabilities.get("durable")
+    if not isinstance(durable, Mapping):
+        # Live install with flag OFF: Hermes omits the durable block entirely.
+        blockers.append("durable_block_absent")
+        return DurableRunAvailability(
+            available=False,
+            blockers=tuple(blockers),
+            contract_version=_as_optional_int(capabilities.get("contract_version")),
+            durable=None,
+        )
+
+    for key in DURABLE_CAPABILITY_KEYS:
+        probe = durable.get(key)
+        if not isinstance(probe, Mapping):
+            blockers.append(f"missing_probe:{key}")
+            continue
+        if probe.get("supported") is not True:
+            blockers.append(f"unsupported:{key}")
+        if probe.get("grounded") is not True:
+            # V2.9 fail-closed: probe exception → grounded=False. Treat as
+            # unavailable even if supported=True (flag-only claim).
+            blockers.append(f"ungrounded:{key}")
+
+    contract_version = _as_optional_int(capabilities.get("contract_version"))
+    if contract_version is None:
+        blockers.append("contract_version_absent")
+
+    return DurableRunAvailability(
+        available=not blockers,
+        blockers=tuple(blockers),
+        contract_version=contract_version,
+        durable=dict(durable),
+    )
+
+
+def _as_optional_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +263,26 @@ class HermesRunPort:
 
     def capabilities(self) -> Mapping[str, Any]:
         raise NotImplementedError
+
+    def durable_availability(self) -> DurableRunAvailability:
+        """Evaluate whether durable-run dispatch is allowed right now.
+
+        Default implementation reads ``capabilities()`` and runs the pure
+        fail-closed evaluator. Adapters MAY override if they already hold a
+        cached payload, but must preserve the same semantics.
+        """
+        return evaluate_durable_run_availability(self.capabilities())
+
+    def require_durable_available(self) -> DurableRunAvailability:
+        """Gate for platform dispatch: raise if durable authority is unavailable.
+
+        Plan §V2 line 528 — production path must report unavailable and keep
+        dispatch closed when any acceptance/capability item fails. Call this
+        BEFORE ``submit_or_get`` / approval / stop on the production adapter.
+        """
+        availability = self.durable_availability()
+        availability.require_available()
+        return availability
 
 
 # ---------------------------------------------------------------------------

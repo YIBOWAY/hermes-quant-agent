@@ -48,6 +48,7 @@ from hqa.hermes_run_adapter import (
     HermesRunError,
     OfficialHermesHttpAdapter,
     UrllibLoopbackHttpTransport,
+    evaluate_durable_run_availability,
 )
 
 # ---------------------------------------------------------------------------
@@ -801,6 +802,19 @@ class TestLiveCapabilities:
         ):
             assert durable[cap]["supported"] is True, cap
             assert durable[cap]["grounded"] is True, cap
+
+    def test_durable_availability_gate_opens_when_broker_on(self, adapter) -> None:
+        """Plan §V2 line 528: when the six probes are grounded, dispatch may open.
+
+        The isolated instance boots with durable ON, so require_durable_available
+        must be a no-raise. The complementary case (live install flag OFF →
+        durable_unavailable / dispatch closed) is covered hermetically in
+        tests/test_hermes_run_adapter.py::TestPortDurableAvailabilityGate.
+        """
+        avail = adapter.require_durable_available()
+        assert avail.available is True
+        assert avail.blockers == ()
+        assert avail.contract_version is not None
 
 
 # ---------------------------------------------------------------------------
