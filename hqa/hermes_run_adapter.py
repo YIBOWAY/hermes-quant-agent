@@ -706,14 +706,47 @@ class UrllibLoopbackHttpTransport:
         return status, json.loads(raw or b"{}")
 
     def get_sse(self, path: str, *, headers: Optional[Mapping[str, str]] = None) -> List[Mapping[str, Any]]:
-        """Consume an SSE stream, returning the parsed frames (data JSON)."""
+        """Consume an SSE stream, returning the parsed frames (data JSON).
+
+        Reads incrementally and stops on the Hermes ``: stream closed`` trailer
+        (or EOF). A pure ``resp.read()`` hangs when the upstream keeps the
+        connection open for keepalives on a non-closed stream — fatal for
+        post-restart replay of already-terminal runs if the server forgets to
+        close. Timeout still bounds hung sockets.
+        """
+        import socket
         import urllib.error
         import urllib.request
 
         req = urllib.request.Request(self._base + path, headers=self._headers(headers), method="GET")
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310 (loopback only)
-                raw = resp.read().decode("utf-8", "replace")
+                chunks: List[str] = []
+                while True:
+                    try:
+                        line = resp.readline()
+                    except socket.timeout as exc:
+                        # Partial body is still useful if a close trailer never arrived.
+                        if chunks:
+                            break
+                        raise HermesRunError(
+                            "transport_error",
+                            f"loopback SSE read timed out: {exc}",
+                        ) from exc
+                    if not line:
+                        break
+                    text = line.decode("utf-8", "replace")
+                    chunks.append(text)
+                    # Hermes durable/live event streams end with this comment.
+                    if text.startswith(": stream closed"):
+                        # Drain the blank line that follows the comment, if any,
+                        # then stop — do not wait for TCP EOF.
+                        try:
+                            resp.fp.raw._sock.settimeout(0.05)  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
+                        break
+                raw = "".join(chunks)
         except urllib.error.HTTPError as exc:
             self._raise_from_error_body(exc.code, exc.read())
             raise  # pragma: no cover
