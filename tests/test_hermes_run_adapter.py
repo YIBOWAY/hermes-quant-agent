@@ -617,3 +617,75 @@ class TestPortDurableAvailabilityGate:
             adapter.require_durable_available()
         assert exc.value.code == "durable_unavailable"
         assert "ungrounded:approval_cas" in exc.value.message
+
+    def test_http_adapter_submit_structurally_gated_when_dormant(self) -> None:
+        """Mutating entrypoints must not POST when durable is unavailable.
+
+        Line-528 is structural on OfficialHermesHttpAdapter — not an opt-in
+        helper the platform can forget. A dormant capabilities payload must
+        raise durable_unavailable without ever hitting post_json.
+        """
+
+        class _DormantNoPost:
+            def __init__(self) -> None:
+                self.posts = 0
+
+            def get_json(self, path: str, *, headers=None):
+                assert path == "/v1/capabilities"
+                return {
+                    "object": "hermes.api_server.capabilities",
+                    "platform": "hermes-agent",
+                    "features": {"run_submission": True},
+                }
+
+            def post_json(self, path: str, body, *, headers=None):
+                self.posts += 1
+                raise AssertionError(f"must not POST {path} when durable unavailable")
+
+        transport = _DormantNoPost()
+        adapter = OfficialHermesHttpAdapter(transport=transport)  # type: ignore[arg-type]
+        with pytest.raises(HermesRunError) as exc:
+            adapter.submit_or_get(idempotency_key="k", request_body={"input": "x"})
+        assert exc.value.code == "durable_unavailable"
+        assert transport.posts == 0
+
+        with pytest.raises(HermesRunError) as exc2:
+            adapter.respond_approval(
+                "run_x", choice="once", challenge_id="c", action_digest="d"
+            )
+        assert exc2.value.code == "durable_unavailable"
+        assert transport.posts == 0
+
+        with pytest.raises(HermesRunError) as exc3:
+            adapter.stop("run_x")
+        assert exc3.value.code == "durable_unavailable"
+        assert transport.posts == 0
+
+    def test_http_adapter_reads_ungated_when_dormant(self) -> None:
+        """Status/events/capabilities remain observable so operators can see why
+        dispatch is closed — only mutators are gated."""
+
+        class _DormantRead:
+            def get_json(self, path: str, *, headers=None):
+                if path == "/v1/capabilities":
+                    return {
+                        "object": "hermes.api_server.capabilities",
+                        "platform": "hermes-agent",
+                    }
+                if path.startswith("/v1/runs/"):
+                    return {
+                        "run_id": "run_x",
+                        "status": "succeeded",
+                        "session_id": None,
+                    }
+                raise AssertionError(path)
+
+            def get_sse(self, path: str, *, headers=None):
+                return []
+
+        adapter = OfficialHermesHttpAdapter(transport=_DormantRead())  # type: ignore[arg-type]
+        caps = adapter.capabilities()
+        assert "durable" not in caps
+        snap = adapter.get_status("run_x")
+        assert snap.status == "succeeded"
+        assert adapter.stream_events("run_x") == []

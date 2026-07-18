@@ -931,12 +931,33 @@ class OfficialHermesHttpAdapter(HermesRunPort):
     ``HermesRunError`` with the upstream code; a transport failure reports
     ``transport_error`` so the platform can mark the adapter unavailable rather
     than dispatch.
+
+    Plan §V2 line 528: every **mutating** entrypoint structurally calls
+    ``require_durable_available()`` first so a forgotten platform-side gate
+    cannot POST against a dormant/legacy Hermes. Read paths (status/events/
+    capabilities) stay ungated so operators can still observe why dispatch is
+    closed. The scripted fake does not inherit this — it is always-on by
+    construction for hermetic suites.
     """
 
     def __init__(self, *, transport: UrllibLoopbackHttpTransport) -> None:
         self._transport = transport
+        self._availability_checked = False
+
+    def _ensure_durable_dispatch_open(self) -> None:
+        """Fail closed once per adapter instance before any mutating call.
+
+        Cached after the first successful open so a long-lived adapter does not
+        re-hit ``/v1/capabilities`` on every submit; a failed check never
+        caches, so a later canary flip can open the gate on retry.
+        """
+        if self._availability_checked:
+            return
+        self.require_durable_available()
+        self._availability_checked = True
 
     def submit_or_get(self, *, idempotency_key: Optional[str], request_body: Mapping[str, Any]) -> RunHandle:
+        self._ensure_durable_dispatch_open()
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         _, payload = self._transport.post_json("/v1/runs", dict(request_body), headers=headers)
         run_id = str(payload["run_id"])
@@ -977,6 +998,7 @@ class OfficialHermesHttpAdapter(HermesRunPort):
         return events
 
     def respond_approval(self, run_id: str, *, choice: str, challenge_id: str, action_digest: str) -> ApprovalResult:
+        self._ensure_durable_dispatch_open()
         body = {"choice": choice, "challenge_id": challenge_id, "action_digest": action_digest}
         _, payload = self._transport.post_json(f"/v1/runs/{run_id}/approval", body)
         return ApprovalResult(
@@ -984,6 +1006,7 @@ class OfficialHermesHttpAdapter(HermesRunPort):
         )
 
     def stop(self, run_id: str) -> StopResult:
+        self._ensure_durable_dispatch_open()
         _, payload = self._transport.post_json(f"/v1/runs/{run_id}/stop", {})
         return StopResult(
             run_id=run_id,
