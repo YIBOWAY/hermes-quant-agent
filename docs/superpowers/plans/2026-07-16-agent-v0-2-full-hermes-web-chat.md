@@ -529,14 +529,18 @@ All checks passed；前端 `eslint`/`tsc --noEmit`/Vitest 224 passed；离线 `n
 
 **V2 交付记录（§8.2，2026-07-19）：DONE_WITH_DOCUMENTED_RESIDUALS**
 
+> 修订注（同日 close-out）：交付记录初稿写于 adversarial audit 之前；本段已并入 audit 清掉的
+> B1/B2/B3（V2.14 + V2.12-C）与 integration merge `f44ec3afb`。状态仍为
+> **DONE_WITH_DOCUMENTED_RESIDUALS**（非无条件 DONE）—— live durable 仍 OFF，canary 另授权。
+
 三仓坐标（重新验证，非旧文档抄写）：
 
 | 仓 | branch / commit | 角色 |
 |---|---|---|
-| HQA | `codex/full-9h` @ `a186c62`（gate）/ `b2d5edb`（live acceptance） | OfficialHermesHttpAdapter + ScriptedFake + 6 项不可伪造验收 + line-528 availability gate |
-| Hermes durable-runs worktree | `codex/agent-v0-2-durable-runs`（九语义 + V2.13 opt-in store + V2.6b evidence + SSE terminal） | 开发权威 |
-| Hermes integration | `codex/v2-live-integration` @ `916f5fbf5` | merge of durable-runs onto live base |
-| Hermes live install | `codex/v2-live-installed` @ `916f5fbf5`；rollback `main@8f657b8f7` | 受控 install；**durable flag OFF/dormant** |
+| HQA | `codex/full-9h` @ `1101bf8`（V2.12-C structural gate）/ `a186c62`（V2.12-B availability）/ live-acceptance B2 对齐 | OfficialHermesHttpAdapter + ScriptedFake + 6 项不可伪造验收 + line-528 gate **结构强制** |
+| Hermes durable-runs worktree | `codex/agent-v0-2-durable-runs` @ `18a6f2593`（V2.14 B1/B2） | 开发权威：approval non-success 不烧 grant；stop 回报真实 terminal |
+| Hermes integration | `codex/v2-live-integration` @ `f44ec3afb`（merge B1/B2 onto prior install base） | IsolatedHermes live suite 指向此 HEAD |
+| Hermes live install | `codex/v2-live-installed` @ `916f5fbf5`；rollback `main@8f657b8f7` | 受控 install；**durable flag OFF/dormant**；B1/B2 **未** 再装入 launchd（下一次受控 re-install 另授权；isolated suite 已覆盖） |
 | ai-quant-platform | 本 Slice 零改动；3 个无关 options dirty 文件全程保留 | — |
 
 **九语义 + 交付项（Hermes worktree → integration → live install）：**
@@ -549,23 +553,25 @@ All checks passed；前端 `eslint`/`tsc --noEmit`/Vitest 224 passed；离线 `n
 | V2.4 持久 Run identity/status/session policy | DONE | store + GET `/v1/runs/{id}` 跨重启 |
 | V2.5 stable event ID + monotonic cursor + page replay + SSE | DONE | store `event_id`+`seq`；SSE `id: {seq}`；cursor replay 无 gap/dup |
 | V2.6 / V2.6b requested vs actual / fallback / usage 证据 | DONE | `set_requested_policy` + `record_run_outcome(agent=)`；fallback 写真实 agent.model |
-| V2.7 approval challenge TTL / single-use / CAS | DONE | fake+live digest mismatch / expired 不消费 |
-| V2.8 idempotent stop + restart reconcile | DONE | fake+live stop 幂等跨重启 |
+| V2.7 approval challenge TTL / single-use / CAS | DONE | fake+live digest mismatch / expired 不消费；**V2.14 B1** resolve 失败 `release_approval_consume` |
+| V2.8 idempotent stop + restart reconcile | DONE | fake+live stop 幂等跨重启；**V2.14 B2** 已 terminal 时回报实际 `succeeded`/`failed`/`stopped`（不 coerce→stopped） |
 | V2.9 capability probe 行为证据（非仅 flag） | DONE | 六 probe `supported+grounded`；异常 → grounded=False |
 | V2.10 OfficialHermesHttpAdapter + ScriptedFakeHermesAdapter 同接口 | DONE | HQA `hqa/hermes_run_adapter.py`；fake 脚本化故障注入 |
 | V2.11 六项不可伪造验收（hermetic fake） | DONE | `tests/test_hermes_run_acceptance.py` 19 |
 | V2.12 受控 install（backup → swap branch → durable OFF → Discord pre/post smoke） | DONE | stamp + backup `~/.hermes/v2.12-backups/20260719T000836`；post_smoke **GREEN**；listen `127.0.0.1:8642`；Discord Hermes-bot#0306 |
-| V2.12-A hermetic real-Hermes live acceptance | DONE | `tests/test_hermes_run_acceptance_live.py` 13；IsolatedHermes + MockLLM SSE + white-box sqlite3 |
+| V2.12-A hermetic real-Hermes live acceptance | DONE | `tests/test_hermes_run_acceptance_live.py` 13；IsolatedHermes@`f44ec3afb` + MockLLM SSE + white-box sqlite3 |
 | V2.12-B line-528 availability gate（dispatch closed when dormant） | DONE | `evaluate_durable_run_availability` / `require_durable_available`；`durable_unavailable`→503；live `:8642` 实测 `durable_block_absent` |
-| V2.13 `build_durable_store` opt-in default-OFF | DONE | Hermes `3ace5b380`；broker 仅 store non-None 时启用 |
+| V2.12-C structural mutator gate on OfficialHermesHttpAdapter | DONE | `submit_or_get`/`respond_approval`/`stop` 经 `_ensure_durable_dispatch_open`；`get_status`/`stream_events`/`capabilities` 不 gate；HQA `1101bf8` |
+| V2.13 `build_durable_store` opt-in default-OFF | DONE | Hermes；broker 仅 store non-None 时启用 |
+| V2.14 B1/B2 honesty（approval + stop） | DONE | durable-runs `18a6f2593` → integration `f44ec3afb`；approval+stop+store suite green |
 
-**HQA 测试基线（2026-07-19 重新跑，exit 0）：**
+**HQA 测试基线（2026-07-19 close-out，exit 0）：**
 
 ```
-tests/test_hermes_run_adapter.py          48
+tests/test_hermes_run_adapter.py          50   (+2 structural mutator gate)
 tests/test_hermes_run_acceptance.py       19
-tests/test_hermes_run_acceptance_live.py  13
-合计                                       80 green
+tests/test_hermes_run_acceptance_live.py  13   (stop idempotency asserts actual terminal)
+合计                                       82 green
 ```
 
 **Live 运行态（重新验证）：**
@@ -574,19 +580,22 @@ tests/test_hermes_run_acceptance_live.py  13
 - `GET /health` → `{"status":"ok","platform":"hermes-agent","version":"0.18.2"}`
 - `GET /v1/capabilities` **无** `durable` 块（flag OFF）→ gate `available=False, blockers=('durable_block_absent',)`
 - `require_durable_available()` → `HermesRunError(code=durable_unavailable, http_status=503)` —— **dispatch 关闭，符合 line 528**
+- OfficialHermesHttpAdapter **结构上** 在 mutator 路径强制上述 gate（V2.12-C），不只靠调用方自觉
 - **未** 启用 live durable ON；**未** 触发 provider / paper / live / broker / Gate / redirect
 - 用户当前 Discord 入口保留；失败路径有 stamp 内 rollback 步骤
+- live launchd 仍在 `916f5fbf5`（B1/B2 代码在 integration，未强制 re-install）；isolated live suite 已用 `f44ec3afb` 覆盖 B1/B2
 
 **Documented residuals（不阻塞 V2 DONE；显式不声称已清零）：**
 
 1. **SSE wire 上 `event_id` 字符串**：store 有 `evt_<hex>`，SSE 帧目前用 numeric `id: {seq}` 作 resume cursor；HTTP adapter `event_id=None`。Resume/replay 已由 monotonic seq 落地。可选后续把 store `event_id` 放进 SSE data payload。
-2. **状态名 completed/cancelled vs succeeded/stopped**：store 与 broker 双名兼容（`_broker_is_terminal` 已含两侧）；对外契约以 API 返回值为准。
+2. **状态名 completed/cancelled vs succeeded/stopped**：store 与 broker 双名兼容（`_broker_is_terminal` 已含两侧）；对外契约以 API 返回值为准。V2.14 B2 后 stop 诚实回报 store terminal，不再 coerce。
 3. **Approval TTL 白盒**：live 用加速时钟/短 TTL 路径验证过期不消费；生产默认 300s 未做 wall-clock 长等。
-4. **Live durable ON canary**：install 刻意 flag OFF。打开需**单独 canary 授权**（备份→ON→短冒烟→OFF/rollback）。当前 gate 保证 OFF 时 dispatch 关闭。
+4. **Live durable ON canary**：install 刻意 flag OFF。打开需**单独 canary 授权**（备份→ON→短冒烟→OFF/rollback）。当前 gate + structural mutator gate 保证 OFF 时 dispatch 关闭。
 5. **Fake capabilities 恒 grounded**：scripted fake 构造上 broker-on，`grounded=True` 硬编码；真实 Hermes 由 live suite + V2.9 probe 覆盖。
 6. **Live A1 弱于 plan 字面**：live 是 terminal 后重启再同 key 恢复，不是 accept-before-ack 中途 SIGKILL；后者由 hermetic fake A1 覆盖。
 7. **V2.6 无 agent 路径**：无 agent/`_model_name` fallback 仍可能与 `_resolve_gateway_model()` 有细微差；V2.6b 在有 agent 时已写真实 model/provider。
 8. **真 TCP RST disconnect**：现覆盖 client-drop reconnect；mid-stream TCP kill 可选加固。
+9. **Live launchd 未含 V2.14**：production 进程仍 `916f5fbf5`；B1/B2 在 integration + isolated suite。下次受控 re-install（durable 仍 OFF）可并入，**不** 自动执行。
 
 **明确未做 / 红线遵守：**
 
@@ -844,7 +853,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 |---|---|---|
 | V0 Interface/cardinality/authority freeze | HQA-side DONE / 三仓 PENDING → not DONE | executable contracts 已交付（5 模块+622 测试绿）；三仓 manifest 一致性 + primary validation + cross-review 见 `../../audits/2026-07-17-v0-three-repo-cross-review.md` |
 | V1 Stop-the-line baseline | platform DONE（V1.2A PARTIAL = code_hardened / live_role_unprovisioned） | V1.2 live role+RLS 属 V4 Gate；其余 V1.1–V1.7 见 §7 V1 交付状态 |
-| V2 Hermes DurableRunAuthority | DONE_WITH_DOCUMENTED_RESIDUALS | 九语义+adapter+6 验收+受控 install（durable OFF）+line-528 gate；live durable ON canary 另授权；见 §7 V2 交付记录 |
+| V2 Hermes DurableRunAuthority | DONE_WITH_DOCUMENTED_RESIDUALS | 九语义+adapter+6 验收+受控 install（durable OFF）+line-528 gate + V2.12-C structural mutator gate + V2.14 B1/B2 honesty；live durable ON canary 另授权；见 §7 V2 交付记录 |
 | V3 HQA Intent/WorkflowAuthority | NOT STARTED | Research Task 1:N Attempt + backup/restore green |
 | V4 PG schema/BFF saga/security | NOT STARTED | code/isolated DB accepted；再请求 live migration 授权 |
 | V5 supervised dispatch worker | NOT STARTED | crash matrix green；再请求 provider smoke 授权 |
@@ -864,7 +873,9 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
    PARTIAL；live role+RLS 属 V4）。startup 不再 auto-migrate。
 4. V2 Hermes DurableRunAuthority **已交付**（`DONE_WITH_DOCUMENTED_RESIDUALS`，见 §7 V2 交付记录）：
    九语义 + OfficialHermesHttpAdapter/fake + 六项验收 + 受控 install（durable OFF）+ line-528
-   availability gate。**live durable ON canary 需单独授权**；未授权前 dispatch 保持关闭。
+   availability gate + **V2.12-C structural mutator gate** + **V2.14 B1/B2 honesty**
+   （integration `f44ec3afb`；live launchd 仍 `916f5fbf5`/durable OFF）。
+   **live durable ON canary 需单独授权**；未授权前 dispatch 保持关闭。
 5. 下一施工入口 = **V3 HQA Intent/WorkflowAuthority**（hermetic fake/隔离状态）；V3 code accepted
    后与 V2 一并进入 V4 schema/BFF。修订 006 与 runner 通过独立 review 后再请求 migration 授权，
    不能默认追加 007。
