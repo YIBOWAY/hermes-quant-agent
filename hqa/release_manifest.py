@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import select
+import shlex
+import stat
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -84,6 +89,31 @@ _SECRET_KEY_PARTS = frozenset(
 _KEY_PART_RE = re.compile(r"[^a-z0-9]+")
 _HEX_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+_SAFE_HERMES_COMMAND_SUFFIX = (
+    "-m",
+    "hermes_cli.main",
+    "gateway",
+    "run",
+    "--replace",
+)
+_GIT_TIMEOUT_SECONDS = 30
+_REMOTE_TIMEOUT_SECONDS = 20
+_PROCESS_TIMEOUT_SECONDS = 5
+_MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
+_MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+_GIT_EXECUTABLE = "/usr/bin/git"
+_RUNTIME_STAMP_FIELDS = frozenset(
+    {
+        "schema_version",
+        "repo",
+        "pid",
+        "started_at",
+        "command_sha256",
+        "version",
+        "source_commit",
+        "source_archive_sha256",
+    }
+)
 
 
 class ReleaseManifestError(ValueError):
@@ -118,8 +148,22 @@ def _validate_git_oid(value: Any, field: str) -> str:
 def _validate_remote(value: Any) -> str:
     remote = _validate_bounded_text(value, "expected_remote", maximum=4_096)
     parsed = urlsplit(remote)
-    if parsed.scheme and (parsed.username is not None or parsed.password is not None):
-        raise ManifestValidationError("expected_remote must not contain credentials")
+    credential_free = (
+        parsed.username is None
+        and parsed.password is None
+        and not parsed.query
+        and not parsed.fragment
+    )
+    canonical_https = (
+        parsed.scheme == "https"
+        and bool(parsed.hostname)
+        and bool(parsed.path)
+        and parsed.path.startswith("/")
+    )
+    if not credential_free or not canonical_https:
+        raise ManifestValidationError(
+            "expected_remote must be a credential-free canonical HTTPS URL"
+        )
     return remote
 
 
@@ -145,20 +189,51 @@ def _normalize_declared_paths(value: Any, field: str) -> Tuple[str, ...]:
     return tuple(sorted(paths))
 
 
-def _validate_command(value: Any) -> Tuple[str, ...]:
-    if not isinstance(value, (tuple, list)) or not value or len(value) > 64:
-        raise ManifestValidationError("command must contain 1 to 64 arguments")
+def _validate_command(value: Any, installed_checkout: Path) -> Tuple[str, ...]:
+    """Accept only the reviewed Hermes gateway process shape.
+
+    Arbitrary argv is intentionally not a manifest feature: it is too easy to
+    serialize an Authorization header or provider credential.  The executable
+    must live below the declared installed checkout and every semantic token is
+    closed here.
+    """
+
+    if not isinstance(value, (tuple, list)) or len(value) != 6:
+        raise ManifestValidationError("command must be the reviewed Hermes gateway")
     command = tuple(
         _validate_bounded_text(item, "command argument", maximum=4_096)
         for item in value
     )
-    for argument in command:
-        if not argument.startswith("-"):
-            continue
-        option = argument.lstrip("-").split("=", 1)[0]
-        if _looks_secret_key(option):
-            raise ManifestValidationError("command contains a secret-like option")
+    executable = Path(command[0]).expanduser()
+    if not executable.is_absolute():
+        raise ManifestValidationError("command executable must be absolute")
+    installed_root = installed_checkout.expanduser().resolve(strict=False)
+    expected_executable = installed_root / "venv" / "bin" / "python"
+    lexical_executable = executable.parent.resolve(strict=False) / executable.name
+    if lexical_executable != expected_executable:
+        raise ManifestValidationError(
+            "command executable must be installed_checkout/venv/bin/python"
+        )
+    if command[1:] != _SAFE_HERMES_COMMAND_SUFFIX:
+        raise ManifestValidationError("command must be the reviewed Hermes gateway")
     return command
+
+
+def runtime_command_sha256(command: Sequence[str]) -> str:
+    """Return the content digest used by the closed Hermes runtime stamp."""
+
+    if not isinstance(command, (tuple, list)) or any(
+        not isinstance(item, str) for item in command
+    ):
+        raise ManifestValidationError("command must be a sequence of strings")
+    return hashlib.sha256(
+        json.dumps(
+            list(command),
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8", errors="strict")
+    ).hexdigest()
 
 
 def _normalize_started_at(value: Any) -> str:
@@ -242,6 +317,7 @@ class RepositorySpec:
 @dataclass(frozen=True)
 class RuntimeSpec:
     repo: str
+    installed_checkout: Path
     command: Tuple[str, ...]
     version: str
     installed_commit: str
@@ -252,11 +328,17 @@ class RuntimeSpec:
     started_at: str
     environment: Mapping[str, str]
     config: Mapping[str, Any]
+    runtime_stamp_path: Optional[Path] = None
 
     def __post_init__(self) -> None:
-        if self.repo not in _REPOSITORIES:
-            raise ManifestValidationError("repo must be hqa, platform, or hermes")
-        command = _validate_command(self.command)
+        if self.repo != "hermes":
+            raise ManifestValidationError(
+                "only the required resident Hermes runtime may be recorded"
+            )
+        if not isinstance(self.installed_checkout, (str, Path)):
+            raise TypeError("installed_checkout must be path-like")
+        installed_checkout = Path(self.installed_checkout)
+        command = _validate_command(self.command, installed_checkout)
         version = _validate_bounded_text(self.version, "version", maximum=200)
         installed_commit = _validate_git_oid(self.installed_commit, "installed_commit")
         running_commit = _validate_git_oid(self.running_commit, "running_commit")
@@ -289,7 +371,15 @@ class RuntimeSpec:
             field="config",
             string_values_only=False,
         )
+        runtime_stamp_path = self.runtime_stamp_path
+        if runtime_stamp_path is not None:
+            if not isinstance(runtime_stamp_path, (str, Path)):
+                raise TypeError("runtime_stamp_path must be path-like")
+            runtime_stamp_path = Path(runtime_stamp_path)
+            if not runtime_stamp_path.is_absolute():
+                raise ManifestValidationError("runtime_stamp_path must be absolute")
         object.__setattr__(self, "command", command)
+        object.__setattr__(self, "installed_checkout", installed_checkout)
         object.__setattr__(self, "version", version)
         object.__setattr__(self, "installed_commit", installed_commit)
         object.__setattr__(self, "running_commit", running_commit)
@@ -304,6 +394,7 @@ class RuntimeSpec:
             "config",
             MappingProxyType(config),
         )
+        object.__setattr__(self, "runtime_stamp_path", runtime_stamp_path)
 
 
 def _looks_secret_key(key: str) -> bool:
@@ -375,6 +466,9 @@ class RepositoryRecord:
     remote_name: str
     remote: str
     expected_remote: str
+    remote_ref: str
+    remote_head_commit: Optional[str]
+    remote_published: bool
     branch: Optional[str]
     expected_branch: str
     parent_commit: Optional[str]
@@ -391,6 +485,7 @@ class RepositoryRecord:
     declared_untracked_dirty: Tuple[str, ...]
     dirty_matches: bool
     working_tree_clean: bool
+    local_checkout_identity_matches: bool
     source_identity_matches: bool
     runtime_required: bool
 
@@ -401,6 +496,9 @@ class RepositoryRecord:
             "remote_name": self.remote_name,
             "remote": self.remote,
             "expected_remote": self.expected_remote,
+            "remote_ref": self.remote_ref,
+            "remote_head_commit": self.remote_head_commit,
+            "remote_published": self.remote_published,
             "branch": self.branch,
             "expected_branch": self.expected_branch,
             "parent_commit": self.parent_commit,
@@ -417,6 +515,7 @@ class RepositoryRecord:
             "declared_untracked_dirty": list(self.declared_untracked_dirty),
             "dirty_matches": self.dirty_matches,
             "working_tree_clean": self.working_tree_clean,
+            "local_checkout_identity_matches": self.local_checkout_identity_matches,
             "source_identity_matches": self.source_identity_matches,
             "runtime_required": self.runtime_required,
         }
@@ -425,7 +524,9 @@ class RepositoryRecord:
 @dataclass(frozen=True)
 class RuntimeRecord:
     repo: str
+    installed_checkout: str
     command: Tuple[str, ...]
+    command_sha256: str
     version: str
     installed_commit: str
     installed_archive_sha256: str
@@ -435,13 +536,20 @@ class RuntimeRecord:
     started_at: str
     environment: Mapping[str, str]
     config: Mapping[str, Any]
+    process_alive: bool
+    command_matches: bool
+    runtime_attested: bool
+    installed_declaration_matches: bool
+    blockers: Tuple[str, ...]
     candidate_installed: bool
     runtime_aligned: bool
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "repo": self.repo,
+            "installed_checkout": self.installed_checkout,
             "command": list(self.command),
+            "command_sha256": self.command_sha256,
             "version": self.version,
             "installed_commit": self.installed_commit,
             "installed_archive_sha256": self.installed_archive_sha256,
@@ -451,6 +559,11 @@ class RuntimeRecord:
             "started_at": self.started_at,
             "environment": dict(self.environment),
             "config": dict(self.config),
+            "process_alive": self.process_alive,
+            "command_matches": self.command_matches,
+            "runtime_attested": self.runtime_attested,
+            "installed_declaration_matches": self.installed_declaration_matches,
+            "blockers": list(self.blockers),
             "candidate_installed": self.candidate_installed,
             "runtime_aligned": self.runtime_aligned,
         }
@@ -468,6 +581,7 @@ class ReleaseManifest:
     runtime_blockers: Tuple[str, ...]
     candidate_installed: bool
     runtime_aligned: bool
+    identity_manifest_ready: bool
     write_ready: bool
     manifest_digest: str
 
@@ -491,6 +605,7 @@ _MANIFEST_FIELDS = frozenset(
         "runtime_blockers",
         "candidate_installed",
         "runtime_aligned",
+        "identity_manifest_ready",
         "write_ready",
         "manifest_digest",
     }
@@ -556,6 +671,16 @@ def _repository_record_from_mapping(value: Mapping[str, Any]) -> RepositoryRecor
             declared_untracked_dirty=value["declared_untracked_dirty"],
         )
         remote = _validate_remote(value["remote"])
+        remote_ref = _validate_bounded_text(
+            value["remote_ref"], "remote_ref", maximum=512
+        )
+        if remote_ref != f"refs/heads/{value['expected_branch']}":
+            raise ManifestValidationError("repository.remote_ref is not canonical")
+        remote_head_commit = value["remote_head_commit"]
+        if remote_head_commit is not None:
+            remote_head_commit = _validate_git_oid(
+                remote_head_commit, "remote_head_commit"
+            )
         branch = value["branch"]
         if branch is not None:
             branch = _validate_bounded_text(branch, "branch", maximum=255)
@@ -579,11 +704,17 @@ def _repository_record_from_mapping(value: Mapping[str, Any]) -> RepositoryRecor
         "base_is_ancestor",
         "dirty_matches",
         "working_tree_clean",
+        "remote_published",
+        "local_checkout_identity_matches",
         "source_identity_matches",
         "runtime_required",
     ):
         if type(value[bool_field]) is not bool:
             raise ManifestValidationError(f"repository.{bool_field} must be boolean")
+    if value["base_is_ancestor"] and not value["base_present"]:
+        raise ManifestIntegrityError(
+            "repository base ancestry requires the base object to be present"
+        )
     tracked_dirty = _tuple_of_strings(value["tracked_dirty"], "tracked_dirty")
     untracked_dirty = _tuple_of_strings(value["untracked_dirty"], "untracked_dirty")
     return RepositoryRecord(
@@ -592,6 +723,9 @@ def _repository_record_from_mapping(value: Mapping[str, Any]) -> RepositoryRecor
         remote_name=spec.remote_name,
         remote=remote,
         expected_remote=spec.expected_remote,
+        remote_ref=remote_ref,
+        remote_head_commit=remote_head_commit,
+        remote_published=value["remote_published"],
         branch=branch,
         expected_branch=spec.expected_branch,
         parent_commit=parent_commit,
@@ -608,6 +742,9 @@ def _repository_record_from_mapping(value: Mapping[str, Any]) -> RepositoryRecor
         declared_untracked_dirty=spec.declared_untracked_dirty,
         dirty_matches=value["dirty_matches"],
         working_tree_clean=value["working_tree_clean"],
+        local_checkout_identity_matches=value[
+            "local_checkout_identity_matches"
+        ],
         source_identity_matches=value["source_identity_matches"],
         runtime_required=spec.runtime_required,
     )
@@ -615,9 +752,22 @@ def _repository_record_from_mapping(value: Mapping[str, Any]) -> RepositoryRecor
 
 def _runtime_record_from_mapping(value: Mapping[str, Any]) -> RuntimeRecord:
     _strict_fields(value, _RUNTIME_RECORD_FIELDS, "runtime")
+    installed_checkout_value = value["installed_checkout"]
+    if not isinstance(installed_checkout_value, str):
+        raise ManifestValidationError("runtime.installed_checkout must be a string")
+    installed_checkout = Path(installed_checkout_value)
+    if (
+        not installed_checkout.is_absolute()
+        or ".." in installed_checkout.parts
+        or installed_checkout.as_posix() != installed_checkout_value
+    ):
+        raise ManifestValidationError(
+            "runtime.installed_checkout must be a canonical absolute path"
+        )
     try:
         spec = RuntimeSpec(
             repo=value["repo"],
+            installed_checkout=installed_checkout,
             command=value["command"],
             version=value["version"],
             installed_commit=value["installed_commit"],
@@ -631,13 +781,46 @@ def _runtime_record_from_mapping(value: Mapping[str, Any]) -> RuntimeRecord:
         )
     except (TypeError, ValueError) as exc:
         raise ManifestValidationError(str(exc)) from exc
-    if type(value["candidate_installed"]) is not bool:
-        raise ManifestValidationError("runtime.candidate_installed must be boolean")
-    if type(value["runtime_aligned"]) is not bool:
-        raise ManifestValidationError("runtime.runtime_aligned must be boolean")
+    for bool_field in (
+        "process_alive",
+        "command_matches",
+        "runtime_attested",
+        "installed_declaration_matches",
+        "candidate_installed",
+        "runtime_aligned",
+    ):
+        if type(value[bool_field]) is not bool:
+            raise ManifestValidationError(f"runtime.{bool_field} must be boolean")
+    command_sha256 = value["command_sha256"]
+    if not isinstance(command_sha256, str) or _SHA256_RE.fullmatch(
+        command_sha256
+    ) is None:
+        raise ManifestValidationError(
+            "runtime.command_sha256 must be lowercase SHA-256"
+        )
+    blockers = value["blockers"]
+    if (
+        not isinstance(blockers, list)
+        or blockers != sorted(blockers)
+        or len(blockers) != len(set(blockers))
+        or any(
+            item
+            not in {
+                "installed_identity_mismatch",
+                "process_command_mismatch",
+                "process_missing",
+                "runtime_stamp_invalid",
+                "runtime_stamp_missing",
+            }
+            for item in blockers
+        )
+    ):
+        raise ManifestValidationError("runtime.blockers must be canonical")
     return RuntimeRecord(
         repo=spec.repo,
+        installed_checkout=installed_checkout_value,
         command=spec.command,
+        command_sha256=command_sha256,
         version=spec.version,
         installed_commit=spec.installed_commit,
         installed_archive_sha256=spec.installed_archive_sha256,
@@ -647,6 +830,11 @@ def _runtime_record_from_mapping(value: Mapping[str, Any]) -> RuntimeRecord:
         started_at=spec.started_at,
         environment=spec.environment,
         config=spec.config,
+        process_alive=value["process_alive"],
+        command_matches=value["command_matches"],
+        runtime_attested=value["runtime_attested"],
+        installed_declaration_matches=value["installed_declaration_matches"],
+        blockers=tuple(blockers),
         candidate_installed=value["candidate_installed"],
         runtime_aligned=value["runtime_aligned"],
     )
@@ -669,6 +857,7 @@ def _manifest_from_mapping(value: Mapping[str, Any]) -> ReleaseManifest:
         "runtime_coverage",
         "candidate_installed",
         "runtime_aligned",
+        "identity_manifest_ready",
         "write_ready",
     ):
         if type(value[bool_field]) is not bool:
@@ -706,28 +895,37 @@ def _manifest_from_mapping(value: Mapping[str, Any]) -> ReleaseManifest:
         runtime_blockers=tuple(runtime_blockers),
         candidate_installed=value["candidate_installed"],
         runtime_aligned=value["runtime_aligned"],
+        identity_manifest_ready=value["identity_manifest_ready"],
         write_ready=value["write_ready"],
         manifest_digest=value["manifest_digest"],
     )
 
 
 def _run_git(checkout: Path, *args: str, text: bool = True):
-    completed = subprocess.run(
-        ["git", "-C", str(checkout), *args],
-        check=True,
-        capture_output=True,
-        text=text,
-    )
+    try:
+        completed = subprocess.run(
+            [_GIT_EXECUTABLE, "-C", str(checkout), *args],
+            check=True,
+            capture_output=True,
+            text=text,
+            timeout=_GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ManifestIntegrityError("Git evidence capture timed out") from exc
     return completed.stdout
 
 
 def _git_succeeds(checkout: Path, *args: str) -> bool:
-    completed = subprocess.run(
-        ["git", "-C", str(checkout), *args],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    try:
+        completed = subprocess.run(
+            [_GIT_EXECUTABLE, "-C", str(checkout), *args],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ManifestIntegrityError("Git evidence capture timed out") from exc
     return completed.returncode == 0
 
 
@@ -739,32 +937,114 @@ def _nul_paths(raw: bytes) -> Tuple[str, ...]:
     )
 
 
-def _capture_repository(spec: RepositorySpec) -> RepositoryRecord:
-    checkout = spec.checkout.expanduser().resolve(strict=True)
-    root = Path(_run_git(checkout, "rev-parse", "--show-toplevel").strip()).resolve()
-    if root != checkout:
-        raise ValueError("checkout must be the absolute repository root")
-    remote = _validate_remote(
-        _run_git(
-            checkout,
-            "config",
-            "--get",
-            f"remote.{spec.remote_name}.url",
-        ).strip()
+def _remote_head(remote: str, remote_ref: str) -> Optional[str]:
+    try:
+        completed = subprocess.run(
+            [
+                _GIT_EXECUTABLE,
+                "ls-remote",
+                "--exit-code",
+                "--refs",
+                remote,
+                remote_ref,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_REMOTE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    if completed.returncode != 0:
+        return None
+    rows = [line.split("\t", 1) for line in completed.stdout.splitlines() if line]
+    if len(rows) != 1 or len(rows[0]) != 2 or rows[0][1] != remote_ref:
+        return None
+    try:
+        return _validate_git_oid(rows[0][0], "remote_head_commit")
+    except ManifestValidationError:
+        return None
+
+
+def _archive_sha256(checkout: Path, commit: str, *, field: str) -> str:
+    """Hash one Git archive without buffering an unbounded child output."""
+
+    process = subprocess.Popen(
+        [
+            _GIT_EXECUTABLE,
+            "-C",
+            str(checkout),
+            "archive",
+            "--format=tar",
+            commit,
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
     )
-    branch = _run_git(checkout, "branch", "--show-current").strip() or None
-    parents = _run_git(checkout, "rev-list", "--parents", "-n", "1", "HEAD").split()
-    parent_commit = parents[1] if len(parents) > 1 else None
-    head_commit = _run_git(checkout, "rev-parse", "HEAD").strip()
-    tree_oid = _run_git(checkout, "rev-parse", "HEAD^{tree}").strip()
-    archive = _run_git(
-        checkout,
-        "archive",
-        "--format=tar",
-        "HEAD",
-        text=False,
-    )
-    archive_sha256 = hashlib.sha256(archive).hexdigest()
+    if process.stdout is None:
+        process.kill()
+        process.wait()
+        raise ManifestIntegrityError(f"{field} archive stream is unavailable")
+    descriptor = process.stdout.fileno()
+    digest = hashlib.sha256()
+    total = 0
+    deadline = time.monotonic() + _GIT_TIMEOUT_SECONDS
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, _GIT_TIMEOUT_SECONDS)
+            readable, _, _ = select.select([descriptor], [], [], remaining)
+            if not readable:
+                raise subprocess.TimeoutExpired(process.args, _GIT_TIMEOUT_SECONDS)
+            chunk = os.read(
+                descriptor,
+                min(65_536, _MAX_ARCHIVE_BYTES + 1 - total),
+            )
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > _MAX_ARCHIVE_BYTES:
+                raise ManifestIntegrityError(
+                    f"{field} archive exceeds the evidence size limit"
+                )
+            digest.update(chunk)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, _GIT_TIMEOUT_SECONDS)
+        if process.wait(timeout=remaining) != 0:
+            raise ManifestIntegrityError(f"{field} archive capture failed")
+        return digest.hexdigest()
+    except subprocess.TimeoutExpired as exc:
+        raise ManifestIntegrityError(f"{field} archive capture timed out") from exc
+    finally:
+        if process.poll() is None:
+            process.kill()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        process.stdout.close()
+
+
+def _hidden_index_paths(checkout: Path) -> Tuple[str, ...]:
+    raw = _run_git(checkout, "ls-files", "-v", "-z", text=False)
+    hidden = []
+    for record in raw.split(b"\0"):
+        if not record:
+            continue
+        if len(record) < 3 or record[1:2] != b" ":
+            raise ManifestIntegrityError("Git index flags are not parseable")
+        marker = record[:1]
+        if marker == b"S" or marker.islower():
+            hidden.append(record[2:].decode("utf-8", errors="strict"))
+    return _normalize_declared_paths(hidden, "hidden_index_paths")
+
+
+def _capture_dirty_paths(checkout: Path, head_commit: str) -> tuple[Tuple[str, ...], Tuple[str, ...]]:
     tracked_dirty = _normalize_declared_paths(
         _nul_paths(
             _run_git(
@@ -774,7 +1054,8 @@ def _capture_repository(spec: RepositorySpec) -> RepositoryRecord:
                 "-z",
                 "--no-renames",
                 "--no-ext-diff",
-                "HEAD",
+                "--ignore-submodules=none",
+                head_commit,
                 "--",
                 text=False,
             )
@@ -794,6 +1075,42 @@ def _capture_repository(spec: RepositorySpec) -> RepositoryRecord:
         ),
         "untracked_dirty",
     )
+    return tracked_dirty, untracked_dirty
+
+
+def _capture_repository(spec: RepositorySpec) -> RepositoryRecord:
+    checkout = spec.checkout.expanduser().resolve(strict=True)
+    root = Path(_run_git(checkout, "rev-parse", "--show-toplevel").strip()).resolve()
+    if root != checkout:
+        raise ValueError("checkout must be the absolute repository root")
+    remote = _validate_remote(
+        _run_git(
+            checkout,
+            "config",
+            "--get",
+            f"remote.{spec.remote_name}.url",
+        ).strip()
+    )
+    branch = _run_git(checkout, "branch", "--show-current").strip() or None
+    head_commit = _validate_git_oid(
+        _run_git(checkout, "rev-parse", "HEAD^{commit}").strip(),
+        "head_commit",
+    )
+    parents = _run_git(
+        checkout, "rev-list", "--parents", "-n", "1", head_commit
+    ).split()
+    parent_commit = parents[1] if len(parents) > 1 else None
+    tree_oid = _validate_git_oid(
+        _run_git(checkout, "rev-parse", f"{head_commit}^{{tree}}").strip(),
+        "tree_oid",
+    )
+    archive_sha256 = _archive_sha256(checkout, head_commit, field="Git")
+    hidden_index_paths = _hidden_index_paths(checkout)
+    if hidden_index_paths:
+        raise ManifestIntegrityError(
+            "repository contains assume-unchanged or skip-worktree paths"
+        )
+    tracked_dirty, untracked_dirty = _capture_dirty_paths(checkout, head_commit)
     dirty_matches = (
         tracked_dirty == spec.declared_tracked_dirty
         and untracked_dirty == spec.declared_untracked_dirty
@@ -809,21 +1126,45 @@ def _capture_repository(spec: RepositorySpec) -> RepositoryRecord:
         "merge-base",
         "--is-ancestor",
         spec.expected_base_commit,
-        "HEAD",
+        head_commit,
     )
+    remote_ref = f"refs/heads/{spec.expected_branch}"
+    remote_head_commit = _remote_head(remote, remote_ref)
+    remote_published = remote_head_commit == spec.expected_head_commit
+    final_branch = _run_git(checkout, "branch", "--show-current").strip() or None
+    final_head = _validate_git_oid(
+        _run_git(checkout, "rev-parse", "HEAD^{commit}").strip(),
+        "head_commit",
+    )
+    final_hidden_index_paths = _hidden_index_paths(checkout)
+    final_tracked_dirty, final_untracked_dirty = _capture_dirty_paths(
+        checkout, head_commit
+    )
+    if (
+        final_branch != branch
+        or final_head != head_commit
+        or final_hidden_index_paths != hidden_index_paths
+        or final_tracked_dirty != tracked_dirty
+        or final_untracked_dirty != untracked_dirty
+    ):
+        raise ManifestIntegrityError("repository changed during evidence capture")
     working_tree_clean = not tracked_dirty and not untracked_dirty
-    source_identity_matches = (
+    local_checkout_identity_matches = (
         remote == spec.expected_remote
         and branch == spec.expected_branch
         and head_commit == spec.expected_head_commit
         and base_is_ancestor
     )
+    source_identity_matches = local_checkout_identity_matches and remote_published
     return RepositoryRecord(
         repo=spec.repo,
         checkout=str(checkout),
         remote_name=spec.remote_name,
         remote=remote,
         expected_remote=spec.expected_remote,
+        remote_ref=remote_ref,
+        remote_head_commit=remote_head_commit,
+        remote_published=remote_published,
         branch=branch,
         expected_branch=spec.expected_branch,
         parent_commit=parent_commit,
@@ -840,8 +1181,213 @@ def _capture_repository(spec: RepositorySpec) -> RepositoryRecord:
         declared_untracked_dirty=spec.declared_untracked_dirty,
         dirty_matches=dirty_matches,
         working_tree_clean=working_tree_clean,
+        local_checkout_identity_matches=local_checkout_identity_matches,
         source_identity_matches=source_identity_matches,
         runtime_required=spec.runtime_required,
+    )
+
+
+def _parse_process_started_at(value: str) -> str:
+    try:
+        parsed = datetime.strptime(value.strip(), "%a %b %d %H:%M:%S %Y")
+        local_timezone = datetime.now().astimezone().tzinfo
+        if local_timezone is None:
+            raise ValueError("local timezone unavailable")
+        parsed = parsed.replace(tzinfo=local_timezone)
+    except ValueError as exc:
+        raise ManifestIntegrityError("process start time is not parseable") from exc
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _observe_process(pid: int) -> tuple[bool, Tuple[str, ...], Optional[str]]:
+    environment = {"LC_ALL": "C", "LANG": "C"}
+    try:
+        output = subprocess.run(
+            [
+                "/bin/ps",
+                "-ww",
+                "-p",
+                str(pid),
+                "-o",
+                "pid=",
+                "-o",
+                "lstart=",
+                "-o",
+                "command=",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=_PROCESS_TIMEOUT_SECONDS,
+            env=environment,
+        ).stdout
+        rows = [line for line in output.splitlines() if line.strip()]
+        if len(rows) != 1:
+            return False, (), None
+        match = re.fullmatch(r"\s*(\d+)\s+(.{24})\s+(.+)", rows[0])
+        if match is None or int(match.group(1)) != pid:
+            return False, (), None
+        started = match.group(2)
+        command_text = match.group(3)
+        command = tuple(shlex.split(command_text))
+        if not command:
+            return False, (), None
+        return True, command, _parse_process_started_at(started)
+    except (subprocess.SubprocessError, ValueError, ManifestIntegrityError):
+        return False, (), None
+
+
+def _observed_command_matches(
+    expected: Tuple[str, ...], observed: Tuple[str, ...]
+) -> bool:
+    if len(observed) != len(expected) or observed[1:] != expected[1:]:
+        return False
+    expected_executable = Path(expected[0])
+    try:
+        resolved = expected_executable.resolve(strict=True)
+    except OSError:
+        return False
+    allowed = {str(expected_executable), str(resolved)}
+    framework_version_root = resolved.parent.parent
+    framework_root = framework_version_root.parent.parent
+    if (
+        resolved.name.startswith("python")
+        and resolved.parent.name == "bin"
+        and framework_version_root.parent.name == "Versions"
+        and framework_root.name in {"Python.framework", "Python3.framework"}
+    ):
+        allowed.add(
+            str(
+                framework_version_root
+                / "Resources"
+                / "Python.app"
+                / "Contents"
+                / "MacOS"
+                / "Python"
+            )
+        )
+    return observed[0] in allowed
+
+
+def _strict_json_object(raw: bytes) -> dict[str, Any]:
+    if len(raw) > 16_384:
+        raise ManifestValidationError("runtime stamp is too large")
+
+    def reject_duplicates(pairs):
+        document = {}
+        for key, value in pairs:
+            if key in document:
+                raise ManifestValidationError("runtime stamp has duplicate keys")
+            document[key] = value
+        return document
+
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=reject_duplicates)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ManifestValidationError("runtime stamp is not strict JSON") from exc
+    if not isinstance(value, dict):
+        raise ManifestValidationError("runtime stamp must be an object")
+    return value
+
+
+def _read_runtime_stamp(path: Path) -> dict[str, Any]:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(str(path), flags)
+    except OSError as exc:
+        raise ManifestValidationError("runtime stamp cannot be opened safely") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ManifestValidationError("runtime stamp must be a regular file")
+        if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != 0o600:
+            raise ManifestValidationError("runtime stamp ownership or mode is unsafe")
+        raw = b""
+        while True:
+            chunk = os.read(descriptor, 16_385 - len(raw))
+            if not chunk:
+                break
+            raw += chunk
+            if len(raw) > 16_384:
+                raise ManifestValidationError("runtime stamp is too large")
+    finally:
+        os.close(descriptor)
+    return _strict_json_object(raw)
+
+
+def _runtime_stamp_matches(
+    spec: RuntimeSpec,
+    *,
+    command_sha256: str,
+    observed_started_at: Optional[str],
+) -> tuple[bool, Optional[str]]:
+    if spec.runtime_stamp_path is None:
+        return False, "runtime_stamp_missing"
+    try:
+        stamp = _read_runtime_stamp(spec.runtime_stamp_path)
+        _strict_fields(stamp, _RUNTIME_STAMP_FIELDS, "runtime_stamp")
+        if stamp["schema_version"] != 1 or type(stamp["schema_version"]) is not int:
+            raise ManifestValidationError("runtime stamp schema is unsupported")
+        if stamp["repo"] != "hermes":
+            raise ManifestValidationError("runtime stamp repo is invalid")
+        if type(stamp["pid"]) is not int:
+            raise ManifestValidationError("runtime stamp pid is invalid")
+        started_at = _normalize_started_at(stamp["started_at"])
+        stamp_command_sha256 = stamp["command_sha256"]
+        if not isinstance(stamp_command_sha256, str) or _SHA256_RE.fullmatch(
+            stamp_command_sha256
+        ) is None:
+            raise ManifestValidationError("runtime stamp command digest is invalid")
+        source_commit = _validate_git_oid(stamp["source_commit"], "source_commit")
+        version = _validate_bounded_text(stamp["version"], "version", maximum=200)
+        source_archive_sha256 = stamp["source_archive_sha256"]
+        if not isinstance(source_archive_sha256, str) or _SHA256_RE.fullmatch(
+            source_archive_sha256
+        ) is None:
+            raise ManifestValidationError("runtime stamp archive digest is invalid")
+        matches = (
+            stamp["pid"] == spec.pid
+            and started_at == spec.started_at
+            and observed_started_at == spec.started_at
+            and stamp_command_sha256 == command_sha256
+            and version == spec.version
+            and source_commit == spec.running_commit
+            and source_archive_sha256 == spec.running_archive_sha256
+        )
+        return matches, None if matches else "runtime_stamp_invalid"
+    except (OSError, TypeError, ValueError):
+        return False, "runtime_stamp_invalid"
+
+
+def _capture_installed_identity(
+    checkout_value: Path,
+) -> tuple[Path, str, str, bool]:
+    checkout = checkout_value.expanduser().resolve(strict=True)
+    root = Path(_run_git(checkout, "rev-parse", "--show-toplevel").strip()).resolve()
+    if root != checkout:
+        raise ManifestIntegrityError("installed_checkout must be its Git root")
+    head_commit = _validate_git_oid(
+        _run_git(checkout, "rev-parse", "HEAD^{commit}").strip(),
+        "installed_commit",
+    )
+    archive_sha256 = _archive_sha256(checkout, head_commit, field="installed")
+    hidden = _hidden_index_paths(checkout)
+    tracked, untracked = _capture_dirty_paths(checkout, head_commit)
+    final_head = _validate_git_oid(
+        _run_git(checkout, "rev-parse", "HEAD^{commit}").strip(),
+        "installed_commit",
+    )
+    final_hidden = _hidden_index_paths(checkout)
+    final_tracked, final_untracked = _capture_dirty_paths(checkout, head_commit)
+    if (
+        final_head != head_commit
+        or final_hidden != hidden
+        or final_tracked != tracked
+        or final_untracked != untracked
+    ):
+        raise ManifestIntegrityError("installed checkout changed during capture")
+    return checkout, head_commit, archive_sha256, not (
+        hidden or tracked or untracked
     )
 
 
@@ -849,26 +1395,68 @@ def _capture_runtime(
     spec: RuntimeSpec,
     repository: RepositoryRecord,
 ) -> RuntimeRecord:
+    (
+        installed_checkout,
+        observed_installed_commit,
+        observed_installed_archive_sha256,
+        installed_checkout_clean,
+    ) = _capture_installed_identity(spec.installed_checkout)
+    installed_declaration_matches = (
+        spec.installed_commit == observed_installed_commit
+        and spec.installed_archive_sha256 == observed_installed_archive_sha256
+        and installed_checkout_clean
+    )
     candidate_installed = (
-        spec.installed_commit == repository.head_commit
-        and spec.installed_archive_sha256 == repository.archive_sha256
+        installed_declaration_matches
+        and observed_installed_commit == repository.head_commit
+        and observed_installed_archive_sha256 == repository.archive_sha256
+    )
+    command_sha256 = runtime_command_sha256(spec.command)
+    process_alive, observed_command, observed_started_at = _observe_process(spec.pid)
+    command_matches = process_alive and _observed_command_matches(
+        spec.command, observed_command
+    )
+    runtime_attested, stamp_blocker = _runtime_stamp_matches(
+        spec,
+        command_sha256=command_sha256,
+        observed_started_at=observed_started_at,
     )
     runtime_aligned = (
-        spec.running_commit == spec.installed_commit
-        and spec.running_archive_sha256 == spec.installed_archive_sha256
+        installed_declaration_matches
+        and process_alive
+        and command_matches
+        and runtime_attested
+        and spec.running_commit == observed_installed_commit
+        and spec.running_archive_sha256 == observed_installed_archive_sha256
     )
+    blockers = []
+    if not installed_declaration_matches:
+        blockers.append("installed_identity_mismatch")
+    if not process_alive:
+        blockers.append("process_missing")
+    elif not command_matches:
+        blockers.append("process_command_mismatch")
+    if stamp_blocker is not None:
+        blockers.append(stamp_blocker)
     return RuntimeRecord(
         repo=spec.repo,
+        installed_checkout=str(installed_checkout),
         command=spec.command,
+        command_sha256=command_sha256,
         version=spec.version,
-        installed_commit=spec.installed_commit,
-        installed_archive_sha256=spec.installed_archive_sha256,
+        installed_commit=observed_installed_commit,
+        installed_archive_sha256=observed_installed_archive_sha256,
         running_commit=spec.running_commit,
         running_archive_sha256=spec.running_archive_sha256,
         pid=spec.pid,
-        started_at=spec.started_at,
+        started_at=observed_started_at or spec.started_at,
         environment=spec.environment,
         config=spec.config,
+        process_alive=process_alive,
+        command_matches=command_matches,
+        runtime_attested=runtime_attested,
+        installed_declaration_matches=installed_declaration_matches,
+        blockers=tuple(sorted(blockers)),
         candidate_installed=candidate_installed,
         runtime_aligned=runtime_aligned,
     )
@@ -923,6 +1511,7 @@ def _manifest_document(
         "runtime_blockers": list(manifest.runtime_blockers),
         "candidate_installed": manifest.candidate_installed,
         "runtime_aligned": manifest.runtime_aligned,
+        "identity_manifest_ready": manifest.identity_manifest_ready,
         "write_ready": manifest.write_ready,
     }
     if include_digest:
@@ -951,12 +1540,8 @@ def build_release_manifest(
             "exactly hqa, platform, and hermes repository specs are required"
         )
     runtime_repos = [item.repo for item in runtimes]
-    if (
-        len(runtimes) > 3
-        or len(runtime_repos) != len(set(runtime_repos))
-        or any(repo not in _REPOSITORIES for repo in runtime_repos)
-    ):
-        raise ValueError("runtime specs must contain at most one entry per known repo")
+    if runtime_repos not in ([], ["hermes"]):
+        raise ValueError("runtime specs may contain only one resident Hermes runtime")
 
     repository_records = tuple(_capture_repository(spec) for spec in repositories)
     records_by_repo = {record.repo: record for record in repository_records}
@@ -981,7 +1566,7 @@ def build_release_manifest(
         repository_records,
         runtime_records,
     )
-    write_ready = (
+    identity_manifest_ready = (
         dirty_declarations_match
         and candidate_source_committed
         and working_trees_clean
@@ -989,6 +1574,8 @@ def build_release_manifest(
         and candidate_installed
         and runtime_aligned
     )
+    # V0/V2 proves identity only. Public browser writes remain a V8 decision.
+    write_ready = False
     unsigned = ReleaseManifest(
         schema_version=1,
         repositories=repository_records,
@@ -1000,6 +1587,7 @@ def build_release_manifest(
         runtime_blockers=runtime_blockers,
         candidate_installed=candidate_installed,
         runtime_aligned=runtime_aligned,
+        identity_manifest_ready=identity_manifest_ready,
         write_ready=write_ready,
         manifest_digest="",
     )
@@ -1017,17 +1605,55 @@ def build_release_manifest(
         runtime_blockers=unsigned.runtime_blockers,
         candidate_installed=unsigned.candidate_installed,
         runtime_aligned=unsigned.runtime_aligned,
+        identity_manifest_ready=unsigned.identity_manifest_ready,
         write_ready=unsigned.write_ready,
         manifest_digest=digest,
     )
 
 
-def verify_release_manifest(
-    manifest: Any,
-    repository_specs: Optional[Sequence[RepositorySpec]] = None,
-    runtime_specs: Optional[Sequence[RuntimeSpec]] = None,
-) -> ReleaseManifest:
-    """Verify schema, derived facts, digest, and optionally fresh Git evidence."""
+def parse_release_manifest_json(raw: Any) -> ReleaseManifest:
+    """Parse bounded strict JSON and reject duplicate keys before validation."""
+
+    if isinstance(raw, str):
+        try:
+            encoded = raw.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as exc:
+            raise ManifestValidationError("manifest JSON is not UTF-8") from exc
+    elif isinstance(raw, bytes):
+        encoded = raw
+    else:
+        raise TypeError("manifest JSON must be bytes or text")
+    if not encoded or len(encoded) > _MAX_MANIFEST_BYTES:
+        raise ManifestValidationError("manifest JSON is empty or oversized")
+
+    def reject_duplicates(pairs):
+        document = {}
+        for key, value in pairs:
+            if key in document:
+                raise ManifestValidationError("manifest JSON has duplicate keys")
+            document[key] = value
+        return document
+
+    def reject_constant(_value: str) -> None:
+        raise ManifestValidationError("manifest JSON contains a non-finite number")
+
+    try:
+        value = json.loads(
+            encoded.decode("utf-8", errors="strict"),
+            object_pairs_hook=reject_duplicates,
+            parse_constant=reject_constant,
+        )
+    except ManifestValidationError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise ManifestValidationError("manifest JSON is invalid") from exc
+    if not isinstance(value, dict):
+        raise ManifestValidationError("manifest JSON must be an object")
+    return validate_release_manifest_document(value)
+
+
+def validate_release_manifest_document(manifest: Any) -> ReleaseManifest:
+    """Validate the closed schema and content digest without claiming freshness."""
 
     if isinstance(manifest, ReleaseManifest):
         parsed = _manifest_from_mapping(manifest.to_dict())
@@ -1058,35 +1684,85 @@ def verify_release_manifest(
         expected_working_tree_clean = (
             not record.tracked_dirty and not record.untracked_dirty
         )
-        expected_source_identity_match = (
+        expected_remote_published = (
+            record.remote_head_commit == record.expected_head_commit
+        )
+        expected_local_checkout_identity_match = (
             record.remote == record.expected_remote
             and record.branch == record.expected_branch
             and record.head_commit == record.expected_head_commit
             and record.base_present
             and record.base_is_ancestor
         )
+        expected_source_identity_match = (
+            expected_local_checkout_identity_match and expected_remote_published
+        )
         if (
             record.dirty_matches != expected_dirty_match
             or record.working_tree_clean != expected_working_tree_clean
+            or record.remote_published != expected_remote_published
+            or record.local_checkout_identity_matches
+            != expected_local_checkout_identity_match
             or record.source_identity_matches != expected_source_identity_match
         ):
             raise ManifestIntegrityError("repository derived facts do not agree")
 
     for runtime in parsed.runtimes:
         repository = repositories[runtime.repo]
+        installed_identity_matches = runtime.installed_declaration_matches
         expected_candidate_installed = (
-            runtime.installed_commit == repository.head_commit
+            installed_identity_matches
+            and runtime.installed_commit == repository.head_commit
             and runtime.installed_archive_sha256 == repository.archive_sha256
         )
         expected_runtime_aligned = (
-            runtime.running_commit == runtime.installed_commit
+            installed_identity_matches
+            and runtime.process_alive
+            and runtime.command_matches
+            and runtime.runtime_attested
+            and runtime.running_commit == runtime.installed_commit
             and runtime.running_archive_sha256 == runtime.installed_archive_sha256
         )
+        expected_command_sha256 = runtime_command_sha256(runtime.command)
         if (
             runtime.candidate_installed != expected_candidate_installed
             or runtime.runtime_aligned != expected_runtime_aligned
+            or runtime.command_sha256 != expected_command_sha256
         ):
             raise ManifestIntegrityError("runtime derived facts do not agree")
+        blockers = set(runtime.blockers)
+        if (
+            "installed_identity_mismatch" in blockers
+        ) == installed_identity_matches:
+            raise ManifestIntegrityError(
+                "runtime installed identity blocker does not agree"
+            )
+        if ("process_missing" in blockers) == runtime.process_alive:
+            raise ManifestIntegrityError("runtime process blocker does not agree")
+        if runtime.command_matches and not runtime.process_alive:
+            raise ManifestIntegrityError(
+                "runtime command cannot match a missing process"
+            )
+        if runtime.runtime_attested and not runtime.process_alive:
+            raise ManifestIntegrityError(
+                "runtime stamp cannot attest a missing process"
+            )
+        if not runtime.process_alive and "process_command_mismatch" in blockers:
+            raise ManifestIntegrityError(
+                "missing process cannot also have a command mismatch"
+            )
+        if runtime.process_alive and (
+            ("process_command_mismatch" in blockers) == runtime.command_matches
+        ):
+            raise ManifestIntegrityError("runtime command blocker does not agree")
+        stamp_blockers = blockers & {
+            "runtime_stamp_invalid",
+            "runtime_stamp_missing",
+        }
+        if runtime.runtime_attested and stamp_blockers:
+            raise ManifestIntegrityError("runtime stamp blockers do not agree")
+        if not runtime.runtime_attested and len(stamp_blockers) != 1:
+            raise ManifestIntegrityError("runtime stamp blocker is required")
 
     dirty_declarations_match = all(item.dirty_matches for item in parsed.repositories)
     candidate_source_committed = all(
@@ -1099,7 +1775,7 @@ def verify_release_manifest(
         candidate_installed,
         runtime_aligned,
     ) = _derive_runtime_facts(parsed.repositories, parsed.runtimes)
-    write_ready = (
+    identity_manifest_ready = (
         dirty_declarations_match
         and candidate_source_committed
         and working_trees_clean
@@ -1107,6 +1783,7 @@ def verify_release_manifest(
         and candidate_installed
         and runtime_aligned
     )
+    write_ready = False
     derived = (
         dirty_declarations_match,
         candidate_source_committed,
@@ -1115,6 +1792,7 @@ def verify_release_manifest(
         runtime_blockers,
         candidate_installed,
         runtime_aligned,
+        identity_manifest_ready,
         write_ready,
     )
     declared = (
@@ -1125,6 +1803,7 @@ def verify_release_manifest(
         parsed.runtime_blockers,
         parsed.candidate_installed,
         parsed.runtime_aligned,
+        parsed.identity_manifest_ready,
         parsed.write_ready,
     )
     if derived != declared:
@@ -1140,12 +1819,18 @@ def verify_release_manifest(
     if parsed.manifest_digest != expected_digest:
         raise ManifestIntegrityError("manifest digest mismatch")
 
-    if (repository_specs is None) != (runtime_specs is None):
-        raise ManifestValidationError(
-            "repository_specs and runtime_specs must be supplied together"
-        )
-    if repository_specs is not None and runtime_specs is not None:
-        fresh = build_release_manifest(repository_specs, runtime_specs)
-        if fresh.to_json_bytes() != parsed.to_json_bytes():
-            raise ManifestIntegrityError("manifest does not match fresh source/runtime")
+    return parsed
+
+
+def verify_release_manifest(
+    manifest: Any,
+    repository_specs: Sequence[RepositorySpec],
+    runtime_specs: Sequence[RuntimeSpec],
+) -> ReleaseManifest:
+    """Require fresh Git, remote, installed-checkout, process and stamp evidence."""
+
+    parsed = validate_release_manifest_document(manifest)
+    fresh = build_release_manifest(repository_specs, runtime_specs)
+    if fresh.to_json_bytes() != parsed.to_json_bytes():
+        raise ManifestIntegrityError("manifest does not match fresh source/runtime")
     return parsed
