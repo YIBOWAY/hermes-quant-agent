@@ -1,0 +1,139 @@
+{
+  "binding_digest": "78a2bf95bc718f9b411a1ce8b67feef87eb01741ee72443af19b85d8c1df6184",
+  "evidence": [
+    {
+      "artifact_format": "pytest-junit-xml",
+      "artifact_path": "/private/tmp/hermes-v2-2eb5-focused.xml",
+      "artifact_sha256": "b88d77f73505d4ce65afcc570fd84c0aafdf77ade7ac400107ceb0e3c25ae46e",
+      "cleanup_commands": [],
+      "command": [
+        "/opt/homebrew/bin/uv",
+        "run",
+        "--frozen",
+        "--extra",
+        "dev",
+        "pytest",
+        "tests/gateway/test_api_server_approval_cas.py",
+        "tests/gateway/test_api_server_bind_guard.py",
+        "tests/gateway/test_api_server_capabilities_probe.py",
+        "tests/gateway/test_api_server_durable_wiring.py",
+        "tests/gateway/test_api_server_run_events_durable.py",
+        "tests/gateway/test_api_server_run_evidence.py",
+        "tests/gateway/test_api_server_runs.py",
+        "tests/gateway/test_api_server_runs_idempotency.py",
+        "tests/gateway/test_api_server_stop_reconcile.py",
+        "tests/gateway/test_approve_deny_commands.py",
+        "tests/gateway/test_durable_run_store.py",
+        "tests/hermes_cli/test_plugins.py",
+        "tests/tools/test_approval_interrupt.py",
+        "tests/tools/test_approved_command_clean_slate.py",
+        "tests/tools/test_request_tool_approval.py",
+        "--junitxml=/tmp/hermes-v2-2eb5-focused.xml"
+      ],
+      "cwd": "/private/tmp/hermes-manifest-source-2eb5-local",
+      "errors": 0,
+      "evidence_id": "hermes-v2-final-head-focused",
+      "exit_code": 0,
+      "failed": 0,
+      "passed": 389,
+      "repo": "hermes",
+      "setup_commands": [],
+      "skipped": 0,
+      "source_archive_sha256": "6ba504649664b2d9868e2f9b97eff072e928b3b559fb060bdbc035e8279cdab1",
+      "source_head_commit": "2eb5fa27790fb7af73fababa21d43b3996fe2d99",
+      "source_tree_oid": "5028a8095927f9b80c5af8c4c97c1644679fb35f",
+      "total": 389
+    },
+    {
+      "artifact_format": "pytest-junit-xml",
+      "artifact_path": "/private/tmp/hqa-v0-v2-4fd-binding.xml",
+      "artifact_sha256": "e3d8833cfa9ab0899577bcd79fbb1cc72ed05e1217a8b1cdc730e6e03fc4c410",
+      "cleanup_commands": [],
+      "command": [
+        "/Users/sunyibo/programs/Hermes-quant-agent/.venv/bin/pytest",
+        "tests/test_agent_workspace_actions.py",
+        "tests/test_agent_workspace_contract.py",
+        "tests/test_agent_workspace_model.py",
+        "tests/test_agent_workspace_security.py",
+        "tests/test_agent_workspace_states.py",
+        "tests/test_release_manifest.py",
+        "tests/test_hermes_run_adapter.py",
+        "tests/test_hermes_run_acceptance.py",
+        "--junitxml=/tmp/hqa-v0-v2-4fd-binding.xml"
+      ],
+      "cwd": "/private/tmp/hqa-manifest-source-2051757",
+      "errors": 0,
+      "evidence_id": "hqa-v0-v2-final-head-targeted",
+      "exit_code": 0,
+      "failed": 0,
+      "passed": 733,
+      "repo": "hqa",
+      "setup_commands": [],
+      "skipped": 0,
+      "source_archive_sha256": "2618dd1fa1b3bf564c5247c674d370d674ce71c33b285364597858e2b9efd71d",
+      "source_head_commit": "4fdad9e7b31bd4088cf7eaaf7a087da167093c95",
+      "source_tree_oid": "625623b951719d223dc13ce5ce2bb7f8d1cadcc7",
+      "total": 733
+    },
+    {
+      "artifact_format": "pytest-junit-xml",
+      "artifact_path": "/private/tmp/platform-v1-release-binding.xml",
+      "artifact_sha256": "2a439d03aecbc615fee99537db5656dbae2198d983cbeff905e70aff2c5978dd",
+      "cleanup_commands": [
+        [
+          "/bin/rm",
+          "/private/tmp/platform-manifest-source-bb62-local/src/frontend/node_modules"
+        ]
+      ],
+      "command": [
+        "/Users/sunyibo/programs/ai-quant-platform/.venv/bin/pytest",
+        "--junitxml=/tmp/platform-v1-release-binding.xml"
+      ],
+      "cwd": "/private/tmp/platform-manifest-source-bb62-local",
+      "errors": 0,
+      "evidence_id": "platform-v1-final-head-full",
+      "exit_code": 0,
+      "failed": 0,
+      "passed": 1573,
+      "repo": "platform",
+      "setup_commands": [
+        [
+          "/bin/ln",
+          "-s",
+          "/Users/sunyibo/programs/ai-quant-platform/src/frontend/node_modules",
+          "/private/tmp/platform-manifest-source-bb62-local/src/frontend/node_modules"
+        ]
+      ],
+      "skipped": 99,
+      "source_archive_sha256": "f9132c0d5cf00fba687606fb47274bd97ff289144a951f975faaa502f31a380e",
+      "source_head_commit": "bb62f5d0bc6a5a9a62a2e735b4d559f7d111ba01",
+      "source_tree_oid": "a8d2f97d6cd51c96daecd4599b2c8d6e496fd759",
+      "total": 1672
+    }
+  ],
+  "identity_manifest_digest": "4effb1b2ee7d234a52ca6a6cf6de1153ea9dd46235c4c2bda860c7ff4f1596e6",
+  "identity_manifest_file_sha256": "9fb919109050b39067b4302b8339c058c2c7e67491b8e3bc77867d0f5bb9f2b4",
+  "identity_manifest_path": "docs/audits/evidence/2026-07-19-v0-v2-release-manifest.json",
+  "kind": "agent_v0_2_v0_v2_validation_binding",
+  "repositories": [
+    {
+      "archive_sha256": "6ba504649664b2d9868e2f9b97eff072e928b3b559fb060bdbc035e8279cdab1",
+      "head_commit": "2eb5fa27790fb7af73fababa21d43b3996fe2d99",
+      "repo": "hermes",
+      "tree_oid": "5028a8095927f9b80c5af8c4c97c1644679fb35f"
+    },
+    {
+      "archive_sha256": "2618dd1fa1b3bf564c5247c674d370d674ce71c33b285364597858e2b9efd71d",
+      "head_commit": "4fdad9e7b31bd4088cf7eaaf7a087da167093c95",
+      "repo": "hqa",
+      "tree_oid": "625623b951719d223dc13ce5ce2bb7f8d1cadcc7"
+    },
+    {
+      "archive_sha256": "f9132c0d5cf00fba687606fb47274bd97ff289144a951f975faaa502f31a380e",
+      "head_commit": "bb62f5d0bc6a5a9a62a2e735b4d559f7d111ba01",
+      "repo": "platform",
+      "tree_oid": "a8d2f97d6cd51c96daecd4599b2c8d6e496fd759"
+    }
+  ],
+  "schema_version": 1
+}

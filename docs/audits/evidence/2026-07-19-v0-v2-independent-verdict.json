@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "kind": "agent_v0_2_v0_v2_independent_verdict",
+  "verdict": "CLEAR",
+  "release_authorized": false,
+  "identity_manifest": {
+    "path": "docs/audits/evidence/2026-07-19-v0-v2-release-manifest.json",
+    "file_sha256": "9fb919109050b39067b4302b8339c058c2c7e67491b8e3bc77867d0f5bb9f2b4",
+    "manifest_digest": "4effb1b2ee7d234a52ca6a6cf6de1153ea9dd46235c4c2bda860c7ff4f1596e6"
+  },
+  "validation_binding": {
+    "path": "docs/audits/evidence/2026-07-19-v0-v2-validation-binding.json",
+    "file_sha256": "7b04441675d70a017a929585f93d6852ce553e05eda538d390a83660d9e8597a",
+    "binding_digest": "78a2bf95bc718f9b411a1ce8b67feef87eb01741ee72443af19b85d8c1df6184"
+  },
+  "reviewer_checks": {
+    "closed_schemas": true,
+    "canonical_digests_match": true,
+    "source_coordinates_match": true,
+    "controlled_checkouts_clean": true,
+    "remote_publication_matches": true,
+    "tree_archive_digests_match": true,
+    "junit_hashes_counts_commands_match": true,
+    "runtime_fail_closed": true,
+    "write_ready_false": true
+  }
+}
