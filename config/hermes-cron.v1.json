@@ -34,6 +34,14 @@
       "script": "hqa-full-9h-notification-drain.sh",
       "no_agent": true,
       "deliver": "local"
+    },
+    {
+      "job_id": "hermes_compatibility_watch",
+      "name": "hqa-hermes-compatibility-watch",
+      "schedule": "*/15 * * * *",
+      "script": "hqa-hermes-compatibility-watch.sh",
+      "no_agent": true,
+      "deliver": "local"
     }
   ]
 }

@@ -38,6 +38,7 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
         "hqa-full-9h-notification-drain.sh",
         "hqa-full-9h-weekly.sh",
         "hqa-hermes-command-worker.sh",
+        "hqa-hermes-compatibility-watch.sh",
         "hqa-market-foresight.sh",
         "hqa-notify.sh",
         "hqa-opportunities.sh",
@@ -75,6 +76,7 @@ def test_wrappers_pass_hermes_escape_check(tmp_path):
         "hqa-full-9h-notification-drain.sh",
         "hqa-full-9h-weekly.sh",
         "hqa-hermes-command-worker.sh",
+        "hqa-hermes-compatibility-watch.sh",
         "hqa-market-foresight.sh",
         "hqa-notify.sh",
         "hqa-options-collect.sh",
@@ -132,6 +134,7 @@ def test_python_wrappers_use_install_time_repo_placeholder():
         "hqa-full-9h-freshness.sh",
         "hqa-full-9h-notification-drain.sh",
         "hqa-full-9h-weekly.sh",
+        "hqa-hermes-compatibility-watch.sh",
         "hqa-market-foresight.sh",
         "hqa-opportunities.sh",
         "hqa-options-radar.sh",
@@ -201,8 +204,46 @@ def test_full_9h_desired_cron_contract_is_versioned_and_parallel_pool_safe() -> 
             "no_agent": True,
             "deliver": "local",
         },
+        {
+            "job_id": "hermes_compatibility_watch",
+            "name": "hqa-hermes-compatibility-watch",
+            "schedule": "*/15 * * * *",
+            "script": "hqa-hermes-compatibility-watch.sh",
+            "no_agent": True,
+            "deliver": "local",
+        },
     ]
     assert all("workdir" not in job for job in contract["jobs"])
+
+
+def test_hermes_compatibility_wrapper_is_a_fixed_no_argument_adapter() -> None:
+    body = (
+        REPO / "scripts" / "hermes" / "hqa-hermes-compatibility-watch.sh"
+    ).read_text(encoding="utf-8")
+    assert "cd __HQA_REPO_DIR__" in body
+    assert "exec python3 -m hqa.hermes_compatibility_cli check" in body
+    assert '"$@"' not in body
+    assert '"$#" -ne 0' in body
+
+
+def test_hermes_compatibility_wrapper_rejects_forwarded_arguments(tmp_path) -> None:
+    source = REPO / "scripts" / "hermes" / "hqa-hermes-compatibility-watch.sh"
+    wrapper = tmp_path / "watch.sh"
+    wrapper.write_text(
+        source.read_text(encoding="utf-8").replace("__HQA_REPO_DIR__", str(tmp_path)),
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(wrapper), "--url", "http://example.invalid"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "accepts no arguments" in result.stderr
 
 
 # --- D-25 read-only gate wrapper -------------------------------------------
