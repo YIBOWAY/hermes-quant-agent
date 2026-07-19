@@ -13,8 +13,19 @@ REPO = Path(__file__).resolve().parent.parent
 
 def _install(tmp_path):
     fake_home = tmp_path / "home"
-    fake_home.mkdir()
-    env = dict(os.environ, HOME=str(fake_home), HERMES_HOME=str(fake_home / ".hermes"))
+    fake_home.mkdir(mode=0o700)
+    hermes_home = fake_home / ".hermes"
+    helper_parent = hermes_home / "bin"
+    helper_parent.mkdir(parents=True, mode=0o700)
+    helper = helper_parent / "hqa-intent-payload-crypto"
+    helper.write_text("#!/bin/bash\nexit 64\n", encoding="utf-8")
+    helper.chmod(0o700)
+    env = dict(
+        os.environ,
+        HOME=str(fake_home),
+        HERMES_HOME=str(hermes_home),
+        HQA_SKIP_NATIVE_BUILD="1",
+    )
     result = subprocess.run(
         ["bash", str(REPO / "scripts" / "install.sh")],
         env=env,
@@ -23,7 +34,287 @@ def _install(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stdout
-    return fake_home / ".hermes" / "scripts"
+    return hermes_home / "scripts"
+
+
+def test_install_cannot_skip_a_missing_native_helper(tmp_path) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(mode=0o700)
+    hermes_home = fake_home / ".hermes"
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(
+            os.environ,
+            HOME=str(fake_home),
+            HERMES_HOME=str(hermes_home),
+            HQA_SKIP_NATIVE_BUILD="1",
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "skip requires an existing helper" in result.stdout
+    assert not (hermes_home / "scripts").exists()
+    assert not (hermes_home / "skills").exists()
+
+
+def test_install_cannot_skip_native_build_for_nonprivate_helper(tmp_path) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(mode=0o700)
+    hermes_home = fake_home / ".hermes"
+    helper_parent = hermes_home / "bin"
+    helper_parent.mkdir(parents=True, mode=0o700)
+    helper = helper_parent / "hqa-intent-payload-crypto"
+    helper.write_text("#!/bin/bash\nexit 64\n", encoding="utf-8")
+    helper.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(
+            os.environ,
+            HOME=str(fake_home),
+            HERMES_HOME=str(hermes_home),
+            HQA_SKIP_NATIVE_BUILD="1",
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "exact private physical helper" in result.stdout
+    assert helper.stat().st_mode & 0o777 == 0o755
+    assert not (hermes_home / "scripts").exists()
+    assert not (hermes_home / "skills").exists()
+
+
+def test_install_skip_refuses_symlinked_helper_ancestor_without_execution(
+    tmp_path,
+) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(mode=0o700)
+    hermes_home = fake_home / ".hermes"
+    hermes_home.mkdir(mode=0o700)
+    victim_bin = tmp_path / "victim-bin"
+    victim_bin.mkdir(mode=0o700)
+    executed = tmp_path / "executed"
+    victim_helper = victim_bin / "hqa-intent-payload-crypto"
+    victim_helper.write_text(
+        f"#!/bin/bash\nprintf executed > {executed!s}\nexit 64\n",
+        encoding="utf-8",
+    )
+    victim_helper.chmod(0o700)
+    (hermes_home / "bin").symlink_to(victim_bin, target_is_directory=True)
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(
+            os.environ,
+            HOME=str(fake_home),
+            HERMES_HOME=str(hermes_home),
+            HQA_SKIP_NATIVE_BUILD="1",
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "helper path must contain only physical directories" in result.stdout
+    assert not executed.exists()
+    assert (hermes_home / "bin").is_symlink()
+    assert not (hermes_home / "scripts").exists()
+    assert not (hermes_home / "skills").exists()
+
+
+def test_install_refuses_symlinked_hermes_root_before_any_target_write(
+    tmp_path,
+) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(mode=0o700)
+    victim = tmp_path / "victim"
+    victim.mkdir(mode=0o755)
+    hermes_home = fake_home / ".hermes"
+    hermes_home.symlink_to(victim, target_is_directory=True)
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(
+            os.environ,
+            HOME=str(fake_home),
+            HERMES_HOME=str(hermes_home),
+            HQA_SKIP_NATIVE_BUILD="1",
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert hermes_home.is_symlink()
+    assert not (victim / "scripts").exists()
+    assert not (victim / "skills").exists()
+    assert not (victim / "bin").exists()
+    assert victim.stat().st_mode & 0o777 == 0o755
+
+
+def test_install_refuses_world_writable_intermediate_ancestor_before_write(
+    tmp_path,
+) -> None:
+    unsafe = tmp_path / "unsafe"
+    unsafe.mkdir(mode=0o777)
+    unsafe.chmod(0o777)
+    fake_home = unsafe / "home"
+    fake_home.mkdir(mode=0o700)
+    hermes_home = fake_home / ".hermes"
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(
+            os.environ,
+            HOME=str(fake_home),
+            HERMES_HOME=str(hermes_home),
+            HQA_SKIP_NATIVE_BUILD="1",
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "ancestor must be owner-controlled" in result.stdout
+    assert unsafe.stat().st_mode & 0o777 == 0o777
+    assert fake_home.stat().st_mode & 0o777 == 0o700
+    assert not hermes_home.exists()
+
+
+def test_install_stages_then_refuses_symlinked_publish_directory(
+    tmp_path,
+) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(mode=0o700)
+    hermes_home = fake_home / ".hermes"
+    helper_parent = hermes_home / "bin"
+    helper_parent.mkdir(parents=True, mode=0o700)
+    helper = helper_parent / "hqa-intent-payload-crypto"
+    helper.write_text("#!/bin/bash\nexit 64\n", encoding="utf-8")
+    helper.chmod(0o700)
+    victim = tmp_path / "victim-scripts"
+    victim.mkdir(mode=0o700)
+    marker = victim / "marker"
+    marker.write_text("unchanged", encoding="utf-8")
+    (hermes_home / "scripts").symlink_to(victim, target_is_directory=True)
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(
+            os.environ,
+            HOME=str(fake_home),
+            HERMES_HOME=str(hermes_home),
+            HQA_SKIP_NATIVE_BUILD="1",
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert (hermes_home / "scripts").is_symlink()
+    assert marker.read_text(encoding="utf-8") == "unchanged"
+    assert sorted(victim.iterdir()) == [marker]
+    assert not (hermes_home / "skills").exists()
+    assert not list(hermes_home.glob(".hqa-install.*"))
+
+
+def test_install_atomically_upgrades_owner_controlled_legacy_files(
+    tmp_path,
+) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(mode=0o700)
+    hermes_home = fake_home / ".hermes"
+    helper_parent = hermes_home / "bin"
+    helper_parent.mkdir(parents=True, mode=0o700)
+    helper = helper_parent / "hqa-intent-payload-crypto"
+    helper.write_text("#!/bin/bash\nexit 64\n", encoding="utf-8")
+    helper.chmod(0o700)
+    scripts = hermes_home / "scripts"
+    scripts.mkdir(mode=0o755)
+    legacy_wrapper = scripts / "hqa-research-task.sh"
+    legacy_wrapper.write_text("legacy\n", encoding="utf-8")
+    legacy_wrapper.chmod(0o755)
+    skill_dir = hermes_home / "skills" / "hqa-research-task"
+    skill_dir.mkdir(parents=True, mode=0o755)
+    legacy_skill = skill_dir / "SKILL.md"
+    legacy_skill.write_text("legacy\n", encoding="utf-8")
+    legacy_skill.chmod(0o644)
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(
+            os.environ,
+            HOME=str(fake_home),
+            HERMES_HOME=str(hermes_home),
+            HQA_SKIP_NATIVE_BUILD="1",
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout
+    assert legacy_wrapper.read_text(encoding="utf-8").startswith("#!/bin/bash\n")
+    assert legacy_wrapper.stat().st_mode & 0o777 == 0o700
+    assert legacy_skill.read_text(encoding="utf-8").startswith("---\n")
+    assert legacy_skill.stat().st_mode & 0o777 == 0o600
+
+
+def test_install_reports_only_candidate_files_and_preserves_unrelated_entries(
+    tmp_path: Path,
+) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(mode=0o700)
+    hermes_home = fake_home / ".hermes"
+    helper_parent = hermes_home / "bin"
+    helper_parent.mkdir(parents=True, mode=0o700)
+    helper = helper_parent / "hqa-intent-payload-crypto"
+    helper.write_text("#!/bin/bash\nexit 64\n", encoding="utf-8")
+    helper.chmod(0o700)
+    scripts = hermes_home / "scripts"
+    scripts.mkdir(mode=0o700)
+    orphan_wrapper = scripts / "hqa-unrelated-existing.sh"
+    orphan_wrapper.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    orphan_wrapper.chmod(0o700)
+    unrelated_skill = hermes_home / "skills" / "unrelated-existing"
+    unrelated_skill.mkdir(parents=True, mode=0o700)
+    unrelated_card = unrelated_skill / "SKILL.md"
+    unrelated_card.write_text("unrelated\n", encoding="utf-8")
+    unrelated_card.chmod(0o600)
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(
+            os.environ,
+            HOME=str(fake_home),
+            HERMES_HOME=str(hermes_home),
+            HQA_SKIP_NATIVE_BUILD="1",
+        ),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert str(orphan_wrapper) not in result.stdout
+    assert str(unrelated_card) not in result.stdout
+    assert f"installed: {scripts / 'hqa-research-task.sh'}" in result.stdout
+    assert (
+        f"installed: {hermes_home / 'skills/hqa-research-task/SKILL.md'}"
+        in result.stdout
+    )
+    assert orphan_wrapper.read_text(encoding="utf-8").endswith("exit 0\n")
+    assert unrelated_card.read_text(encoding="utf-8") == "unrelated\n"
 
 
 def test_install_copies_physical_executable_wrappers(tmp_path):
@@ -39,6 +330,7 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
         "hqa-full-9h-weekly.sh",
         "hqa-hermes-command-worker.sh",
         "hqa-hermes-compatibility-watch.sh",
+        "hqa-intent-payload-reconcile.sh",
         "hqa-market-foresight.sh",
         "hqa-notify.sh",
         "hqa-opportunities.sh",
@@ -48,6 +340,7 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
         "hqa-prediction.sh",
         "hqa-premarket-digest.sh",
         "hqa-quant-readonly.sh",
+        "hqa-research-task.sh",
         "hqa-signal-watchdog.sh",
         "hqa-weekly-review.sh",
     ]
@@ -61,6 +354,27 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
         assert (
             "python3 -m hqa." in body or "quant-system" in body or "hermes send" in body
         )
+
+
+def test_install_builds_private_native_intent_crypto_helper(tmp_path) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    hermes_home = fake_home / ".hermes"
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(os.environ, HOME=str(fake_home), HERMES_HOME=str(hermes_home)),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stdout
+    helper = hermes_home / "bin" / "hqa-intent-payload-crypto"
+    assert helper.is_file()
+    assert not helper.is_symlink()
+    assert helper.stat().st_mode & 0o777 == 0o700
+    assert helper.parent.stat().st_mode & 0o777 == 0o700
 
 
 def test_wrappers_pass_hermes_escape_check(tmp_path):
@@ -77,6 +391,7 @@ def test_wrappers_pass_hermes_escape_check(tmp_path):
         "hqa-full-9h-weekly.sh",
         "hqa-hermes-command-worker.sh",
         "hqa-hermes-compatibility-watch.sh",
+        "hqa-intent-payload-reconcile.sh",
         "hqa-market-foresight.sh",
         "hqa-notify.sh",
         "hqa-options-collect.sh",
@@ -86,6 +401,7 @@ def test_wrappers_pass_hermes_escape_check(tmp_path):
         "hqa-prediction.sh",
         "hqa-premarket-digest.sh",
         "hqa-quant-readonly.sh",
+        "hqa-research-task.sh",
         "hqa-signal-watchdog.sh",
         "hqa-weekly-review.sh",
     ):
@@ -135,12 +451,14 @@ def test_python_wrappers_use_install_time_repo_placeholder():
         "hqa-full-9h-notification-drain.sh",
         "hqa-full-9h-weekly.sh",
         "hqa-hermes-compatibility-watch.sh",
+        "hqa-intent-payload-reconcile.sh",
         "hqa-market-foresight.sh",
         "hqa-opportunities.sh",
         "hqa-options-radar.sh",
         "hqa-portfolio-risk.sh",
         "hqa-prediction.sh",
         "hqa-premarket-digest.sh",
+        "hqa-research-task.sh",
         "hqa-signal-watchdog.sh",
         "hqa-weekly-review.sh",
     ):
@@ -209,6 +527,14 @@ def test_full_9h_desired_cron_contract_is_versioned_and_parallel_pool_safe() -> 
             "name": "hqa-hermes-compatibility-watch",
             "schedule": "*/15 * * * *",
             "script": "hqa-hermes-compatibility-watch.sh",
+            "no_agent": True,
+            "deliver": "local",
+        },
+        {
+            "job_id": "intent_payload_retention",
+            "name": "hqa-intent-payload-reconcile",
+            "schedule": "11 * * * *",
+            "script": "hqa-intent-payload-reconcile.sh",
             "no_agent": True,
             "deliver": "local",
         },
@@ -398,6 +724,61 @@ def test_install_deploys_skill_card_with_substitution(tmp_path):
     assert str(scripts_dest / "hqa-portfolio-risk.sh") in body
     assert str(scripts_dest / "hqa-prediction.sh") in body
     assert str(scripts_dest / "hqa-opportunities.sh") in body
+
+
+def test_install_deploys_v3_research_authority_skill_and_wrapper(tmp_path) -> None:
+    scripts_dest = _install(tmp_path)
+    wrapper = scripts_dest / "hqa-research-task.sh"
+    skill = scripts_dest.parent / "skills" / "hqa-research-task" / "SKILL.md"
+
+    assert wrapper.is_file()
+    assert wrapper.stat().st_mode & 0o111
+    assert skill.is_file()
+    body = skill.read_text(encoding="utf-8")
+    assert str(wrapper) in body
+    assert "__HERMES_SCRIPTS_DIR__" not in body
+    assert "__HQA_REPO_DIR__" not in body
+
+
+def test_installed_wrapper_freezes_canonical_v3_authority_environment(
+    tmp_path,
+) -> None:
+    scripts_dest = _install(tmp_path)
+    wrapper = scripts_dest / "hqa-research-task.sh"
+    stub_dir = tmp_path / "stub-bin"
+    stub_dir.mkdir()
+    stub = stub_dir / "python3"
+    stub.write_text(
+        "#!/bin/bash\n"
+        "printf '%s\\n' \"$HQA_INTENT_PAYLOAD_DIR\"\n"
+        "printf '%s\\n' \"$HQA_WORKFLOW_AUTHORITY_DIR\"\n"
+        "printf '%s\\n' \"$HQA_INTENT_PAYLOAD_CRYPTO_HELPER\"\n"
+        "printf '%s\\n' \"$HQA_WORKFLOW_OWNER_USER_ID\"\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o700)
+
+    result = subprocess.run(
+        [str(wrapper), "audit"],
+        env=dict(
+            os.environ,
+            PATH=f"{stub_dir}:/usr/bin:/bin",
+            HQA_INTENT_PAYLOAD_DIR="/tmp/escaped-intent",
+            HQA_WORKFLOW_AUTHORITY_DIR="/tmp/escaped-workflow",
+            HQA_INTENT_PAYLOAD_CRYPTO_HELPER="/tmp/escaped-helper",
+            HQA_WORKFLOW_OWNER_USER_ID="escaped-owner",
+        ),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        str(REPO / "data" / "_runtime" / "intent-payloads-v2"),
+        str(REPO / "data" / "_runtime" / "workflow-authority-v2"),
+        str(scripts_dest.parent / "bin" / "hqa-intent-payload-crypto"),
+        "local-owner-v1",
+    ]
 
 
 def test_skill_card_frontmatter_mirrors_hermes_contract():

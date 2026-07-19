@@ -26,6 +26,32 @@ def test_repo_and_platform_paths():
         config.RESEARCH_WORKFLOW_DIR
         == config.REPO_DIR / "data" / "_runtime" / "research-workflows"
     )
+    assert (
+        config.CANONICAL_INTENT_PAYLOAD_DIR
+        == config.REPO_DIR / "data" / "_runtime" / "intent-payloads-v2"
+    )
+    assert (
+        config.CANONICAL_WORKFLOW_AUTHORITY_DIR
+        == config.REPO_DIR / "data" / "_runtime" / "workflow-authority-v2"
+    )
+    assert config.CANONICAL_WORKFLOW_OWNER_USER_ID == "local-owner-v1"
+
+
+def test_generic_runtime_override_does_not_redirect_v3_canonical_roots(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("HQA_RUNTIME_DIR", str(tmp_path / "escaped-runtime"))
+    try:
+        importlib.reload(config)
+        assert config.RUNTIME_DIR == tmp_path / "escaped-runtime"
+        assert config.INTENT_PAYLOAD_DIR == config.CANONICAL_INTENT_PAYLOAD_DIR
+        assert (
+            config.WORKFLOW_AUTHORITY_DIR
+            == config.CANONICAL_WORKFLOW_AUTHORITY_DIR
+        )
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
 
 
 def test_expected_safety_baseline():

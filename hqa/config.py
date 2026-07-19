@@ -70,6 +70,42 @@ RESEARCH_WORKFLOW_DIR = Path(
         str(RUNTIME_DIR / "research-workflows"),
     )
 )
+
+# V3 authority defaults are canonical repo/device identities, not children of
+# the generic HQA_RUNTIME_DIR test seam. The four explicit HQA_* overrides
+# below remain available for hermetic direct-CLI tests; installed Hermes
+# wrappers overwrite them with these canonical values before Python starts.
+CANONICAL_INTENT_PAYLOAD_DIR = (
+    REPO_DIR / "data" / "_runtime" / "intent-payloads-v2"
+)
+CANONICAL_WORKFLOW_AUTHORITY_DIR = (
+    REPO_DIR / "data" / "_runtime" / "workflow-authority-v2"
+)
+CANONICAL_INTENT_PAYLOAD_CRYPTO_HELPER = (
+    Path.home() / ".hermes" / "bin" / "hqa-intent-payload-crypto"
+)
+CANONICAL_WORKFLOW_OWNER_USER_ID = "local-owner-v1"
+INTENT_PAYLOAD_DIR = Path(
+    os.environ.get(
+        "HQA_INTENT_PAYLOAD_DIR",
+        str(CANONICAL_INTENT_PAYLOAD_DIR),
+    )
+)
+WORKFLOW_AUTHORITY_DIR = Path(
+    os.environ.get(
+        "HQA_WORKFLOW_AUTHORITY_DIR",
+        str(CANONICAL_WORKFLOW_AUTHORITY_DIR),
+    )
+)
+INTENT_PAYLOAD_CRYPTO_HELPER = Path(
+    os.environ.get(
+        "HQA_INTENT_PAYLOAD_CRYPTO_HELPER",
+        str(CANONICAL_INTENT_PAYLOAD_CRYPTO_HELPER),
+    )
+)
+WORKFLOW_OWNER_USER_ID = os.environ.get(
+    "HQA_WORKFLOW_OWNER_USER_ID", CANONICAL_WORKFLOW_OWNER_USER_ID
+)
 FACTOR_GATE1_DIR = Path(
     os.environ.get("HQA_FACTOR_GATE1_DIR", str(RUNTIME_DIR / "factor-gate1"))
 )
