@@ -18,9 +18,11 @@ durable notification receipts, feed schema 1.1 and the visible `/hermes` cards.
 D-31 has since delivered the official API GET-only session BFF (3A), PostgreSQL
 command/event/outbox/run-link ledger with claim/lease/heartbeat primitives (3B),
 and a deterministic connector notify/scan/expired-lease reconcile runtime (3C).
-The runtime does not claim queued commands and remains reconcile-only: real Hermes
-chat/provider Run submission and approval mutations
-are still blocked. Slice 3C.1 has a code-accepted append-only Task/Attempt
+The runtime does not claim queued commands and remains reconcile-only. Agent v0.2
+V2 now has an independently accepted durable Run/approval/provider-evidence
+implementation in the controlled Hermes integration worktree, but the live Hermes
+install is unchanged and durable OFF; real Web submission, claim/dispatch and approval
+mutations therefore remain blocked. Slice 3C.1 has a code-accepted append-only Task/Attempt
 authority, immutable content-addressed payloads, exact cross-authority bindings,
 and reverse audit. Platform migration 006 has not been applied to the live database;
 a later v0.2 review found its `UNIQUE(task_id)` incompatible with multi-Attempt
@@ -35,6 +37,13 @@ overall stays NOT DONE — three-repo manifest consistency, primary validation a
 cross-review are pending (see
 [`docs/audits/2026-07-17-v0-three-repo-cross-review.md`](docs/audits/2026-07-17-v0-three-repo-cross-review.md));
 all live write gates remain OFF.
+V1's startup migration/DLP/schema-fingerprint baseline is code-accepted with fresh
+platform full-suite and browser evidence; live DB role/RLS provisioning remains PARTIAL
+(`quant` is still superuser/bypassrls and migration 006 is absent). V2's frozen isolated
+evidence is 408 related Hermes tests + 436 real conversation-loop tests, HQA 1531 passed /
+2 skipped, and two independent ACCEPT reviews. These are uncommitted worktree facts—not
+live installation or release evidence. See the latest V2 close-out at the top of the
+active plan before using older delivery addenda.
 This foundation is not yet an activated write path. The read-only Unified Results catalog and details are
 delivered and locally accepted as 3E-A, while independent Hermes Run results and
 full results cutover are not. Agent Studio has only a reversible page-scoped

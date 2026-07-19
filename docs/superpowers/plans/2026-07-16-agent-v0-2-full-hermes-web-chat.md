@@ -491,7 +491,70 @@ cross-review 均 pending。
 All checks passed；前端 `eslint`/`tsc --noEmit`/Vitest 224 passed；离线 `next build` 成功；隔离 pg 加固 80 passed；
 `migrate` CLI dry-run/fail-closed/allowlist-apply 冒烟通过。3 个无关 options 文件全程保持 dirty 未提交。
 
+**V1 对抗复核与未提交修复（2026-07-19，platform `df7d7254c` + working tree）：**
+
+- startup 已彻底移除 migration apply 调用；即使遗留配置显式设置
+  `QS_DATABASE_AUTO_MIGRATE=true` 也只 backfill 已 ready 的 run index，绝不修改 schema。
+- schema fingerprint 从“对象名列表”升级为语义指纹，覆盖 owner/ACL、relation/column、
+  constraint/index/view/sequence、trigger/rule/function、type/enum、default ACL、RLS policy 与
+  row-security flags。`migrate --apply` 在 pre-fingerprint 不可得时不执行，在 post-fingerprint
+  不可得时返回需人工复核，不能打印成功。
+- transcript DLP 的 Bearer 匹配补齐大小写、token boundary 以及 `/`、`=`、前导 `.` 等合法形态；
+  仍在 bounding 前脱敏。真实浏览器验收又发现 Discord 的 `Triggering message id` 路由指令泄漏到
+  历史 transcript；现已在 server-side allowlist 层剥离，metadata-only 行直接丢弃，真实用户正文保留。
+- fresh platform full suite：`1577 passed, 98 skipped`；`ruff check src tests` 全绿；独立
+  PostgreSQL 16 语义指纹对抗测试 `1 passed`，测试 schema/role/object 清理后均为零。
+- live PostgreSQL 仅做只读核验：migration 005 存在、006 不存在，指纹稳定为
+  `2f7c7e2216b93073d3b2a0771910401bb5673b76d464be7c09a2e6055161368f`；当前 quant 角色仍为
+  `superuser=true / bypassrls=true`，因此 **V1.2 继续 PARTIAL**。本轮未 provisioning、未加 RLS、
+  未 apply 006，browser writer / claim-dispatch / composer 仍全 OFF。
+- 用户原有 options CSV/Python/tests 与 `.understand-anything/diff-overlay.json` 保持原状；上述修复
+  尚未 commit/push，不把 working-tree 结果冒充已发布版本。
+
 ### Slice V2 — Hermes `DurableRunAuthority`（C1 + C2 foundation）
+
+**V2 最新对抗收口（2026-07-19）：ISOLATED CODE ACCEPTED / LIVE NOT INSTALLED**
+
+> 本段是 V2 当前事实源，取代下方同日早期的 `DONE_WITH_DOCUMENTED_RESIDUALS`
+> 记录。早期记录保留用于追溯，但其中旧 commit、`resolved`、`approval.delivered`、双状态名、
+> SSE 无 `event_id` 等描述均已过时。当前仍是未提交工作树，不能表述为已发布或 live 生效。
+
+冻结坐标：HQA `codex/full-9h@c0624b542f54 + dirty`；platform
+`codex/agent-v0-2-platform-v1@df7d7254c27c + dirty`；Hermes integration
+`codex/v2-live-integration@b3343a658f62 + dirty`；live Hermes 仍为
+`codex/v2-live-installed@916f5fbf5452`，未修改、未重启、durable flag 仍 OFF。
+
+本轮 adversarial remediation 已在隔离 Hermes authority 内闭合：
+
+- canonical five-state Run、submit-or-get、request digest/recovery、stable `event_id` + `seq`、
+  replay/SSE、restart reconcile、idempotent stop 与终态原子提交；终态后普通 append fail closed。
+- 行为 capability probe 使用公共 store 方法并在 rollback/savepoint 内验证；每次 HQA mutation
+  前重读 capability。SQLite authority 在打开 store 前取得跨进程文件锁，所有失败/断开路径均先
+  close/checkpoint owned store 再释放锁。
+- approval 使用进程私有 HMAC-SHA256 exact action digest、TTL、single-use/CAS。人类选择、释放承诺
+  与内存 waiter 信号分别记录为 `approval.decision_recorded`、`approval.release_committed` 和
+  `approval.signalled`；HTTP 返回 `decision_status=committed` 与
+  `waiter_signal_status=confirmed|unknown`，不再用 `resolved/delivered` 冒充动作结果。ACK 丢失可
+  exact replay；release/signal gap、stop gap、finalizer raise/false 均不重复放行动作。
+- provider `actual_policy`/usage 只来自 execution middleware `next_call` 内实际观察到的 response
+  receipt；preflight、middleware short-circuit、create-agent/provider exception 均不伪造 actual。
+  fallback 只保存实际 secondary model/provider；整条 fallback config、`api_key`、`base_url`、
+  `key_env` 不进入 Run/event/GET 证据。审批 `pattern_key(s)` 也从 Web/SSE 出口剥离。
+- 初始 admission 状态失败清理 live maps 并返回统一 `durable_unavailable`；损坏 durable evidence
+  JSON 返回 503，不静默省略。HQA Official adapter 与 scripted fake 已同步新 approval/status/event
+  合同，fake stop/approval ACK-loss 与 restart replay 也保持同一语义。
+
+冻结验证：Hermes 官方 runner 相关面 `408 passed`（17 files）、真实 conversation loop
+`436 passed`，Ruff 与 `git diff --check` 全绿；独立 reviewer 复跑 `110 passed` 并 ACCEPT。
+HQA V2 三文件 `91 passed`；HQA full `1531 passed, 2 skipped`，Ruff 全绿。platform 保持
+`1577 passed, 98 skipped` 与 Ruff 全绿。测试全程 hermetic/loopback；无 provider、paper/live、
+broker、Gate、redirect 或交易调用。
+
+非阻断但必须保留的事实：middleware 改写 effective model 且 response 不带 model 时只能回退
+attempt route；`approval.signalled` 仅证明 waiter signal，不代表工具执行完成；admission 初写与
+补偿终止同时 DB 故障仍需后续 admission-failed 标记；多进程 mutation 需把最终 fence 进一步
+数据库原子化；默认 300s TTL、真 TCP RST 与 accept-before-ACK live SIGKILL 仍以 hermetic/加速
+证据为主。本轮未声称 Hermes 全仓 suite 全绿，也未授权 live install/canary。
 
 **目标：** 在 Hermes canonical authority 内解决九项语义，不让平台投影冒充 upstream。
 
@@ -527,11 +590,11 @@ All checks passed；前端 `eslint`/`tsc --noEmit`/Vitest 224 passed；离线 `n
 
 任一项失败，production adapter 只能报告 unavailable，后续 dispatch 继续关闭。
 
-**V2 交付记录（§8.2，2026-07-19）：DONE_WITH_DOCUMENTED_RESIDUALS**
+**V2 历史交付记录（§8.2，2026-07-19）：SUPERSEDED BY LATEST CLOSE-OUT ABOVE**
 
-> 修订注（同日 close-out）：交付记录初稿写于 adversarial audit 之前；本段已并入 audit 清掉的
+> 历史注：交付记录初稿写于 adversarial audit 之前；本段曾并入 audit 清掉的
 > B1/B2/B3（V2.14 + V2.12-C）与 integration merge `f44ec3afb`。状态仍为
-> **DONE_WITH_DOCUMENTED_RESIDUALS**（非无条件 DONE）—— live durable 仍 OFF，canary 另授权。
+> **历史证据，不是当前状态**。live durable 仍 OFF，canary 另授权。
 
 三仓坐标（重新验证，非旧文档抄写）：
 
@@ -853,7 +916,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 |---|---|---|
 | V0 Interface/cardinality/authority freeze | HQA-side DONE / 三仓 PENDING → not DONE | executable contracts 已交付（5 模块+622 测试绿）；三仓 manifest 一致性 + primary validation + cross-review 见 `../../audits/2026-07-17-v0-three-repo-cross-review.md` |
 | V1 Stop-the-line baseline | platform DONE（V1.2A PARTIAL = code_hardened / live_role_unprovisioned） | V1.2 live role+RLS 属 V4 Gate；其余 V1.1–V1.7 见 §7 V1 交付状态 |
-| V2 Hermes DurableRunAuthority | DONE_WITH_DOCUMENTED_RESIDUALS | 九语义+adapter+6 验收+受控 install（durable OFF）+line-528 gate + V2.12-C structural mutator gate + V2.14 B1/B2 honesty；live durable ON canary 另授权；见 §7 V2 交付记录 |
+| V2 Hermes DurableRunAuthority | ISOLATED CODE ACCEPTED / RELEASE PENDING / LIVE OFF | 九语义、adapter、approval/provider/stop 证据已在 dirty integration worktree 独立 ACCEPT；先形成三仓 exact commit、完成 manifest/primary validation/cross-review，才能结束 V2 release closure。当前 live 仍是旧 `916f5fbf5`、durable OFF；install/canary 另授权；见 §7 最新 V2 对抗收口 |
 | V3 HQA Intent/WorkflowAuthority | NOT STARTED | Research Task 1:N Attempt + backup/restore green |
 | V4 PG schema/BFF saga/security | NOT STARTED | code/isolated DB accepted；再请求 live migration 授权 |
 | V5 supervised dispatch worker | NOT STARTED | crash matrix green；再请求 provider smoke 授权 |
@@ -871,13 +934,17 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
    `../../audits/2026-07-17-v0-three-repo-cross-review.md`）。
 3. V1 stop-the-line **已在 platform 分支交付**（V1.2A = `code_hardened / live_role_unprovisioned`
    PARTIAL；live role+RLS 属 V4）。startup 不再 auto-migrate。
-4. V2 Hermes DurableRunAuthority **已交付**（`DONE_WITH_DOCUMENTED_RESIDUALS`，见 §7 V2 交付记录）：
-   九语义 + OfficialHermesHttpAdapter/fake + 六项验收 + 受控 install（durable OFF）+ line-528
-   availability gate + **V2.12-C structural mutator gate** + **V2.14 B1/B2 honesty**
-   （integration `b3343a658`；live launchd 仍 `916f5fbf5`/durable OFF）。
-   **live durable ON canary 需单独授权**；未授权前 dispatch 保持关闭。
-5. 下一施工入口 = **V3 HQA Intent/WorkflowAuthority**（hermetic fake/隔离状态）；V3 code accepted
-   后与 V2 一并进入 V4 schema/BFF。修订 006 与 runner 通过独立 review 后再请求 migration 授权，
+4. V2 Hermes DurableRunAuthority 当前是 **ISOLATED CODE ACCEPTED / RELEASE PENDING / LIVE OFF**
+   （见 §7 最新 V2 对抗收口）：九语义、OfficialHermesHttpAdapter/fake、approval release/signal、
+   stop fence 与 response-receipt-only provider evidence 已在 integration `b3343a658` 基线的 dirty
+   worktree 通过独立审查；这些事实尚未形成 release commit，也未安装到 live。旧 live 仍是
+   `916f5fbf5`、durable OFF，并继续报告旧九项 blocker。**live install/canary 需单独授权**；
+   未授权前 Web write、claim/dispatch 与 public composer 保持关闭。
+5. 当前施工入口不是 V3，而是 **V2 release closure**：先形成 HQA/platform/Hermes exact commit，
+   完成三仓 manifest 一致性、primary validation 与 cross-review，并把 release 记录同步到本计划。
+   只有该 closure 结束后，才可把 **V3 HQA Intent/WorkflowAuthority** 作为下一 hermetic/isolated
+   施工入口；不得用 dirty isolated code 跳过这道准入。受控 live install/canary 是另行授权的
+   live 轨道，不因进入 V3 自动发生。修订 006 与 runner 通过独立 review 后再请求 migration 授权，
    不能默认追加 007。
 6. V5 worker、V6 UI、V7 两纵切按 Gate 逐步集成，但公共 Web Chat 始终 OFF。
 7. V8 完成后一次开放 v0.2；legacy redirect 仍另开后续计划。

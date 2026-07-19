@@ -12,13 +12,14 @@ Red lines (enforced by construction):
 * Subprocess uses the live venv python with ``cwd=worktree`` so the editable
   install's PathFinder resolves the V2 code from the worktree, not live main.
 
-Known real-Hermes contract divergences vs the fake suite (documented, not faked):
-* SSE ``data:`` carries ``seq`` for resume; ``event_id`` is a DB column and is
-  NOT on the wire (deferred from V2.11). Assertions use seq-level durability.
-* Live status names while running: ``completed``/``cancelled``; after restart the
-  store surfaces contract names ``succeeded``/``stopped``.
-* Live stop of an in-flight run first returns ``status=stopping``; terminal
-  ``stopped`` + ``idempotent_replay`` arrive after the agent is interrupted.
+Known real-Hermes contract details exercised here (documented, not faked):
+* SSE ``data:`` carries both the monotonic ``seq`` resume cursor and the stable
+  persisted ``event_id``; replay must preserve both across restart.
+* The public API exposes only ``queued/running/succeeded/failed/stopped``.
+  Internal ``completed/cancelled/waiting_for_approval/stopping`` names never
+  escape as top-level statuses.
+* Live stop of an in-flight run reports ``running`` with a ``stopping`` substate;
+  terminal ``stopped`` + ``idempotent_replay`` arrive after interruption.
 * Approval challenge TTL is hardcoded 300s — expiry is covered by white-box
   ``expires_at`` manipulation (not a 5-minute sleep).
 
@@ -40,7 +41,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import pytest
 
@@ -48,7 +49,6 @@ from hqa.hermes_run_adapter import (
     HermesRunError,
     OfficialHermesHttpAdapter,
     UrllibLoopbackHttpTransport,
-    evaluate_durable_run_availability,
 )
 
 # ---------------------------------------------------------------------------
@@ -735,10 +735,7 @@ def adapter(hermes) -> OfficialHermesHttpAdapter:
 
 
 def _wait_status(adapter, run_id: str, terminals=None, timeout_s: float = 30.0) -> str:
-    terminals = set(terminals or {
-        "completed", "failed", "cancelled",  # live names
-        "succeeded", "stopped",              # store/contract names (post-restart)
-    })
+    terminals = set(terminals or {"succeeded", "failed", "stopped"})
     deadline = time.time() + timeout_s
     last = None
     while time.time() < deadline:
@@ -884,11 +881,12 @@ class TestLiveStateSurvivesRestart:
         mock_llm.set_mode("primary_429")
         handle = adapter.submit_or_get(idempotency_key=_KEY, request_body=_BODY)
         status = _wait_status(adapter, handle.run_id)
-        assert status in {"completed", "succeeded"}
+        assert status == "succeeded"
 
         before = adapter.get_status(handle.run_id)
         before_events = [
-            (e.seq, e.event_type) for e in adapter.stream_events(handle.run_id)
+            (e.seq, e.event_type, e.event_id)
+            for e in adapter.stream_events(handle.run_id)
         ]
         assert before.fallback_reason is not None
         assert "fallback-y" in before.fallback_reason
@@ -897,6 +895,7 @@ class TestLiveStateSurvivesRestart:
         assert before.actual_policy is not None
         assert before.actual_policy.get("model") == "fallback-y"
         assert len(before_events) >= 1
+        assert all(event_id for _, _, event_id in before_events)
 
         # White-box: the store holds the same evidence.
         (row,) = hermes.wb_runs()
@@ -912,17 +911,17 @@ class TestLiveStateSurvivesRestart:
         )
         after = adapter2.get_status(handle.run_id)
         after_events = [
-            (e.seq, e.event_type) for e in adapter2.stream_events(handle.run_id)
+            (e.seq, e.event_type, e.event_id)
+            for e in adapter2.stream_events(handle.run_id)
         ]
 
-        # After restart the store surfaces the contract name 'succeeded'.
-        assert after.status in {"succeeded", "completed"}
+        assert after.status == "succeeded"
         assert after.requested_policy == before.requested_policy
         assert after.actual_policy == before.actual_policy
         assert after.fallback_reason == before.fallback_reason
-        # Canonical event plane: same (seq, type) sequence, gapless.
+        # Canonical event plane: same (seq, type, stable event_id), gapless.
         assert after_events == before_events
-        seqs = [s for s, _ in after_events]
+        seqs = [seq for seq, _, _ in after_events]
         assert seqs == list(range(seqs[0], seqs[0] + len(seqs)))
 
 
@@ -976,7 +975,7 @@ class TestLiveAuthorizedFallback:
         mock_llm.set_mode("primary_429")
         handle = adapter.submit_or_get(idempotency_key=_KEY, request_body=_BODY)
         status = _wait_status(adapter, handle.run_id)
-        assert status in {"completed", "succeeded"}
+        assert status == "succeeded"
         snap = adapter.get_status(handle.run_id)
         assert snap.requested_policy is not None
         assert snap.requested_policy.get("model") == "primary-x"
@@ -1050,17 +1049,23 @@ class TestLiveApprovalAndStop:
         assert len(grants_after) == 1
         assert int(grants_after[0]["consumed"] or 0) == 0
 
-        # Valid consume succeeds exactly once.
+        # Valid consume succeeds exactly once. An exact retry represents a lost
+        # acknowledgement and must replay the same durable decision without
+        # signalling or executing the gated action a second time.
         ok = adapter.respond_approval(
             handle.run_id, choice="once", challenge_id=ch_id, action_digest=digest
         )
-        assert ok.resolved >= 1
-        # Replay rejected; grant stays consumed=1.
-        with pytest.raises(HermesRunError) as exc2:
-            adapter.respond_approval(
-                handle.run_id, choice="once", challenge_id=ch_id, action_digest=digest
-            )
-        assert exc2.value.code == "approval_challenge_invalid"
+        assert ok.decision_status == "committed"
+        assert ok.waiter_signal_status == "confirmed"
+        assert ok.resolved == 0
+        assert ok.idempotent_replay is False
+        replay = adapter.respond_approval(
+            handle.run_id, choice="once", challenge_id=ch_id, action_digest=digest
+        )
+        assert replay.decision_status == "committed"
+        assert replay.waiter_signal_status == "confirmed"
+        assert replay.resolved == ok.resolved == 0
+        assert replay.idempotent_replay is True
         grants_final = hermes.wb_approvals(handle.run_id)
         assert int(grants_final[0]["consumed"] or 0) == 1
 
@@ -1107,14 +1112,7 @@ class TestLiveApprovalAndStop:
         first = adapter.stop(handle.run_id)
         # V2.14 / plan A6: idempotent stop reports the *actual* terminal fact
         # (succeeded/failed/stopped) — never coerce a succeeded run to stopped.
-        assert first.status in {
-            "stopped",
-            "stopping",
-            "cancelled",
-            "completed",
-            "succeeded",
-            "failed",
-        }
+        assert first.status in {"succeeded", "failed", "stopped"}
         second = adapter.stop(handle.run_id)
         assert second.status == first.status
         # At least one of the stops must advertise the replay (the post-terminal one).
@@ -1137,6 +1135,6 @@ class TestLiveApprovalAndStop:
         # Terminal fact unchanged by repeated stop across restart.
         assert row["status"] in {"succeeded", "failed", "stopped"}
         # If the run completed happily, stop must keep saying succeeded.
-        if terminal in {"completed", "succeeded"}:
+        if terminal == "succeeded":
             assert third.status == "succeeded"
             assert row["status"] == "succeeded"

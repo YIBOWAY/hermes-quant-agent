@@ -223,7 +223,10 @@ class ApprovalChallenge:
 class ApprovalResult:
     run_id: str
     choice: str
-    resolved: int
+    resolved: int = 0
+    decision_status: Optional[str] = None
+    waiter_signal_status: Optional[str] = None
+    idempotent_replay: bool = False
 
 
 @dataclass(frozen=True)
@@ -324,6 +327,8 @@ class _ApprovalGrant:
         self.action_digest = action_digest
         self.expires_at = expires_at
         self.consumed = False
+        self.choice: Optional[str] = None
+        self.resolved = 0
 
 
 class _InMemoryRunAuthority:
@@ -381,6 +386,8 @@ class _InMemoryRunAuthority:
                     "action_digest": g.action_digest,
                     "expires_at": g.expires_at,
                     "consumed": g.consumed,
+                    "choice": g.choice,
+                    "resolved": g.resolved,
                 }
                 for g in self._approvals.values()
             ],
@@ -415,6 +422,8 @@ class _InMemoryRunAuthority:
         for gd in payload.get("approvals", []):
             grant = _ApprovalGrant(gd["challenge_id"], gd["run_id"], gd["action_digest"], gd["expires_at"])
             grant.consumed = gd.get("consumed", False)
+            grant.choice = gd.get("choice")
+            grant.resolved = int(gd.get("resolved", 0))
             authority._approvals[grant.challenge_id] = grant
         return authority
 
@@ -482,6 +491,36 @@ class _InMemoryRunAuthority:
             record.updated_at = time.time()
             self._persist()
 
+    def stop(self, run_id: str) -> StopResult:
+        """Atomically commit one cancellation or identify a terminal replay.
+
+        The status read, cancellation event and terminal transition share one
+        authority lock. Concurrent callers therefore cannot both observe an
+        in-flight run and append duplicate cancellation facts.
+        """
+        with self._lock:
+            record = self.require_run(run_id)
+            if record.status in _TERMINAL:
+                return StopResult(
+                    run_id=run_id,
+                    status=record.status,
+                    idempotent_replay=True,
+                )
+            seq = (record.events[-1].seq + 1) if record.events else 1
+            record.events.append(
+                StreamEvent(
+                    seq=seq,
+                    event_type="run.cancelled",
+                    run_id=run_id,
+                    payload={},
+                    event_id=f"evt_{uuid.uuid4().hex}",
+                )
+            )
+            record.status = "stopped"
+            record.updated_at = time.time()
+            self._persist()
+            return StopResult(run_id=run_id, status="stopped")
+
     # -- events (semantic 4) --------------------------------------------------
     def append_event(self, run_id: str, event_type: str, payload: Mapping[str, Any]) -> StreamEvent:
         with self._lock:
@@ -517,18 +556,34 @@ class _InMemoryRunAuthority:
                 expires_at=challenge.expires_at,
             )
 
-    def consume_approval(self, challenge_id: str, *, action_digest: str) -> bool:
+    def consume_approval(
+        self, challenge_id: str, *, action_digest: str, choice: str
+    ) -> Optional[bool]:
+        """Commit an approval decision or identify its exact durable replay.
+
+        ``False`` means this call committed the first decision, ``True`` means
+        it is the same decision replayed after a lost acknowledgement, and
+        ``None`` means the challenge is invalid/stale/mismatched.  A consumed
+        decision remains replayable after its original TTL because the durable
+        fact, rather than the once-live grant, is now authoritative.
+        """
         with self._lock:
             grant = self._approvals.get(challenge_id)
-            if grant is None or grant.consumed:
-                return False
+            if grant is None:
+                return None
+            if grant.consumed:
+                if grant.action_digest == action_digest and grant.choice == choice:
+                    return True
+                return None
             if grant.action_digest != action_digest:
-                return False
+                return None
             if grant.expires_at <= time.time():
-                return False
+                return None
             grant.consumed = True
+            grant.choice = choice
+            grant.resolved = 0
             self._persist()
-            return True
+            return False
 
     # -- reconcile (semantic 9) ------------------------------------------------
     def reconcile(self) -> int:
@@ -708,25 +763,65 @@ class ScriptedFakeHermesAdapter(HermesRunPort):
                 "approval_challenge_invalid",
                 "Approval challenge is stale, expired, already used, or mismatched",
             )
-        if not self._authority.consume_approval(challenge_id, action_digest=action_digest):
+        replayed = self._authority.consume_approval(
+            challenge_id, action_digest=action_digest, choice=choice
+        )
+        if replayed is None:
             raise HermesRunError(
                 "approval_challenge_invalid",
                 "Approval challenge is stale, expired, already used, or mismatched",
             )
-        self._authority.append_event(run_id, "approval.responded", {"choice": choice, "resolved": 1})
-        return ApprovalResult(run_id=run_id, choice=choice, resolved=1)
+        if not replayed:
+            self._authority.append_event(
+                run_id,
+                "approval.responded",
+                {
+                    "choice": choice,
+                    "decision_status": "committed",
+                    "waiter_signal_status": "unknown",
+                },
+            )
+            self._authority.append_event(
+                run_id,
+                "approval.release_committed",
+                {
+                    "choice": choice,
+                    "decision_status": "committed",
+                    "waiter_signal_status": "unknown",
+                },
+            )
+            self._authority.append_event(
+                run_id,
+                "approval.signalled",
+                {
+                    "choice": choice,
+                    "decision_status": "committed",
+                    "waiter_signal_status": "confirmed",
+                },
+            )
+        return ApprovalResult(
+            run_id=run_id,
+            choice=choice,
+            resolved=0,
+            decision_status="committed",
+            waiter_signal_status="confirmed",
+            idempotent_replay=replayed,
+        )
 
     def stop(self, run_id: str) -> StopResult:
-        record = self._authority.require_run(run_id)
-        if record.status in _TERMINAL:
-            # Idempotent: a known terminal run never 404s; repeat stop returns
-            # the same result.
-            return StopResult(run_id=run_id, status="stopped", idempotent_replay=True)
-        # Drive the (single, synchronous) run straight to its terminal stopped
-        # state so a repeat stop is byte-for-byte idempotent.
-        self._authority.append_event(run_id, "run.cancelled", {})
-        self._authority.set_status(run_id, "stopped")
-        return StopResult(run_id=run_id, status="stopped")
+        result = self._authority.stop(run_id)
+        if (
+            ScriptedFault.PARTIAL_STOP in self._faults
+            and not result.idempotent_replay
+        ):
+            # Model an accepted stop whose durable commit succeeded but whose
+            # acknowledgement was lost. Recovery by run ID must see the
+            # terminal fact and classify the retry as an idempotent replay.
+            raise HermesRunError(
+                "transport_error",
+                "stop committed but acknowledgement was lost",
+            )
+        return result
 
     def capabilities(self) -> Mapping[str, Any]:
         grounded = {
@@ -942,28 +1037,30 @@ class OfficialHermesHttpAdapter(HermesRunPort):
 
     def __init__(self, *, transport: UrllibLoopbackHttpTransport) -> None:
         self._transport = transport
-        self._availability_checked = False
 
     def _ensure_durable_dispatch_open(self) -> None:
-        """Fail closed once per adapter instance before any mutating call.
+        """Fail closed against the current capability state before mutation.
 
-        Cached after the first successful open so a long-lived adapter does not
-        re-hit ``/v1/capabilities`` on every submit; a failed check never
-        caches, so a later canary flip can open the gate on retry.
+        Capability state is a runtime canary, not immutable adapter metadata.
+        Re-read it for every mutation so an ON-to-OFF transition closes an
+        already-used adapter before another POST can escape.
         """
-        if self._availability_checked:
-            return
         self.require_durable_available()
-        self._availability_checked = True
 
     def submit_or_get(self, *, idempotency_key: Optional[str], request_body: Mapping[str, Any]) -> RunHandle:
         self._ensure_durable_dispatch_open()
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         _, payload = self._transport.post_json("/v1/runs", dict(request_body), headers=headers)
         run_id = str(payload["run_id"])
-        # Reviewed contract: created -> {"run_id","status":"started"}; replay ->
-        # {"run_id","status":"recovered","idempotent_replay":True,...}.
-        created = payload.get("status") == "started" and payload.get("idempotent_replay") is not True
+        # Creation/recovery is orthogonal to the canonical five-state run
+        # lifecycle. New servers return ``status=queued`` while older reviewed
+        # servers used ``started``/``recovered`` pseudo-statuses. Prefer the
+        # explicit replay bit and retain the legacy recovered fallback.
+        replayed = (
+            payload.get("idempotent_replay") is True
+            or payload.get("status") == "recovered"
+        )
+        created = not replayed
         return RunHandle(run_id=run_id, created=created, idempotency_key=idempotency_key)
 
     def get_status(self, run_id: str) -> RunStatusSnapshot:
@@ -989,7 +1086,11 @@ class OfficialHermesHttpAdapter(HermesRunPort):
             seq = frame.get("seq")
             if seq is None:
                 continue
-            payload = {k: v for k, v in frame.items() if k not in {"seq", "event", "run_id"}}
+            payload = {
+                key: value
+                for key, value in frame.items()
+                if key not in {"seq", "event", "run_id", "event_id"}
+            }
             events.append(StreamEvent(
                 seq=int(seq), event_type=str(frame.get("event", "message")),
                 run_id=str(frame.get("run_id", run_id)), payload=payload,
@@ -1002,7 +1103,20 @@ class OfficialHermesHttpAdapter(HermesRunPort):
         body = {"choice": choice, "challenge_id": challenge_id, "action_digest": action_digest}
         _, payload = self._transport.post_json(f"/v1/runs/{run_id}/approval", body)
         return ApprovalResult(
-            run_id=run_id, choice=choice, resolved=int(payload.get("resolved", 0)),
+            run_id=run_id,
+            choice=choice,
+            resolved=int(payload.get("resolved", 0)),
+            decision_status=(
+                str(payload["decision_status"])
+                if payload.get("decision_status") is not None
+                else None
+            ),
+            waiter_signal_status=(
+                str(payload["waiter_signal_status"])
+                if payload.get("waiter_signal_status") is not None
+                else None
+            ),
+            idempotent_replay=bool(payload.get("idempotent_replay", False)),
         )
 
     def stop(self, run_id: str) -> StopResult:

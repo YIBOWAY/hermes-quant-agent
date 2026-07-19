@@ -3,7 +3,7 @@
 这份文件只回答三个问题：**现在按哪份计划做、实际做到哪里、其他文档该怎么读**。
 长期方向、历史实现细节和特定日期审计分别留在 roadmap、plan 和 audit 中。
 
-> 事实快照：2026-07-16。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
+> 事实快照：2026-07-19。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
 > 必须重新检查 git、进程、HTTP smoke 和测试。
 
 ## 当前执行入口
@@ -12,7 +12,7 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。**V0 HQA-side DONE / 三仓 PENDING → V0 NOT DONE**，公共写端仍 OFF。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。V1 代码基线已对抗收口但 live DB role/RLS 仍 PARTIAL；V2 隔离代码已独立 ACCEPT，尚未安装 live。公共写端仍 OFF。 |
 | V0 Workspace v1 candidate ADR | [`design/2026-07-16-agent-workspace-v1-adr.md`](design/2026-07-16-agent-workspace-v1-adr.md) | **HQA-side DONE / 三仓 PENDING → V0 NOT DONE**；HQA 侧 executable contracts 已交付（5 模块+622 测试绿），三仓 manifest/primary validation/cross-review 待完成（见 `audits/2026-07-17-v0-three-repo-cross-review.md`）。 |
 | Wave 3 前序交付记录 | [`superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`](superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md) | 3A/3B、reconcile-only 3C、3C.1 code acceptance、3E-A 与 3F mechanism 的历史交付证据和 blocker 输入；不是当前执行队列。 |
 | 本机 Hermes 集成决策 | [`design/2026-07-15-local-hermes-integration-decision.md`](design/2026-07-15-local-hermes-integration-decision.md) | 正式方向是 platform BFF → PostgreSQL durable ledger → deterministic HQA worker → official Hermes API；禁止 Hermes/LLM cron 空轮询。 |
@@ -29,7 +29,10 @@
 
 **Phase 1a-4 / 9H 已收口；D-31 已交付真实 Hermes 会话只读、durable ledger、reconcile-only
 worker、3C.1 代码地基和 3E-A 只读 Unified Results。当前执行主线已由 D-32 收敛为真正 Agent
-v0.2 + 完整 `/hermes` Web Chat；公共网页写端仍关闭。** V0 将冻结最终 Interface、权威与
+v0.2 + 完整 `/hermes` Web Chat；公共网页写端仍关闭。** V0 已交付 HQA contracts，但三仓
+manifest/primary validation/cross-review 尚未收口；V1 代码基线和 V2 isolated durable authority
+已完成 fresh adversarial code acceptance。V1.2 的 live `quant` role 仍为 superuser/bypassrls，
+V2 也尚未受控安装到 live Hermes，因此两者都不能被写成 live release。V0 将冻结最终 Interface、权威与
 ordinary turn / Research Task / Attempt / submission Command / Run cardinality。已发现当前 migration 006 的 `UNIQUE(task_id)` 与一个
 Task 多 Attempt 的目标冲突，因此不得继续按旧顺序单独 live apply 006；必须先完成 schema
 修正、migration guard 和独立复核。Discord 保持当前可用入口，但不是临时网页方案或 fallback；
@@ -48,7 +51,7 @@ Discord/历史 session 在 Web 只读，网页写入只能新建或显式 fork �
 | 3C deterministic worker | **FRAMEWORK DONE / reconcile-only** | 安装 wrapper `--once` 与 live `LISTEN/NOTIFY` 两周期通过；零 Hermes mutation/provider。 |
 | 3C.1 Task/Attempt + payload + exact binding | **FOUNDATION ACCEPTED / SCHEMA REVISION REQUIRED** | HQA append-only journal、projection/replay/CAS、payload、跨权威 saga/reverse audit 已代码验收；但 migration 006 的 `UNIQUE(task_id)` 不能支持 multi-Attempt research。live 未 apply；当前 runner 会重放旧 SQL，因此须修订未上线的 006 并重做完整验收，不能默认追加 007；worker 仍不 claim。 |
 | Browser Gate 2 mutation | **ROLLED BACK / OFF** | 初版会 refetch digest/status，违反 HQA Gate 1 exact binding 与 Gate 2 no-refetch；Approvals 当前只读。 |
-| Hermes chat/stream/resume/stop | **BLOCKED（九项 live blocker）** | 平台 ledger 不等于 upstream request recovery、Run/event/provider/approval/stop 语义已具备。 |
+| Hermes chat/stream/resume/stop | **V2 ISOLATED CODE ACCEPTED / LIVE OFF** | 九项 canonical durable 语义、HQA adapter 和 approval/provider evidence 已在 integration worktree 对抗验收；live Hermes 仍是旧安装且 durable OFF，所以 Web write/release 继续 BLOCKED。 |
 | Unified Results 3E-A | **DONE（只读实现 + 本机验收）** | 统一索引、动态详情、权威源回链和 exact Run-link 投影已交付；不复制领域真相。独立 Hermes research Run 结果与 full cutover 仍受 3D/用户验收门阻断，`unifiedResultsCutoverAccepted=false`。 |
 | Legacy page redirects/deletion | **MECHANISM ONLY / DEFAULT OFF** | Agent Studio 有独立可回滚 redirect 机制但默认 OFF；exact digest-bound audit parity 与用户 cutover 批准仍缺。Factor Lab / Backtester / Experiments 仍承载写任务，不可退；全局 `legacyRedirects=false`。 |
 | 交易执行 | **OFF** | `paper_trading` / `live_trading_enabled=false` / kill switch / 人工门不变。 |
@@ -161,7 +164,9 @@ actual provider/fallback/usage evidence、approval TTL/digest/single-use 和幂�
 
 live gateway 仍报告九项 3D blocker：提交非幂等、请求不可恢复、无 event ID、无 event replay、
 Run 状态不持久、provider policy 不可变、无 actual provider 证据、approval 无 exact binding、
-stop 不可对账。因此 3D 保持 **BLOCKED**。
+stop 不可对账。这里描述的是仍运行 `916f5fbf5452`、durable OFF 的 live 进程，不是最新
+integration worktree。V2 已在隔离代码中闭合这些语义并获独立 ACCEPT，但未获 install/canary
+授权，因此 3D/public composer 仍保持 **BLOCKED/OFF**。
 
 ### 3C.1 代码验收与 live 激活边界（2026-07-16）
 
@@ -186,11 +191,13 @@ stop 不可对账。因此 3D 保持 **BLOCKED**。
    HQA 侧 executable contracts 已交付（5 模块 + 622 测试全绿）；三仓 manifest 一致性、primary
    validation 与三仓 cross-review 均 pending（见 `audits/2026-07-17-v0-three-repo-cross-review.md`），
    当前零 live mutation。
-2. **V1 Stop-the-line baseline。** 第一项修复默认 auto migration；随后清零 standard
-   verify/offline build、transcript/DLP、APR/sample provenance 等 launch 基线。
-3. **V2 Hermes DurableRunAuthority 与 V3 HQA WorkflowAuthority。** 接口冻结后可并行；一个
-   解决 canonical Run/idempotency/replay/provider/approval/stop，另一个补完整 Task/Attempt/
-   payload/Gate/result lifecycle。只在隔离状态和 fake adapter 上开发。
+2. **V1 Stop-the-line baseline：代码收口，live DB role PARTIAL。** startup migration、语义
+   fingerprint、fail-closed migrate、transcript/DLP 与浏览器 metadata 泄漏已修复并全量验收；
+   migration 006 仍未 apply，`quant` role provisioning/RLS 需独立任务和授权。
+3. **V2 Hermes DurableRunAuthority：isolated code ACCEPTED / live OFF。** canonical Run、
+   idempotency/replay、provider response receipt、approval release/signal 与 stop 已收口；最新代码
+   仍是 integration dirty worktree。先完成提交/三仓 manifest 对齐；受控 live install/canary 必须
+   另获授权。V3 HQA WorkflowAuthority 尚未开始。
 4. **V4 PostgreSQL schema/BFF/security。** 先完成代码、cardinality 与隔离 PostgreSQL
    验收，再请求修正后 migration 的单独 live 授权；apply 后仍不开放 dispatch。
 5. **V5 supervised worker、V6 最终 Workspace UI、V7 decisions/results/two vertical

@@ -322,14 +322,17 @@ class TestAcceptance6ApprovalAndStopIdempotency:
         fake, _ = _durable_fake(tmp_path)
         handle = fake.submit_or_get(idempotency_key=_KEY, request_body=_BODY)
         ch = fake.raise_approval(handle.run_id)
-        fake.respond_approval(
+        first = fake.respond_approval(
             handle.run_id, choice="once", challenge_id=ch.challenge_id, action_digest=ch.action_digest,
         )
-        with pytest.raises(HermesRunError) as exc:
-            fake.respond_approval(
-                handle.run_id, choice="once", challenge_id=ch.challenge_id, action_digest=ch.action_digest,
-            )
-        assert exc.value.code == "approval_challenge_invalid"
+        replay = fake.respond_approval(
+            handle.run_id, choice="once", challenge_id=ch.challenge_id, action_digest=ch.action_digest,
+        )
+        assert first.idempotent_replay is False
+        assert replay.idempotent_replay is True
+        assert first.decision_status == replay.decision_status == "committed"
+        assert first.waiter_signal_status == replay.waiter_signal_status == "confirmed"
+        assert replay.resolved == first.resolved == 0
         # The replay appended nothing: exactly ONE approval.responded event.
         assert len(_approval_events(fake, handle.run_id)) == 1
 
@@ -345,7 +348,8 @@ class TestAcceptance6ApprovalAndStopIdempotency:
         ok = fake.respond_approval(
             handle.run_id, choice="once", challenge_id=ch.challenge_id, action_digest=ch.action_digest,
         )
-        assert ok.resolved >= 1
+        assert ok.decision_status == "committed"
+        assert ok.waiter_signal_status == "confirmed"
         assert len(_approval_events(fake, handle.run_id)) == 1
 
     def test_stale_does_not_consume_grant(self, tmp_path) -> None:
@@ -364,7 +368,8 @@ class TestAcceptance6ApprovalAndStopIdempotency:
         ok = fake.respond_approval(
             handle.run_id, choice="once", challenge_id=ch.challenge_id, action_digest=ch.action_digest,
         )
-        assert ok.resolved >= 1
+        assert ok.decision_status == "committed"
+        assert ok.waiter_signal_status == "confirmed"
         assert len(_approval_events(fake, handle.run_id)) == 1
 
     def test_expired_grant_rejected_and_fact_unchanged(self, tmp_path) -> None:

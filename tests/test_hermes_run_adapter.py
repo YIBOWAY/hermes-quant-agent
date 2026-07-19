@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 import pytest
 
@@ -126,6 +126,10 @@ class TestEventPlane:
         assert isinstance(events[0], StreamEvent)
         assert seqs == sorted(seqs), "monotonic"
         assert len(set(seqs)) == len(seqs), "no duplicates"
+        assert all(event.event_id for event in events), "stable event identity"
+        assert all(
+            "event_id" not in event.payload for event in events
+        ), "event identity is envelope metadata, not duplicated payload"
 
     def test_replay_from_cursor_returns_strictly_after(
         self, adapter: HermesRunPort
@@ -202,19 +206,41 @@ class TestFakeLifecycleAndSemantics:
             challenge_id=challenge.challenge_id,
             action_digest=challenge.action_digest,
         )
-        assert result.resolved >= 1
+        assert result.decision_status == "committed"
+        assert result.waiter_signal_status == "confirmed"
+        assert result.resolved == 0
 
-    def test_approval_replay_rejected(self) -> None:
-        fake = ScriptedFakeHermesAdapter()
+    def test_exact_approval_replay_is_idempotent_across_restart(self, tmp_path) -> None:
+        snapshot = str(tmp_path / "authority.json")
+        fake = ScriptedFakeHermesAdapter(snapshot)
         handle = fake.submit_or_get(idempotency_key=_KEY, request_body=_BODY)
         challenge = fake.raise_approval(handle.run_id)
-        fake.respond_approval(
+        first = fake.respond_approval(
             handle.run_id, choice="once",
             challenge_id=challenge.challenge_id, action_digest=challenge.action_digest,
         )
+        recovered = ScriptedFakeHermesAdapter(snapshot)
+        replay = recovered.respond_approval(
+            handle.run_id, choice="once",
+            challenge_id=challenge.challenge_id,
+            action_digest=challenge.action_digest,
+        )
+
+        assert first.idempotent_replay is False
+        assert replay.idempotent_replay is True
+        assert first.decision_status == replay.decision_status == "committed"
+        assert first.waiter_signal_status == replay.waiter_signal_status == "confirmed"
+        assert replay.resolved == first.resolved == 0
+        responded = [
+            event
+            for event in recovered.stream_events(handle.run_id)
+            if event.event_type == "approval.responded"
+        ]
+        assert len(responded) == 1
+
         with pytest.raises(HermesRunError) as exc:
-            fake.respond_approval(
-                handle.run_id, choice="once",
+            recovered.respond_approval(
+                handle.run_id, choice="always",
                 challenge_id=challenge.challenge_id,
                 action_digest=challenge.action_digest,
             )
@@ -237,6 +263,79 @@ class TestFakeLifecycleAndSemantics:
         fake.mark_running(handle.run_id)  # simulate crash mid-run
         fake.reconcile()
         assert fake.get_status(handle.run_id).status == "stopped"
+
+    @pytest.mark.parametrize("terminal_status", ["succeeded", "failed"])
+    def test_stop_preserves_an_existing_terminal_result(
+        self, terminal_status: str
+    ) -> None:
+        fake = ScriptedFakeHermesAdapter()
+        handle = fake.submit_or_get(idempotency_key=_KEY, request_body=_BODY)
+        fake.drive_to_terminal(handle.run_id, outcome=terminal_status)
+        before = list(fake.stream_events(handle.run_id))
+
+        first = fake.stop(handle.run_id)
+        second = fake.stop(handle.run_id)
+
+        assert first.status == terminal_status
+        assert first.idempotent_replay is True
+        assert second == first
+        assert fake.get_status(handle.run_id).status == terminal_status
+        assert fake.stream_events(handle.run_id) == before
+
+    def test_concurrent_stop_has_one_first_result_and_one_replay(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = ScriptedFakeHermesAdapter()
+        handle = fake.submit_or_get(idempotency_key=_KEY, request_body=_BODY)
+        fake.mark_running(handle.run_id)
+
+        # Deterministically expose the former read/append/set race.  The old
+        # adapter path called append_event only after reading a non-terminal
+        # status, so this barrier forced both callers past that stale read.
+        # The atomic authority.stop() path never crosses this legacy seam.
+        legacy_append = fake._authority.append_event  # noqa: SLF001
+        legacy_race = threading.Barrier(2)
+
+        def append_after_both_old_callers_read_status(
+            run_id: str, event_type: str, payload: Mapping[str, Any]
+        ) -> StreamEvent:
+            if event_type == "run.cancelled":
+                legacy_race.wait(timeout=2)
+            return legacy_append(run_id, event_type, payload)
+
+        monkeypatch.setattr(
+            fake._authority,  # noqa: SLF001
+            "append_event",
+            append_after_both_old_callers_read_status,
+        )
+        start = threading.Barrier(3)
+        results: list[StopResult] = []
+        errors: list[BaseException] = []
+
+        def stop_at_once() -> None:
+            start.wait()
+            try:
+                results.append(fake.stop(handle.run_id))
+            except BaseException as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+
+        workers = [threading.Thread(target=stop_at_once) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        start.wait()
+        for worker in workers:
+            worker.join(timeout=2)
+
+        assert all(not worker.is_alive() for worker in workers)
+        assert errors == []
+        assert [result.idempotent_replay for result in results].count(False) == 1
+        assert [result.idempotent_replay for result in results].count(True) == 1
+        cancelled = [
+            event
+            for event in fake.stream_events(handle.run_id)
+            if event.event_type == "run.cancelled"
+        ]
+        assert len(cancelled) == 1
 
 
 class TestScriptedFaults:
@@ -278,17 +377,31 @@ class TestScriptedFaults:
             )
         assert exc.value.code == "approval_challenge_invalid"
 
-    def test_partial_stop_leaves_run_addressable_and_idempotent(self) -> None:
-        fake = ScriptedFakeHermesAdapter()
+    def test_partial_stop_leaves_run_addressable_and_idempotent(self, tmp_path) -> None:
+        snapshot = str(tmp_path / "authority.json")
+        fake = ScriptedFakeHermesAdapter(snapshot)
         handle = fake.submit_or_get(idempotency_key=_KEY, request_body=_BODY)
         fake.mark_running(handle.run_id)
         fake.inject(ScriptedFault.PARTIAL_STOP)
-        first = fake.stop(handle.run_id)
-        # A partial stop must not orphan the run: it stays addressable and a
-        # repeat stop returns the SAME result (never a 404 / lost run).
+
+        with pytest.raises(HermesRunError) as exc:
+            fake.stop(handle.run_id)
+
+        assert exc.value.code == "transport_error"
+        # The authority committed before the ACK was lost. Recovery by run ID
+        # observes a durable stop and does not append a second cancellation.
+        assert fake.get_status(handle.run_id).status == "stopped"
         again = fake.stop(handle.run_id)
-        assert again.status == first.status
-        assert fake.get_status(handle.run_id).run_id == handle.run_id
+        assert again.status == "stopped"
+        assert again.idempotent_replay is True
+        recovered = ScriptedFakeHermesAdapter(snapshot)
+        assert recovered.stop(handle.run_id).idempotent_replay is True
+        cancelled = [
+            event
+            for event in recovered.stream_events(handle.run_id)
+            if event.event_type == "run.cancelled"
+        ]
+        assert len(cancelled) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +512,10 @@ class _ScriptedUpstreamServer:
             handle = self._fake.submit_or_get(idempotency_key=key, request_body=body)
             payload = {
                 "run_id": handle.run_id,
-                "status": "started" if handle.created else "recovered",
+                # The public run contract exposes only canonical lifecycle
+                # states. Creation vs recovery is carried independently by
+                # idempotent_replay, never by pseudo-status names.
+                "status": "queued",
             }
             if not handle.created:
                 payload["idempotent_replay"] = True
@@ -422,7 +538,10 @@ class _ScriptedUpstreamServer:
             )
             h._send(200, {
                 "object": "hermes.run.approval_response", "run_id": run_id,
-                "choice": body.get("choice"), "resolved": result.resolved,
+                "choice": body.get("choice"),
+                "decision_status": result.decision_status,
+                "waiter_signal_status": result.waiter_signal_status,
+                "idempotent_replay": result.idempotent_replay,
             })
             return
         h._error(404, "not_found", "unknown path")
@@ -467,7 +586,12 @@ class _ScriptedUpstreamServer:
         h.send_header("X-Accel-Buffering", "no")
         h.end_headers()
         for e in events:
-            frame = {"seq": e.seq, "event": e.event_type, **e.payload}
+            frame = {
+                "seq": e.seq,
+                "event": e.event_type,
+                "event_id": e.event_id,
+                **e.payload,
+            }
             h.wfile.write(
                 f"id: {e.seq}\nevent: {e.event_type}\ndata: {json.dumps(frame)}\n\n".encode()
             )
@@ -618,6 +742,44 @@ class TestPortDurableAvailabilityGate:
         assert exc.value.code == "durable_unavailable"
         assert "ungrounded:approval_cas" in exc.value.message
 
+    @pytest.mark.parametrize(
+        ("legacy_status", "expected_created"),
+        [("started", True), ("recovered", False)],
+    )
+    def test_http_adapter_keeps_legacy_submit_status_compatibility(
+        self, legacy_status: str, expected_created: bool
+    ) -> None:
+        """Older reviewed servers used pseudo-statuses for create/replay.
+
+        The canonical contract now uses ``queued`` plus ``idempotent_replay``,
+        but retaining this fallback prevents a mixed-version rollout from
+        accidentally treating a recovered run as a fresh execution.
+        """
+
+        class _LegacySubmitTransport:
+            def get_json(self, path: str, *, headers=None):
+                assert path == "/v1/capabilities"
+                return {
+                    "object": "hermes.api_server.capabilities",
+                    "contract_version": 1,
+                    "durable": _full_grounded_durable(),
+                }
+
+            def post_json(self, path: str, body, *, headers=None):
+                assert path == "/v1/runs"
+                return 202, {"run_id": "run_legacy", "status": legacy_status}
+
+        adapter = OfficialHermesHttpAdapter(  # type: ignore[arg-type]
+            transport=_LegacySubmitTransport()
+        )
+
+        handle = adapter.submit_or_get(
+            idempotency_key="legacy-key", request_body={"input": "hello"}
+        )
+
+        assert handle.run_id == "run_legacy"
+        assert handle.created is expected_created
+
     def test_http_adapter_submit_structurally_gated_when_dormant(self) -> None:
         """Mutating entrypoints must not POST when durable is unavailable.
 
@@ -659,6 +821,86 @@ class TestPortDurableAvailabilityGate:
         with pytest.raises(HermesRunError) as exc3:
             adapter.stop("run_x")
         assert exc3.value.code == "durable_unavailable"
+        assert transport.posts == 0
+
+    @pytest.mark.parametrize("mutation", ["submit", "approval", "stop"])
+    def test_http_adapter_rechecks_capabilities_before_every_mutation(
+        self, mutation: str
+    ) -> None:
+        """A canary flip to dormant closes an already-used adapter immediately."""
+
+        class _OpenThenDormant:
+            def __init__(self) -> None:
+                self.capability_reads = 0
+                self.posts = 0
+
+            def get_json(self, path: str, *, headers=None):
+                assert path == "/v1/capabilities"
+                self.capability_reads += 1
+                if self.capability_reads == 1:
+                    return {
+                        "object": "hermes.api_server.capabilities",
+                        "contract_version": 1,
+                        "durable": _full_grounded_durable(),
+                    }
+                return {
+                    "object": "hermes.api_server.capabilities",
+                    "platform": "hermes-agent",
+                    "features": {"run_submission": True},
+                }
+
+            def post_json(self, path: str, body, *, headers=None):
+                self.posts += 1
+                if path == "/v1/runs":
+                    return 202, {"run_id": "run_1", "status": "started"}
+                if path.endswith("/approval"):
+                    return 200, {"run_id": "run_1", "resolved": 1}
+                if path.endswith("/stop"):
+                    return 200, {"run_id": "run_1", "status": "stopped"}
+                raise AssertionError(path)
+
+        transport = _OpenThenDormant()
+        adapter = OfficialHermesHttpAdapter(transport=transport)  # type: ignore[arg-type]
+
+        def mutate() -> object:
+            if mutation == "submit":
+                return adapter.submit_or_get(
+                    idempotency_key="k", request_body={"input": "x"}
+                )
+            if mutation == "approval":
+                return adapter.respond_approval(
+                    "run_1", choice="once", challenge_id="c", action_digest="d"
+                )
+            return adapter.stop("run_1")
+
+        mutate()
+        with pytest.raises(HermesRunError) as exc:
+            mutate()
+
+        assert exc.value.code == "durable_unavailable"
+        assert transport.capability_reads == 2
+        assert transport.posts == 1
+
+    def test_capability_transport_error_blocks_post(self) -> None:
+        class _CapabilityReadFails:
+            def __init__(self) -> None:
+                self.posts = 0
+
+            def get_json(self, path: str, *, headers=None):
+                assert path == "/v1/capabilities"
+                raise HermesRunError("transport_error", "capability read failed")
+
+            def post_json(self, path: str, body, *, headers=None):
+                self.posts += 1
+                raise AssertionError(f"must not POST after capability failure: {path}")
+
+        transport = _CapabilityReadFails()
+        adapter = OfficialHermesHttpAdapter(transport=transport)  # type: ignore[arg-type]
+
+        with pytest.raises(HermesRunError) as exc:
+            adapter.submit_or_get(idempotency_key="k", request_body={"input": "x"})
+
+        assert exc.value.code == "transport_error"
         assert transport.posts == 0
 
     def test_http_adapter_reads_ungated_when_dormant(self) -> None:

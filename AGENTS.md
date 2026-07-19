@@ -50,7 +50,19 @@ Rules for AI agents working in this repository.
   and cross-review are pending. Current evidence and the three-repo audit are
   `docs/audits/2026-07-17-v0-three-repo-cross-review.md`; keep `chat_write_ready`,
   browser mutation, worker claim/dispatch and public composer OFF. Wave
-  3D chat remains BLOCKED. Wave
+  3D chat remains BLOCKED at runtime. V1 startup migration/DLP/semantic schema
+  fingerprint remediation is code-accepted, but live V1.2 role/RLS is PARTIAL:
+  migration 006 is absent and `quant` remains superuser/bypassrls. V2
+  `DurableRunAuthority` is independently ACCEPTED only in the dirty controlled
+  Hermes integration worktree (`b3343a658` base): five public states, stable
+  event IDs/cursors, atomic terminal facts, exact approval
+  decision/release-commit/signal evidence, stop fencing, and response-receipt-only
+  provider evidence are delivered with 408 related tests plus 436 real
+  conversation-loop tests green. HQA full is 1531 passed / 2 skipped. Live
+  Hermes remains unchanged at `916f5fbf5`, durable OFF; do not install/restart,
+  enable Web writes, or start V3 by treating isolated dirty code as released.
+  The latest V2 close-out in the active plan supersedes older same-day V2
+  addenda and old `resolved`/`approval.delivered` semantics. Wave
   3E-A has delivered and locally accepted the read-only Unified Results catalog,
   details and exact-link projection; independent Hermes research Run results and
   full results cutover remain blocked. Wave 3F has only a page-scoped,
