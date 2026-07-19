@@ -19,31 +19,41 @@ D-31 has since delivered the official API GET-only session BFF (3A), PostgreSQL
 command/event/outbox/run-link ledger with claim/lease/heartbeat primitives (3B),
 and a deterministic connector notify/scan/expired-lease reconcile runtime (3C).
 The runtime does not claim queued commands and remains reconcile-only. Agent v0.2
-V2 now has an independently accepted durable Run/approval/provider-evidence
-implementation in the controlled Hermes integration worktree, but the live Hermes
-install is unchanged and durable OFF; real Web submission, claim/dispatch and approval
-mutations therefore remain blocked. Slice 3C.1 has a code-accepted append-only Task/Attempt
+V2 now has an independently accepted and pushed durable Run/approval/provider-evidence
+source candidate at Hermes integration `codex/v2-live-integration@2eb5fa27790f`.
+It is not the live runtime: the 2026-07-19 process is upstream
+`main@c0c76a471533` (PID `96807`, health `0.18.2`), while launchd and the install
+stamp are stale, the stamp still names `916f5fbf5452`, and
+`gateway/durable_runs.py` is absent. Durable runs, real Web submission,
+claim/dispatch and approval mutations therefore remain OFF. Slice 3C.1 has a
+code-accepted append-only Task/Attempt
 authority, immutable content-addressed payloads, exact cross-authority bindings,
 and reverse audit. Platform migration 006 has not been applied to the live database;
 a later v0.2 review found its `UNIQUE(task_id)` incompatible with multi-Attempt
 research. Because the current runner replays old SQL, the selected fix is to revise
 the never-live 006 and redo its full evidence—not assume a later 007 can repair it—
 before any live authorization.
-Slice V0 (interface/cardinality/authority freeze) is HQA-side DONE and merged into
-`codex/full-9h`: the five `hqa/agent_workspace_*` contract modules (act/snapshot/follow,
-closed `UserActionV1` union, authority matrix, error taxonomy, retention) ship with 622
-contract tests green, plus a fail-closed fix for the event-timestamp normalizer. V0
-overall stays NOT DONE — three-repo manifest consistency, primary validation and
-cross-review are pending (see
-[`docs/audits/2026-07-17-v0-three-repo-cross-review.md`](docs/audits/2026-07-17-v0-three-repo-cross-review.md));
-all live write gates remain OFF.
+Slice V0 (interface/cardinality/authority freeze) is source/formal **DONE**. The five
+`hqa/agent_workspace_*` contract modules and exact three-repo source coordinates are
+bound to a fail-closed runtime identity manifest, fresh JUnit evidence and an independent
+`CLEAR` verdict in the
+[`V0/V2 release closure audit`](docs/audits/2026-07-19-v0-v2-release-closure.md).
+That verdict explicitly says `release_authorized=false`; the
+[2026-07-17 cross-review](docs/audits/2026-07-17-v0-three-repo-cross-review.md) remains
+historical evidence. All live write gates remain OFF.
 V1's startup migration/DLP/schema-fingerprint baseline is code-accepted with fresh
 platform full-suite and browser evidence; live DB role/RLS provisioning remains PARTIAL
-(`quant` is still superuser/bypassrls and migration 006 is absent). V2's frozen isolated
-evidence is 408 related Hermes tests + 436 real conversation-loop tests, HQA 1531 passed /
-2 skipped, and two independent ACCEPT reviews. These are uncommitted worktree facts—not
-live installation or release evidence. See the latest V2 close-out at the top of the
-active plan before using older delivery addenda.
+(`quant` is still superuser/bypassrls and migration 006 is absent). V2 source is accepted
+and pushed, but the live Hermes runtime is still upstream `main@c0c76a471533`, not the
+candidate; Durable Run and every public write gate remain OFF. V3 is source-accepted and
+locally installed in dark mode at HQA `121926388d86`: encrypted intent payloads,
+multi-Attempt WorkflowAuthority, read-only Hermes research inspection and a unique local
+`--no-agent` retention job are delivered. The current V3 acceptance is
+[`docs/audits/2026-07-19-agent-v0-2-v3-acceptance.md`](docs/audits/2026-07-19-agent-v0-2-v3-acceptance.md).
+This is internal infrastructure, not a usable `/hermes` composer. Hermes updates remain
+operator-controlled and periodic/manual; the no-agent watcher reports drift but never
+pulls, merges, installs, restarts or enables a gate. The upstream Hermes 40k full suite
+is not an Agent v0.2 release gate.
 This foundation is not yet an activated write path. The read-only Unified Results catalog and details are
 delivered and locally accepted as 3E-A, while independent Hermes Run results and
 full results cutover are not. Agent Studio has only a reversible page-scoped

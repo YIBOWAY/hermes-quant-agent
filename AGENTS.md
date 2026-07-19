@@ -42,27 +42,26 @@ Rules for AI agents working in this repository.
   a later 007 as a patch. First freeze the v0.2 cardinality, disable implicit startup
   migration, and repeat isolated PostgreSQL/independent review. None of this may
   enable claim or dispatch.
-- Slice V0 (interface/cardinality/authority freeze) is HQA-side DONE and merged
-  into `codex/full-9h`: the five `hqa/agent_workspace_*` contract modules
-  (act/snapshot/follow surface, closed `UserActionV1` union, authority matrix,
-  error taxonomy, retention) are delivered with 622 contract tests green. V0
-  overall stays NOT DONE: three-repo manifest consistency, primary validation
-  and cross-review are pending. Current evidence and the three-repo audit are
-  `docs/audits/2026-07-17-v0-three-repo-cross-review.md`; keep `chat_write_ready`,
-  browser mutation, worker claim/dispatch and public composer OFF. Wave
-  3D chat remains BLOCKED at runtime. V1 startup migration/DLP/semantic schema
-  fingerprint remediation is code-accepted, but live V1.2 role/RLS is PARTIAL:
-  migration 006 is absent and `quant` remains superuser/bypassrls. V2
-  `DurableRunAuthority` is independently ACCEPTED only in the dirty controlled
-  Hermes integration worktree (`b3343a658` base): five public states, stable
-  event IDs/cursors, atomic terminal facts, exact approval
-  decision/release-commit/signal evidence, stop fencing, and response-receipt-only
-  provider evidence are delivered with 408 related tests plus 436 real
-  conversation-loop tests green. HQA full is 1531 passed / 2 skipped. Live
-  Hermes remains unchanged at `916f5fbf5`, durable OFF; do not install/restart,
-  enable Web writes, or start V3 by treating isolated dirty code as released.
-  The latest V2 close-out in the active plan supersedes older same-day V2
-  addenda and old `resolved`/`approval.delivered` semantics. Wave
+- Slice V0 is source/formal DONE: the three-repo identity manifest, validation
+  binding and independent `CLEAR` verdict are closed in
+  `docs/audits/2026-07-19-v0-v2-release-closure.md`. The verdict explicitly has
+  `release_authorized=false`. V1 code remediation is accepted, but live V1.2
+  role/RLS remains PARTIAL: migration 006 is absent and `quant` is still
+  superuser/bypassrls. V2 `DurableRunAuthority` source is accepted and pushed at
+  Hermes integration `2eb5fa27790f`; it is not installed in the live upstream
+  Hermes runtime, so Durable Run and every write gate remain OFF.
+- Slice V3 is source-accepted and installed locally in dark mode at HQA
+  `121926388d86`; see `docs/audits/2026-07-19-agent-v0-2-v3-acceptance.md` and
+  `docs/runbooks/agent-v0-2-v3-authorities.md`. `IntentPayloadStore` owns encrypted
+  bodies/TTL/tombstones; `WorkflowAuthority` owns Task/Attempt facts. Hermes may
+  only call `show|events|audit|rebuild`; workflow mutation and payload resolve are
+  trusted in-process seams only. The retention cron is local `--no-agent` and
+  must stay free of provider, HTTP, database and trading calls. V3 completion
+  does not enable Web writes, claim/dispatch, migration or V2 live install.
+- Hermes updates are operator-controlled and periodic/manual. The no-agent
+  compatibility watcher may report drift but must never pull, merge, install,
+  restart or enable gates. The upstream Hermes 40k full suite is not an Agent
+  v0.2 release gate. Wave
   3E-A has delivered and locally accepted the read-only Unified Results catalog,
   details and exact-link projection; independent Hermes research Run results and
   full results cutover remain blocked. Wave 3F has only a page-scoped,

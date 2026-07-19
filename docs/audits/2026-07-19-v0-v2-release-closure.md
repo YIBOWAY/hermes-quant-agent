@@ -22,8 +22,9 @@
   integration `2eb5fa27790f` 独立验收并推送至用户 fork；live Hermes 运行的是 upstream
   `main@c0c76a471533`，不是 candidate。launchd/install stamp/process/module identity 没有形成一致
   chain，因此不能写成 installed、runtime-accepted 或 released。
-- **V3：施工中，无完成结论。** V3 可以在 hermetic/dark 边界内开发，但不允许用模块测试或
-  V2 source acceptance 越过独立 close-out、live install 与后续 release gates。
+- **V3 后续已完成 source acceptance 与 local dark install。** 其独立验收见
+  `2026-07-19-agent-v0-2-v3-acceptance.md`；该后续结论不改变本文的 V0/V2 source/runtime
+  判定，也不允许越过 live install 与后续 release gates。
 - `chat_write_ready`、browser mutation、worker claim/dispatch、public composer、durable runs、provider、
   Gate、paper/live 与交易链路全部保持 **OFF**。
 

@@ -1,9 +1,9 @@
-# Agent Workspace v1 ADR — LIMITED-DEVICE CANDIDATE
+# Agent Workspace v1 ADR
 
-> **状态：HQA-side DONE / 三仓 PENDING → V0 NOT DONE（2026-07-17 更新）。**
-> HQA 侧 executable action/cardinality/auth/retention 合同已交付（5 个 `hqa/agent_workspace_*` 模块
-> ~2541 行 + 622 个合同测试全绿）。三仓 source/runtime manifest 一致性、primary validation 与三仓
-> cross-review 仍 pending；本 ADR 不授权任何 live effect。
+> **状态：SOURCE + FORMAL EVIDENCE + INDEPENDENT CLOSE-OUT DONE（2026-07-19）。** HQA
+> executable action/cardinality/auth/retention 合同、三仓 source identity、fresh validation binding
+> 与 independent `CLEAR` 已闭合。verdict 明确 `release_authorized=false`；本 ADR 不授权任何 live
+> effect。
 
 ## 决策
 
@@ -177,15 +177,23 @@ ordinary conversation 不伪造 task/attempt binding。
 
 ## 三仓 source/runtime manifest（fail closed）
 
-每次 build/install/start/smoke/release 必须生成同一份 manifest；每仓至少记录 repo、absolute checkout、
-branch、base/source commit、dirty、artifact digest、runtime command/version/commit、PID/start time 和环境；
-Hermes 还须同时固定 checkout、installed package 与 running process identity。
+每次 build/install/start/smoke/release 必须生成同一 closed-schema manifest；每仓至少记录 repo、
+absolute checkout、canonical remote/ref、source branch/head/tree/archive digest、当时的 exact tracked/
+untracked dirty 声明，以及需要常驻的 runtime command/version/commit/archive digest/PID/start time 与
+allowlisted 环境。Hermes 还须同时固定 source candidate、installed checkout/stamp 与 running process
+identity。`historical_fork_base` 只表达 candidate 的祖先/分叉背景，**不是** expected head、installed
+identity 或 release readiness。
 
-| Repo | Candidate branch | Frozen base |
-|---|---|---|
-| HQA | `codex/agent-v0-2-limited-device` | `a7428b6219ded4550f4c8951b6fabc4542a1724f` |
-| ai-quant-platform | `codex/agent-v0-2-platform-limited-device` | `7b73b5f2fe9e80509f4762c3de696d1e2c58fc9d` |
-| Hermes | `codex/agent-v0-2-durable-runs` | `a79b818360700d526c0a48107444810e3d6ecc2e` |
+| Repo | Source branch | Source head（2026-07-19） | `historical_fork_base` |
+|---|---|---|---|
+| HQA | `codex/full-9h` | `4fdad9e7b31bd4088cf7eaaf7a087da167093c95`（V0 formal source snapshot） | `a7428b6219ded4550f4c8951b6fabc4542a1724f` |
+| ai-quant-platform | `codex/agent-v0-2-platform-v1` | `bb62f5d0bc6a5a9a62a2e735b4d559f7d111ba01`（已推送） | `7b73b5f2fe9e80509f4762c3de696d1e2c58fc9d` |
+| Hermes integration | `codex/v2-live-integration` | `2eb5fa27790fb7af73fababa21d43b3996fe2d99`（已推送至用户 fork） | `a79b818360700d526c0a48107444810e3d6ecc2e` |
+
+live Hermes 是独立 runtime 身份，不能写进 source head 一列。截至本次快照，live 手工更新到
+upstream `main@c0c76a47153398953c718ca729bc5192da1e63ac`，而非 Hermes candidate；launchd 与
+install stamp 仍 stale，stamp 仍记录 `916f5fbf5452`，且 `gateway/durable_runs.py` 未安装。
+因此 formal manifest 的 `candidate_installed` / `runtime_aligned` / `write_ready` 必须 fail closed。
 
 manifest 缺失、source 不匹配、dirty 未声明、artifact/runtime identity 不匹配，或 Hermes checkout/install/process 任两者漂移时，所有 write readiness、claim/dispatch、provider
 与 live Gate 必须 fail closed；不得使用未知 live checkout、旧 TUI gateway、fake adapter 或手工覆盖
@@ -193,8 +201,8 @@ manifest 缺失、source 不匹配、dirty 未声明、artifact/runtime identity
 
 ## Candidate 验收边界
 
-此 ADR candidate 的 HQA 侧 executable action/cardinality/auth/retention 合同已交付并测试全绿（622
-tests）；但三仓 source/runtime manifest 一致性、primary validation 与三仓 cross-review 均 pending
-（见 `../audits/2026-07-17-v0-three-repo-cross-review.md`）；V0 不是 DONE。在此之前 public
-composer、`chat_write_ready`、browser mutation、worker claim/dispatch、provider、Gate 与 migration
-live apply 全部保持 OFF。
+此 ADR candidate 的 executable contracts、三仓 source/runtime identity、primary validation binding
+与 independent close-out 已完成（见 `../audits/2026-07-19-v0-v2-release-closure.md`）；2026-07-17
+cross-review 保持历史原文。V0 source/formal freeze 为 DONE，但这不会自动满足后续 runtime gates。
+public composer、`chat_write_ready`、browser mutation、worker claim/dispatch、provider、Gate 与
+migration live apply 仍全部保持 OFF。
