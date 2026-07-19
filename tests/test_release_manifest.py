@@ -462,6 +462,15 @@ def test_repository_specs_reject_unknown_identity_and_unsafe_dirty_paths() -> No
         RepositorySpec(**dict(base, unexpected="value"))
 
 
+def test_embedded_repository_dirty_path_is_canonicalized() -> None:
+    from hqa.release_manifest import _nul_paths
+
+    assert _nul_paths(b"nested/repository/\0ordinary.txt\0") == (
+        "nested/repository",
+        "ordinary.txt",
+    )
+
+
 def test_runtime_specs_reject_unverifiable_or_secret_bearing_identity(
     aligned_specs,
 ) -> None:

@@ -930,11 +930,18 @@ def _git_succeeds(checkout: Path, *args: str) -> bool:
 
 
 def _nul_paths(raw: bytes) -> Tuple[str, ...]:
-    return tuple(
-        sorted(
-            item.decode("utf-8", errors="strict") for item in raw.split(b"\0") if item
-        )
-    )
+    paths = []
+    for item in raw.split(b"\0"):
+        if not item:
+            continue
+        path = item.decode("utf-8", errors="strict")
+        # Git reports an untracked embedded repository with one trailing slash.
+        # The manifest stores canonical repository-relative paths, where a path
+        # itself can never end in a separator.
+        if path.endswith("/"):
+            path = path[:-1]
+        paths.append(path)
+    return tuple(sorted(paths))
 
 
 def _remote_head(remote: str, remote_ref: str) -> Optional[str]:
