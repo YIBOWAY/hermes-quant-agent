@@ -101,6 +101,7 @@ def _valid_action_documents() -> list[dict[str, object]]:
             task_ref="task:research.1",
             plan_version=1,
             plan_digest="d" * 64,
+            confirmation_note="Reviewed the exact plan.",
         ),
         dict(
             common,
@@ -367,6 +368,7 @@ def test_confirm_research_plan_round_trips_only_plan_authority_fields() -> None:
         task_ref="task:research.1",
         plan_version=2,
         plan_digest="f" * 64,
+        confirmation_note="I confirm this exact plan.",
     )
     document = {
         "schema_version": 1,
@@ -376,6 +378,7 @@ def test_confirm_research_plan_round_trips_only_plan_authority_fields() -> None:
         "task_ref": "task:research.1",
         "plan_version": 2,
         "plan_digest": "f" * 64,
+        "confirmation_note": "I confirm this exact plan.",
     }
 
     assert action_to_document(action) == document

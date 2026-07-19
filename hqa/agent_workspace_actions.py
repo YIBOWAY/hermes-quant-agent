@@ -53,7 +53,7 @@ _ACTION_FIELDS = {
     "research.continue": _COMMON_DOCUMENT_FIELDS
     | {"managed_session_ref", "task_ref", "payload_ref", "payload_digest"},
     "research.plan.confirm": _COMMON_DOCUMENT_FIELDS
-    | {"task_ref", "plan_version", "plan_digest"},
+    | {"task_ref", "plan_version", "plan_digest", "confirmation_note"},
     "run.stop.request": _COMMON_DOCUMENT_FIELDS
     | {"run_ref", "task_ref", "attempt_ref", "platform_job_ref"},
     "hermes.command_approval.decide": _COMMON_DOCUMENT_FIELDS
@@ -305,6 +305,7 @@ class ConfirmResearchPlan:
     task_ref: str
     plan_version: int
     plan_digest: str
+    confirmation_note: str
 
     def __post_init__(self) -> None:
         _validate_common(self.client_action_id, self.workspace)
@@ -312,6 +313,7 @@ class ConfirmResearchPlan:
         if type(self.plan_version) is not int or self.plan_version < 1:
             raise ValueError("plan_version must be a positive integer")
         _validate_digest(self.plan_digest, "plan_digest")
+        _validate_note(self.confirmation_note, "confirmation_note")
 
 
 @dataclass(frozen=True)
@@ -525,6 +527,7 @@ def _action_to_raw_document(action: _UserAction) -> dict[str, Any]:
                 "task_ref": action.task_ref,
                 "plan_version": action.plan_version,
                 "plan_digest": action.plan_digest,
+                "confirmation_note": action.confirmation_note,
             }
         )
         return _strict_json_document(document)
@@ -673,6 +676,7 @@ def parse_user_action_v1(document: Mapping[str, Any]) -> _UserAction:
             task_ref=document["task_ref"],
             plan_version=document["plan_version"],
             plan_digest=document["plan_digest"],
+            confirmation_note=document["confirmation_note"],
         )
     if document["kind"] == "run.stop.request":
         return RequestStop(
