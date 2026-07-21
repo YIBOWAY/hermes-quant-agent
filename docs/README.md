@@ -12,7 +12,7 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。V0 formal/source 与 V3 dark foundation 已 DONE；当前下一代码切片是 V4，公共写端仍 OFF。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。V0/V3 DONE；**V4 code + isolated + live schema ACCEPT**（006/007 已于 2026-07-21 apply；public write 仍 OFF）；下一代码切片默认 V5。 |
 | V0 Workspace v1 candidate ADR | [`design/2026-07-16-agent-workspace-v1-adr.md`](design/2026-07-16-agent-workspace-v1-adr.md) | **SOURCE + FORMAL EVIDENCE + INDEPENDENT CLOSE-OUT DONE**；这只冻结 interface/cardinality/authority，不授权 runtime/live effect。 |
 | V0/V2 release closure | [`audits/2026-07-19-v0-v2-release-closure.md`](audits/2026-07-19-v0-v2-release-closure.md) | 三仓 source、live identity、validation binding 与 independent `CLEAR` 的事实源；verdict 明确 `release_authorized=false`。 |
 | V3 acceptance | [`audits/2026-07-19-agent-v0-2-v3-acceptance.md`](audits/2026-07-19-agent-v0-2-v3-acceptance.md) | encrypted intent + multi-Attempt workflow authority 已 source-accepted、本地暗态安装并注册唯一 no-agent retention；不等于 Web Chat 可写。 |
@@ -34,10 +34,13 @@
 worker、3C.1 代码地基和 3E-A 只读 Unified Results。当前执行主线已由 D-32 收敛为真正 Agent
 v0.2 + 完整 `/hermes` Web Chat；公共网页写端仍关闭。** V0 source/formal freeze 和 V3 encrypted
 intent / multi-Attempt workflow 暗态地基已完成独立验收；V1.2 live role/RLS 仍 PARTIAL，V2
-candidate 仍未被 live Hermes 加载。下一代码切片是 V4：修订 never-live 006 与 submission saga/
-security，先做隔离 PostgreSQL 和独立 review，再另行请求 live migration 授权。Discord 保持当前
-可用入口，但不是临时网页方案或 fallback；
-Discord/历史 session 在 Web 只读，网页写入只能新建或显式 fork 到新的 managed Hermes Session。
+candidate 仍未被 live Hermes 加载。**V4 code + isolated + live schema ACCEPT**（修订 006 Scheme A、007 session registry、
+owner session/CSRF、AgentWorkspace/saga、thin BFF、`composer_readiness`；live
+`quantplatform` 已于 2026-07-21 apply 006/007，fingerprint `4d952fe…`，业务行仍 0，
+write flags 仍 false）。**public write / claim / dispatch / composer 仍 OFF**。下一代码
+切片默认 V5 supervised claim/dispatch（dark）。Discord 保持当前可用入口，但不是临时
+网页方案或 fallback；Discord/历史 session 在 Web 只读，网页写入只能新建或显式 fork
+到新的 managed Hermes Session。
 
 ## D-31 当前事实
 
@@ -48,7 +51,7 @@ Discord/历史 session 在 Web 只读，网页写入只能新建或显式 fork �
 | Candidate integrity | **DONE** | canonical root、immutable manifest、verified/migration_required/corrupt、digest/status CAS、legacy_unbound 非授权。 |
 | Scene-B Gate 1/2/final/Gate 3 | **DONE** | 人类 Gate 3 commit `524e791e5e3e22cec12a4166ad8fc3617c735566` 已进入 promoted registry 并 cleanup。 |
 | Hermes official API session read | **DONE（代码 + 本机只读验收）** | 平台 BFF 能读真实 session list/detail/messages；浏览器不持有 Hermes key。 |
-| 3B durable ledger/outbox | **DONE（live DB 验收）** | migration 005 已 apply 并重复验证幂等；schema v1、五表、四个 append-only trigger，health `schema_ready=true`。 |
+| 3B durable ledger/outbox | **DONE（live DB 表已 apply）** | migration 005 已 apply 并重复验证幂等；schema v1、五表、四个 append-only trigger 存在且业务行数为 0。2026-07-20 smoke：表在、`hermes_ledger_meta.schema_version=1`，但 V1.2A readiness 要求 trigger `ENABLE ALWAYS`（`'A'`），live 仍为 origin-only（`'O'`），故 `/api/health` 现报 `schema_ready=false`；不得误读为 005 未 apply。`workflow_binding_schema_ready=false`（006 未 live）。 |
 | 3C deterministic worker | **FRAMEWORK DONE / reconcile-only** | 安装 wrapper `--once` 与 live `LISTEN/NOTIFY` 两周期通过；零 Hermes mutation/provider。 |
 | 3C.1 Task/Attempt + payload + exact binding | **FOUNDATION ACCEPTED / SCHEMA REVISION REQUIRED** | HQA append-only journal、projection/replay/CAS、payload、跨权威 saga/reverse audit 已代码验收；但 migration 006 的 `UNIQUE(task_id)` 不能支持 multi-Attempt research。live 未 apply；当前 runner 会重放旧 SQL，因此须修订未上线的 006 并重做完整验收，不能默认追加 007；worker 仍不 claim。 |
 | V3 Intent / WorkflowAuthority | **SOURCE ACCEPTED / LOCAL DARK INSTALL DONE** | AES-GCM/Keychain intent、TTL/tombstone、Task `1:N` Attempt、CAS/replay/backup 与只读 Hermes skill 已交付；唯一 retention cron 为 local no-agent。无 Web/Hermes mutation/provider/DB/交易。 |
@@ -158,7 +161,11 @@ actual provider/fallback/usage evidence、approval TTL/digest/single-use 和幂�
   `data/_runtime/db_backups/quantplatform-pre-wave3-20260715T182203+0800.dump`，SHA-256
   `3bbf5f3be83e6aeb348c83986e42cfed49e844e467b51305abf87a39d3733a3b`。
 - migration 005 live apply 与重复幂等 apply 均成功；schema v1、五张表、四个 append-only
-  trigger 已核验，`/api/health` 报告 `schema_ready=true`。
+  trigger 已核验（2026-07-15/16 验收当时 `/api/health` 报 `schema_ready=true`）。
+  **2026-07-20 smoke 更新：** 表与 `hermes_ledger_meta.schema_version=1` 仍在，但 V1.2A
+  之后 readiness 只认 append-only trigger `ENABLE ALWAYS`；live 四个 trigger 仍为
+  origin-only，故现报 `schema_ready=false`。这是 live role/trigger residual，不是 005
+  回滚。正确 pin 应随修订后的 006 / V4 live activation Gate 另授权执行。
 - 44 个平台目标测试和 HQA full suite 通过；安装 wrapper `--once` 与 live
   `LISTEN/NOTIFY` 两周期通过。
 - 验收后 command/event/outbox/run-link 仍各为零行，Hermes mutation/provider 调用均为零。
@@ -203,10 +210,12 @@ periodic/manual update + no-agent watcher；watcher 只报告漂移，不得 ins
 4. **V3 HQA Intent/WorkflowAuthority：DONE（source accepted + local dark install）。** production
    bodies 加密、Task `1:N` Attempt、expiry/backup/replay、只读 skill 与 no-agent retention 已闭合；
    这不开放 composer/dispatch。
-5. **V4 PostgreSQL schema/BFF/security：当前下一代码切片。** 先完成代码、cardinality 与隔离 PostgreSQL
-   验收，再请求修正后 migration 的单独 live 授权；apply 后仍不开放 dispatch。
-6. **V5 supervised worker、V6 最终 Workspace UI、V7 decisions/results/two vertical
-   slices。** 所有切片只落最终架构，公共 Web Chat 保持 OFF。
+5. **V4 PostgreSQL schema/BFF/security：CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21）。**
+   修订 006/007 已 live apply（backup + idempotent replay + readiness 证据见 platform
+   `docs/audits/2026-07-21-v4-live-migrate-006-007.md`）。research.* 仅 typed fail-closed；
+   **public write / claim / dispatch 仍 OFF**。
+6. **V5 supervised worker（当前下一代码切片）、V6 最终 Workspace UI、V7 decisions/results/two
+   vertical slices。** 所有切片只落最终架构，公共 Web Chat 保持 OFF。
 7. **V8 adversarial acceptance/release。** 两轮冷启动、独立 security review、真实用户验收
    全绿后一次开放 Agent v0.2；legacy redirect 仍另行审批。
 

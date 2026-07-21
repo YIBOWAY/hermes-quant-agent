@@ -20,7 +20,7 @@
 > migration、browser mutation、worker claim/dispatch、provider、Gate、paper/live 与 public composer
 > 等所有 live gates 保持 OFF；本 addendum 不构成任何 live 授权。
 
-> **状态（2026-07-19）：CURRENT / PLAN ACCEPTED / V0 + V3 DONE / V2 LIVE NOT RELEASED / NEXT V4。** 本计划是 D-32 唯一 active
+> **状态（2026-07-21）：CURRENT / PLAN ACCEPTED / V0 + V3 DONE / V4 CODE+ISOLATED+LIVE SCHEMA ACCEPT / V2 LIVE NOT RELEASED / NEXT V5（public write 仍 OFF）。** 本计划是 D-32 唯一 active
 > implementation plan。此前的 Wave 3 文档保留为已交付事实与问题输入，不再从其中的旧顺序、
 > unchecked checkbox 或“下一步”继续施工。
 >
@@ -965,8 +965,8 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 | V1 Stop-the-line baseline | platform DONE（V1.2A PARTIAL = code_hardened / live_role_unprovisioned） | V1.2 live role+RLS 属 V4 Gate；其余 V1.1–V1.7 见 §7 V1 交付状态 |
 | V2 Hermes DurableRunAuthority | SOURCE ACCEPTED / LIVE NOT RELEASED / WRITE GATES OFF | 九语义 source 已在 `2eb5fa27790f` 独立 ACCEPT 并推送；live 为 upstream `c0c76a471533`，candidate 未安装。install/canary 另授权；见 §7 |
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
-| V4 PG schema/BFF saga/security | NEXT / NOT STARTED | code/isolated DB accepted；再请求 live migration 授权 |
-| V5 supervised dispatch worker | NOT STARTED | crash matrix green；再请求 provider smoke 授权 |
+| V4 PG schema/BFF saga/security | CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21） | live 006/007 applied；public write/composer/claim 仍 OFF；证据 platform `docs/audits/2026-07-21-v4-live-migrate-006-007.md` |
+| V5 supervised dispatch worker | NEXT / NOT STARTED | dark claim/lease/dispatch adapter + crash matrix；provider smoke 另授权；不开放 public composer |
 | V6 final workspace UI | NOT STARTED | fake/real dark E2E green；public chat 仍 OFF |
 | V7 decisions/results/vertical slices | NOT STARTED | 两纵切 + exact approvals + stop green |
 | V8 adversarial acceptance/release | NOT STARTED | independent CLEAR + user acceptance + one-time cutover |
@@ -988,10 +988,12 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
    public composer 保持关闭。
 5. V3 **DONE**：source `1219263`、本地暗态安装、唯一 no-agent retention 与独立 review 已闭合；
    不开放 Web/Hermes mutation。
-6. **当前施工入口是 V4**：先修订 never-live 006 与 replay-all runner，完成 BFF submission saga/
-   security、隔离 PostgreSQL、backup/restore/concurrency 和独立 review；之后才重新请求 live migration
-   授权，不能默认追加 007。V2 controlled install/canary 仍是另行授权的独立 live 轨道。
-7. V5 worker、V6 UI、V7 两纵切按 Gate 逐步集成，但公共 Web Chat 始终 OFF。
+6. **V4 CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21）**：修订 006/007 已 live apply
+   （backup + idempotent replay + readiness；业务行 0；write flags false）。public write/claim
+   仍 OFF。
+7. **当前施工入口是 V5**：supervised claim/dispatch/reconcile worker 先 dark 交付 + crash
+   matrix；公共 Web Chat 始终 OFF。V6 UI、V7 两纵切按 Gate 逐步集成。V2 controlled
+   install/canary 与 provider smoke 仍是另行授权的独立 live 轨道。
 8. V8 完成后一次开放 v0.2；legacy redirect 仍另开后续计划。
 
 这条顺序不再以“把九个 blocker 做完”为模糊任务，而是以最终用户路径、三入口 Interface、四份
