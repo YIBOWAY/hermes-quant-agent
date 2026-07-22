@@ -39,9 +39,9 @@ Deliver **L2a-Send** as one construction package with two milestones:
 **Critical path after L2a-Send:** L2b observe spine → L3 workbench UI → L4a Activity →
 L4b SSE follow spine → L5a Hermes command-approval observe (Composer on spine;
 honest empty approvals; no decision write) → L5b Authority projection (honest
-empty Task/Attempt/Run/result + health on spine) → L5c a11y → V7 verticals
-(after contract freeze) → V8 public cutover. Plan-V6 remains the official UI
-slice name; L2a-Send is **not** Plan-V6 acceptance.
+empty Task/Attempt/Run/result + health on spine) → L5c workbench a11y (ACCEPT) →
+V7 verticals (after contract freeze) → V8 public cutover. Plan-V6 remains the
+official UI slice name; L2a-Send is **not** Plan-V6 acceptance.
 
 ## 3. Locked decisions
 
