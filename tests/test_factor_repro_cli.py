@@ -10,6 +10,10 @@ import pytest
 
 from hqa import factor_repro_cli as cli
 
+_REAL_REQUIRE_FINAL_BACKTEST_RECEIPT = (
+    cli.factor_repro.require_final_backtest_receipt
+)
+
 
 @pytest.fixture(autouse=True)
 def _valid_gate1_binding_by_default(monkeypatch, tmp_path):
@@ -1864,7 +1868,7 @@ def test_backtest_final_writes_full_end_and_no_holdout_note(monkeypatch, capsys,
     assert receipt["final"] is True
 
 
-def test_second_final_backtest_is_refused_before_provider_execution(
+def test_second_final_backtest_replays_receipt_without_provider_execution(
     monkeypatch, capsys, tmp_path
 ) -> None:
     calls = 0
@@ -1876,6 +1880,11 @@ def test_second_final_backtest_is_refused_before_provider_execution(
 
     monkeypatch.setattr(cli.quant_cli, "run_experiment_config", counted_run)
     monkeypatch.setattr(cli.config, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(
+        cli.factor_repro,
+        "require_final_backtest_receipt",
+        _REAL_REQUIRE_FINAL_BACKTEST_RECEIPT,
+    )
     common = [
         "backtest",
         "--candidate-id", "cand-once_factor",
@@ -1891,9 +1900,79 @@ def test_second_final_backtest_is_refused_before_provider_execution(
 
     captured = capsys.readouterr()
     assert first == 0
-    assert second == 2
+    assert second == 0
     assert calls == 1
-    assert "already reserved" in captured.err
+    assert "final_backtest_recovered=true provider_replayed=false" in captured.out
+
+
+def test_final_backtest_retry_recovers_receipt_without_second_provider_call(
+    monkeypatch, capsys, tmp_path
+) -> None:
+    calls = 0
+
+    def counted_run(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return _fake_experiment_receipt(*args, **kwargs)
+
+    original_write = cli.factor_repro._write_exclusive_or_verify
+    crashed = False
+
+    def crash_after_completion(path, payload):
+        nonlocal crashed
+        if path.parent.name == "backtests" and not crashed:
+            crashed = True
+            raise OSError("injected crash before receipt materialization")
+        return original_write(path, payload)
+
+    monkeypatch.setattr(cli.quant_cli, "run_experiment_config", counted_run)
+    monkeypatch.setattr(cli.config, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(
+        cli.factor_repro,
+        "require_final_backtest_receipt",
+        _REAL_REQUIRE_FINAL_BACKTEST_RECEIPT,
+    )
+    monkeypatch.setattr(
+        cli.factor_repro,
+        "_write_exclusive_or_verify",
+        crash_after_completion,
+    )
+    common = [
+        "backtest",
+        "--candidate-id", "cand-recover_factor",
+        "--expected-digest", "5" * 64,
+        "--symbol", "SPY",
+        "--start", "2020-01-02",
+        "--end", "2026-06-30",
+        "--final",
+    ]
+
+    first = cli.main([*common, "--config-out", str(tmp_path / "first.json")])
+    assert first == 1
+    assert calls == 1
+    assert list((cli.config.FACTOR_GATE1_DIR / "final-completions").glob("*.json"))
+    assert not list((cli.config.FACTOR_GATE1_DIR / "backtests").glob("*.json"))
+
+    monkeypatch.setattr(
+        cli.factor_repro,
+        "_write_exclusive_or_verify",
+        original_write,
+    )
+    second = cli.main([*common, "--config-out", str(tmp_path / "second.json")])
+
+    captured = capsys.readouterr()
+    assert second == 0
+    assert calls == 1
+    assert "final_backtest_recovered=true" in captured.out
+    receipts = list((cli.config.FACTOR_GATE1_DIR / "backtests").glob("*.json"))
+    assert len(receipts) == 1
+    receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
+    completion_path = next(
+        (cli.config.FACTOR_GATE1_DIR / "final-completions").glob("*.json")
+    )
+    completion = json.loads(completion_path.read_text(encoding="utf-8"))
+    assert completion["receipt_id"] == receipt["receipt_id"]
+    assert completion["receipt"] == receipt
 
 
 def test_backtest_records_trial_and_final_flag(monkeypatch, capsys, tmp_path):

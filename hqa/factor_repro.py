@@ -940,8 +940,7 @@ def reserve_final_backtest_once(
         "candidate_id": candidate_id,
         "manifest_digest": manifest_digest,
     }
-    attempt_hash = hashlib.sha256(_canonical_bytes(identity)).hexdigest()
-    attempt_id = f"final-{attempt_hash[:32]}"
+    attempt_id = _final_backtest_attempt_id(candidate_id, manifest_digest)
     record = {
         **identity,
         "attempt_id": attempt_id,
@@ -962,6 +961,17 @@ def reserve_final_backtest_once(
     return attempt_id
 
 
+def _final_backtest_attempt_id(candidate_id: str, manifest_digest: str) -> str:
+    identity = {
+        "schema_version": "1.0",
+        "gate": "final_one_shot_reservation",
+        "candidate_id": candidate_id,
+        "manifest_digest": manifest_digest,
+    }
+    attempt_hash = hashlib.sha256(_canonical_bytes(identity)).hexdigest()
+    return f"final-{attempt_hash[:32]}"
+
+
 def _require_final_backtest_attempt(
     *, gate_dir: Path, attempt_id: str, candidate_id: str, manifest_digest: str
 ) -> dict:
@@ -978,15 +988,7 @@ def _require_final_backtest_attempt(
         "reserved_at",
         "reservation_nonce",
     }
-    identity = {
-        "schema_version": "1.0",
-        "gate": "final_one_shot_reservation",
-        "candidate_id": candidate_id,
-        "manifest_digest": manifest_digest,
-    }
-    expected_id = (
-        "final-" + hashlib.sha256(_canonical_bytes(identity)).hexdigest()[:32]
-    )
+    expected_id = _final_backtest_attempt_id(candidate_id, manifest_digest)
     if (
         set(record) != expected_fields
         or record.get("schema_version") != "1.0"
@@ -1002,6 +1004,139 @@ def _require_final_backtest_attempt(
     ):
         raise ValueError(f"invalid final backtest attempt values: {path}")
     return record
+
+
+def _read_final_backtest_completion(
+    *,
+    gate_dir: Path,
+    attempt_id: str,
+    candidate_id: str,
+    manifest_digest: str,
+) -> tuple[str, Optional[dict]]:
+    completion_path = gate_dir / "final-completions" / f"{attempt_id}.json"
+    completion = _read_canonical_json_record(
+        completion_path,
+        label="final backtest completion",
+    )
+    base = {
+        "gate": "final_one_shot_completion",
+        "final_attempt_id": attempt_id,
+        "candidate_id": candidate_id,
+        "manifest_digest": manifest_digest,
+    }
+    legacy_fields = {"schema_version", "receipt_id", *base}
+    if completion.get("schema_version") == "1.0":
+        receipt_id = completion.get("receipt_id")
+        if (
+            set(completion) != legacy_fields
+            or any(completion.get(key) != value for key, value in base.items())
+            or not isinstance(receipt_id, str)
+            or _BACKTEST_RECEIPT_ID_RE.fullmatch(receipt_id) is None
+        ):
+            raise ValueError(f"invalid final backtest completion: {completion_path}")
+        return receipt_id, None
+    if set(completion) != {
+        "schema_version",
+        "gate",
+        "final_attempt_id",
+        "receipt_id",
+        "candidate_id",
+        "manifest_digest",
+        "receipt",
+    } or any(completion.get(key) != value for key, value in base.items()):
+        raise ValueError(f"invalid final backtest completion: {completion_path}")
+    receipt_id = completion.get("receipt_id")
+    record = completion.get("receipt")
+    if (
+        completion.get("schema_version") != "1.1"
+        or not isinstance(receipt_id, str)
+        or _BACKTEST_RECEIPT_ID_RE.fullmatch(receipt_id) is None
+        or not isinstance(record, dict)
+        or record.get("receipt_id") != receipt_id
+        or record.get("final_attempt_id") != attempt_id
+        or record.get("candidate_id") != candidate_id
+        or record.get("manifest_digest") != manifest_digest
+    ):
+        raise ValueError(f"invalid final backtest completion: {completion_path}")
+    evidence = {key: value for key, value in record.items() if key != "receipt_id"}
+    expected_id = (
+        f"backtest-{hashlib.sha256(_canonical_bytes(evidence)).hexdigest()[:32]}"
+    )
+    if receipt_id != expected_id:
+        raise ValueError(f"invalid final backtest completion: {completion_path}")
+    return receipt_id, record
+
+
+def recover_final_backtest_receipt(
+    *,
+    gate_dir: Path,
+    experiment_output_dir: Path,
+    candidate_id: str,
+    manifest_digest: str,
+    provider: str,
+    symbols: list[str],
+    start: str,
+    end: str,
+) -> Optional[str]:
+    """Materialize one exact receipt from its durable successful completion.
+
+    The completion record is the commit point after the provider has returned
+    verified evidence.  It embeds the content-addressed receipt, so replay does
+    not invent a new timestamp or identity and never needs to call the provider.
+    """
+    gate_dir = _canonical_authority_dir(gate_dir)
+    require_gate1_candidate_binding(
+        gate_dir=gate_dir,
+        candidate_id=candidate_id,
+        manifest_digest=manifest_digest,
+    )
+    if _CANDIDATE_ID_RE.fullmatch(candidate_id) is None:
+        raise ValueError("final backtest recovery requires a valid candidate ID")
+    if _HEX64.fullmatch(manifest_digest) is None:
+        raise ValueError("final backtest recovery requires a lowercase SHA-256")
+    attempt_id = _final_backtest_attempt_id(candidate_id, manifest_digest)
+    completion_path = gate_dir / "final-completions" / f"{attempt_id}.json"
+    try:
+        os.lstat(completion_path)
+    except FileNotFoundError:
+        return None
+    _require_final_backtest_attempt(
+        gate_dir=gate_dir,
+        attempt_id=attempt_id,
+        candidate_id=candidate_id,
+        manifest_digest=manifest_digest,
+    )
+    receipt_id, prepared_record = _read_final_backtest_completion(
+        gate_dir=gate_dir,
+        attempt_id=attempt_id,
+        candidate_id=candidate_id,
+        manifest_digest=manifest_digest,
+    )
+    receipt_path = gate_dir / "backtests" / f"{receipt_id}.json"
+    if prepared_record is not None:
+        _write_exclusive_or_verify(receipt_path, _canonical_bytes(prepared_record))
+    else:
+        try:
+            os.lstat(receipt_path)
+        except FileNotFoundError as exc:
+            raise ValueError(
+                "legacy final completion has no recoverable receipt evidence"
+            ) from exc
+    record = require_final_backtest_receipt(
+        gate_dir=gate_dir,
+        experiment_output_dir=experiment_output_dir,
+        receipt_id=receipt_id,
+        candidate_id=candidate_id,
+        manifest_digest=manifest_digest,
+    )
+    if (
+        record.get("provider") != provider
+        or record.get("symbols") != list(symbols)
+        or record.get("start") != start
+        or record.get("end") != end
+    ):
+        raise ValueError("final backtest recovery request does not match completion")
+    return receipt_id
 
 
 def record_final_backtest_receipt(
@@ -1068,6 +1203,42 @@ def record_final_backtest_receipt(
         not isinstance(symbol, str) or not symbol.strip() for symbol in symbols
     ):
         raise ValueError("final backtest receipt requires non-empty symbols")
+    recovered_receipt_id = recover_final_backtest_receipt(
+        gate_dir=gate_dir,
+        experiment_output_dir=experiment_output_dir,
+        candidate_id=candidate_id,
+        manifest_digest=manifest_digest,
+        provider=provider,
+        symbols=symbols,
+        start=start,
+        end=end,
+    )
+    if recovered_receipt_id is not None:
+        recovered = require_final_backtest_receipt(
+            gate_dir=gate_dir,
+            experiment_output_dir=experiment_output_dir,
+            receipt_id=recovered_receipt_id,
+            candidate_id=candidate_id,
+            manifest_digest=manifest_digest,
+        )
+        requested_evidence = {
+            "factor_id": factor_id,
+            "experiment_id": experiment_id,
+            "run_count": run_count,
+            "best_run_id": best_run_id,
+            "config_path": config_path,
+            "config_sha256": config_sha256,
+            "agent_summary_path": agent_summary_path,
+            "agent_summary_sha256": agent_summary_sha256,
+            "report": report,
+            "report_sha256": report_sha256,
+        }
+        if any(
+            recovered.get(key) != value
+            for key, value in requested_evidence.items()
+        ):
+            raise ValueError("final backtest completion evidence collision")
+        return recovered_receipt_id
     verify_experiment_receipt(
         {
             "experiment_id": experiment_id,
@@ -1126,12 +1297,13 @@ def record_final_backtest_receipt(
     receipt_id = f"backtest-{receipt_hash[:32]}"
     record = {**evidence, "receipt_id": receipt_id}
     completion = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "gate": "final_one_shot_completion",
         "final_attempt_id": final_attempt_id,
         "receipt_id": receipt_id,
         "candidate_id": candidate_id,
         "manifest_digest": manifest_digest,
+        "receipt": record,
     }
     completion_path = (
         gate_dir / "final-completions" / f"{final_attempt_id}.json"
@@ -1252,18 +1424,15 @@ def require_final_backtest_receipt(
     completion_path = (
         gate_dir / "final-completions" / f"{record['final_attempt_id']}.json"
     )
-    completion = _read_canonical_json_record(
-        completion_path,
-        label="final backtest completion",
+    completion_receipt_id, prepared_record = _read_final_backtest_completion(
+        gate_dir=gate_dir,
+        attempt_id=record["final_attempt_id"],
+        candidate_id=candidate_id,
+        manifest_digest=manifest_digest,
     )
-    if completion != {
-        "schema_version": "1.0",
-        "gate": "final_one_shot_completion",
-        "final_attempt_id": record["final_attempt_id"],
-        "receipt_id": receipt_id,
-        "candidate_id": candidate_id,
-        "manifest_digest": manifest_digest,
-    }:
+    if completion_receipt_id != receipt_id or (
+        prepared_record is not None and prepared_record != record
+    ):
         raise ValueError(f"invalid final backtest completion: {completion_path}")
     for path_field, digest_field in (
         ("config_path", "config_sha256"),

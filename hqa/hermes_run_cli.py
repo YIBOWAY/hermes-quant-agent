@@ -33,6 +33,26 @@ _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,511}\Z")
 _RETRYABLE_ERRORS = frozenset(
     {"transport_error", "durable_unavailable", "run_cli_unavailable"}
 )
+_SAFE_HERMES_ERROR_MESSAGES = {
+    "approval_challenge_invalid": "Hermes approval challenge is invalid",
+    "approval_challenge_required": "Hermes approval challenge is required",
+    "approval_not_active": "Hermes approval is not active",
+    "approval_not_pending": "Hermes approval is not pending",
+    "durable_unavailable": "Hermes durable Run authority is unavailable",
+    "idempotency_conflict": "Hermes durable Run idempotency conflict",
+    "invalid_cursor": "Hermes durable Run event cursor is invalid",
+    "invalid_endpoint": "Hermes durable Run endpoint is invalid",
+    "non_loopback_endpoint": "Hermes durable Run endpoint must be loopback",
+    "restart_without_durable_state": "Hermes durable Run state is unavailable after restart",
+    "run_cli_unavailable": "Hermes durable Run port is unavailable",
+    "run_not_found": "Hermes durable Run was not found",
+    "transport_error": "Hermes durable Run transport is unavailable",
+    "unauthorized_fallback": "Hermes durable Run provider fallback is unauthorized",
+}
+_UNKNOWN_HERMES_ERROR = (
+    "run_upstream_error",
+    "Hermes durable Run request failed",
+)
 
 
 class _CliArgumentError(ValueError):
@@ -105,6 +125,15 @@ def _emit(document: Mapping[str, Any]) -> None:
 
 def _emit_error(code: str, message: str, *, retryable: bool) -> None:
     _emit({"error": {"code": code, "message": message, "retryable": retryable}})
+
+
+def _safe_hermes_error(exc: HermesRunError) -> tuple[str, str, bool]:
+    """Collapse untrusted upstream error detail to the reviewed CLI contract."""
+    message = _SAFE_HERMES_ERROR_MESSAGES.get(exc.code)
+    if message is None:
+        code, message = _UNKNOWN_HERMES_ERROR
+        return code, message, False
+    return exc.code, message, exc.code in _RETRYABLE_ERRORS
 
 
 def _parse_command(argv: Sequence[str]) -> str:
@@ -291,8 +320,8 @@ def main(
         _emit_error(exc.code, exc.message, retryable=False)
         return 2
     except HermesRunError as exc:
-        retryable = exc.code in _RETRYABLE_ERRORS
-        _emit_error(exc.code, exc.message, retryable=retryable)
+        code, message, retryable = _safe_hermes_error(exc)
+        _emit_error(code, message, retryable=retryable)
         return 1 if retryable else 2
     except (OSError, TypeError, ValueError, KeyError):
         _emit_error(

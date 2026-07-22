@@ -720,6 +720,32 @@ def main(argv: Optional[list[str]] = None) -> int:
         except ValueError as exc:
             print(f"ERROR: {exc}")
             return 1
+        if args.final:
+            try:
+                recovered_receipt_id = factor_repro.recover_final_backtest_receipt(
+                    gate_dir=config.FACTOR_GATE1_DIR,
+                    experiment_output_dir=config.FACTOR_EXPERIMENT_OUTPUT_DIR,
+                    candidate_id=args.candidate_id,
+                    manifest_digest=args.expected_digest,
+                    provider=args.provider,
+                    symbols=args.symbols,
+                    start=args.start,
+                    end=effective_end,
+                )
+            except (OSError, ValueError) as exc:
+                print(
+                    f"ERROR: final backtest recovery failed: {exc}",
+                    file=sys.stderr,
+                )
+                return 1
+            if recovered_receipt_id is not None:
+                print(f"final_backtest_receipt={recovered_receipt_id}")
+                print("final_backtest_recovered=true provider_replayed=false")
+                print(
+                    "Results are research evidence; a successful --final receipt "
+                    "is required before the separate Gate 3 code-review workspace."
+                )
+                return 0
         config_out = (
             Path(args.config_out)
             if args.config_out

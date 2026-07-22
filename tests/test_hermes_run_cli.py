@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from hqa.hermes_run_adapter import ScriptedFakeHermesAdapter
+from hqa.hermes_run_adapter import HermesRunError, ScriptedFakeHermesAdapter
 from hqa.hermes_run_cli import main
 
 
@@ -135,3 +135,69 @@ def test_unknown_fields_are_rejected_without_calling_adapter(
     assert payload["error"]["code"] == "run_invalid_request"
     assert called is False
     assert "must-never-be-echoed" not in stdout.getvalue()
+
+
+def test_upstream_error_message_cannot_echo_prompt_or_bearer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompt = "private investment thesis"
+    bearer = "must-never-be-echoed"
+
+    class EchoingFailureAdapter(ScriptedFakeHermesAdapter):
+        def submit_or_get(self, *, idempotency_key, request_body):
+            raise HermesRunError(
+                "transport_error",
+                f"upstream echoed prompt={request_body['input']} bearer={bearer}",
+            )
+
+    stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    code, payload = _invoke(
+        monkeypatch,
+        EchoingFailureAdapter(),
+        "submit",
+        {
+            "endpoint": _endpoint(),
+            "idempotency_key": "owner:session:secret-error",
+            "request_body": {"input": prompt, "session_id": "web_secret"},
+        },
+    )
+
+    rendered = json.dumps(payload) + stderr.getvalue()
+    assert code == 1
+    assert payload == {
+        "error": {
+            "code": "transport_error",
+            "message": "Hermes durable Run transport is unavailable",
+            "retryable": True,
+        }
+    }
+    assert prompt not in rendered
+    assert bearer not in rendered
+
+
+def test_unreviewed_upstream_error_code_is_not_forwarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnreviewedFailureAdapter(ScriptedFakeHermesAdapter):
+        def get_status(self, run_id):
+            raise HermesRunError(
+                "private-investment-thesis",
+                "bearer must-never-be-echoed",
+            )
+
+    code, payload = _invoke(
+        monkeypatch,
+        UnreviewedFailureAdapter(),
+        "status",
+        {"endpoint": _endpoint(), "run_id": "run-secret"},
+    )
+
+    assert code == 2
+    assert payload == {
+        "error": {
+            "code": "run_upstream_error",
+            "message": "Hermes durable Run request failed",
+            "retryable": False,
+        }
+    }
