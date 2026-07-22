@@ -27,6 +27,17 @@ AGENT_SUMMARY = json.dumps(
         ],
     }
 )
+FINAL_BACKTEST_RECEIPT_ID = "backtest-" + "c" * 32
+
+
+def _paper_provenance(tmp_path: Path) -> dict[str, str]:
+    paper = tmp_path / "reviewed-paper.pdf"
+    paper.write_bytes(b"%PDF-1.7\nreviewed paper bytes\n%%EOF\n")
+    return {
+        "paper_doi": "10.1093/rfs/hhaf057",
+        "paper_file": str(paper),
+        "expected_paper_digest": hashlib.sha256(paper.read_bytes()).hexdigest(),
+    }
 
 
 def test_parse_candidate_id():
@@ -129,6 +140,7 @@ def _gate1_authority(tmp_path):
         source_file=str(source),
         expected_source_digest=source_digest,
         confirmation_note="formula and translation reviewed",
+        **_paper_provenance(tmp_path),
         gate_dir=gate_dir,
     )
     manifest_digest = "a" * 64
@@ -150,6 +162,38 @@ def test_gate1_authority_round_trip_verifies_confirmation_and_source(tmp_path) -
         candidate_id="factor-reviewed-1",
         manifest_digest=manifest_digest,
     )
+
+
+def test_gate1_confirmation_binds_verified_paper_doi_and_pdf_hash(tmp_path) -> None:
+    gate_dir = tmp_path / "gate1"
+    source = tmp_path / "factor.py"
+    source.write_text("# reviewed factor\n", encoding="utf-8")
+    source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF-1.7\nreviewed paper bytes\n%%EOF\n")
+    paper_digest = hashlib.sha256(paper.read_bytes()).hexdigest()
+
+    confirmation_id, _, _ = fr.prepare_gate1_confirmation(
+        goal="reviewed factor",
+        universe="SPY,QQQ",
+        source_file=str(source),
+        expected_source_digest=source_digest,
+        confirmation_note="formula and translation reviewed",
+        paper_doi="https://doi.org/10.1093/RFS/HHAF057",
+        paper_file=str(paper),
+        expected_paper_digest=paper_digest,
+        gate_dir=gate_dir,
+    )
+
+    record = json.loads(
+        (gate_dir / "confirmations" / f"{confirmation_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert record["schema_version"] == "1.1"
+    assert record["paper_doi"] == "10.1093/rfs/hhaf057"
+    assert record["paper_digest"] == paper_digest
+    assert Path(record["staged_paper"]).read_bytes() == paper.read_bytes()
 
 
 def test_gate1_rejects_forged_binding_without_confirmation(tmp_path) -> None:
@@ -203,6 +247,20 @@ def test_gate1_rejects_missing_or_changed_staged_source(tmp_path) -> None:
         )
 
 
+def test_gate1_rejects_changed_staged_paper(tmp_path) -> None:
+    gate_dir, _, manifest_digest, _ = _gate1_authority(tmp_path)
+    staged_paper = next((gate_dir / "papers").glob("*.pdf"))
+    staged_paper.chmod(0o600)
+    staged_paper.write_bytes(b"%PDF-1.7\ntampered paper bytes\n%%EOF\n")
+
+    with pytest.raises(ValueError, match="paper digest"):
+        fr.require_gate1_candidate_binding(
+            gate_dir=gate_dir,
+            candidate_id="factor-reviewed-1",
+            manifest_digest=manifest_digest,
+        )
+
+
 def test_gate1_rejects_tampered_existing_confirmation_on_reuse(tmp_path) -> None:
     gate_dir, source_digest, _, _ = _gate1_authority(tmp_path)
     confirmation_path = next((gate_dir / "confirmations").glob("*.json"))
@@ -218,6 +276,7 @@ def test_gate1_rejects_tampered_existing_confirmation_on_reuse(tmp_path) -> None
             source_file=str(tmp_path / "factor.py"),
             expected_source_digest=source_digest,
             confirmation_note="formula and translation reviewed",
+            **_paper_provenance(tmp_path),
             gate_dir=gate_dir,
         )
 
@@ -259,6 +318,7 @@ def test_gate1_write_rejects_symlinked_parent_before_any_outside_write(tmp_path)
             source_file=str(source),
             expected_source_digest=digest,
             confirmation_note="reviewed exact bytes",
+            **_paper_provenance(tmp_path),
             gate_dir=gate_dir,
         )
 
@@ -284,6 +344,7 @@ def test_gate1_write_rejects_symlinked_ancestor_before_any_outside_write(
             source_file=str(source),
             expected_source_digest=digest,
             confirmation_note="reviewed exact bytes",
+            **_paper_provenance(tmp_path),
             gate_dir=safe / "link" / "gate",
         )
 
@@ -305,6 +366,7 @@ def test_external_gate1_source_allows_parent_alias_but_not_final_symlink(tmp_pat
         source_file=str(alias / "factor.py"),
         expected_source_digest=digest,
         confirmation_note="reviewed exact bytes",
+        **_paper_provenance(tmp_path),
         gate_dir=tmp_path / "gate",
     )
 
@@ -321,6 +383,7 @@ def test_external_gate1_source_allows_parent_alias_but_not_final_symlink(tmp_pat
             source_file=str(final_alias),
             expected_source_digest=digest,
             confirmation_note="reviewed exact bytes",
+            **_paper_provenance(tmp_path),
             gate_dir=tmp_path / "other-gate",
         )
 
@@ -388,6 +451,7 @@ def _gate3_receipt(tmp_path):
         "base_commit": base_commit,
         "candidate_digest": "a" * 64,
         "candidate_id": "factor-reviewed-1",
+        "final_backtest_receipt_id": FINAL_BACKTEST_RECEIPT_ID,
         "files": files,
         "patch_sha256": patch_sha,
         "scoped_paths": scoped_paths,
@@ -409,11 +473,12 @@ def _gate3_receipt(tmp_path):
     patch.write_bytes(patch_bytes)
     manifest = promotion_dir / "manifest.v1.json"
     payload = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "promotion_id": promotion_id,
         "base_commit": base_commit,
         "candidate_id": "factor-reviewed-1",
         "candidate_digest": "a" * 64,
+        "final_backtest_receipt_id": FINAL_BACKTEST_RECEIPT_ID,
         "scoped_paths": scoped_paths,
         "files": files,
         "patch_sha256": patch_sha,
@@ -438,6 +503,7 @@ def test_gate3_receipt_binds_candidate_digest_and_base_commit(tmp_path) -> None:
         candidate_id="factor-reviewed-1",
         manifest_digest="a" * 64,
         factor_id="factor",
+        final_backtest_receipt_id=FINAL_BACKTEST_RECEIPT_ID,
         base_commit=payload["base_commit"],
         promotion_root=tmp_path / "promotions",
         worktree_root=tmp_path / "worktrees",
@@ -446,6 +512,7 @@ def test_gate3_receipt_binds_candidate_digest_and_base_commit(tmp_path) -> None:
         Path(receipt["manifest"]).read_bytes()
     ).hexdigest()
     assert evidence["patch_sha256"] == payload["patch_sha256"]
+    assert evidence["final_backtest_receipt_id"] == FINAL_BACKTEST_RECEIPT_ID
 
 
 def test_gate3_receipt_rejects_managed_root_escape(tmp_path) -> None:
@@ -458,6 +525,7 @@ def test_gate3_receipt_rejects_managed_root_escape(tmp_path) -> None:
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
             factor_id="factor",
+            final_backtest_receipt_id=FINAL_BACKTEST_RECEIPT_ID,
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
             worktree_root=tmp_path / "worktrees",
@@ -474,6 +542,7 @@ def test_gate3_receipt_accepts_platform_resolved_worktree_root_alias(tmp_path) -
         candidate_id="factor-reviewed-1",
         manifest_digest="a" * 64,
         factor_id="factor",
+        final_backtest_receipt_id=FINAL_BACKTEST_RECEIPT_ID,
         base_commit=payload["base_commit"],
         promotion_root=tmp_path / "promotions",
         worktree_root=alias_root,
@@ -494,6 +563,7 @@ def test_gate3_receipt_rejects_worktree_file_drift(tmp_path) -> None:
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
             factor_id="factor",
+            final_backtest_receipt_id=FINAL_BACKTEST_RECEIPT_ID,
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
             worktree_root=tmp_path / "worktrees",
@@ -521,6 +591,7 @@ def test_gate3_rejects_nested_file_entry_before_identity_serialization(
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
             factor_id="factor",
+            final_backtest_receipt_id=FINAL_BACKTEST_RECEIPT_ID,
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
             worktree_root=tmp_path / "worktrees",
@@ -539,6 +610,7 @@ def test_gate3_receipt_rejects_extra_dirty_path(tmp_path) -> None:
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
             factor_id="factor",
+            final_backtest_receipt_id=FINAL_BACKTEST_RECEIPT_ID,
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
             worktree_root=tmp_path / "worktrees",
@@ -557,6 +629,7 @@ def test_gate3_receipt_rejects_executable_file_but_allows_restrictive_umask(
         candidate_id="factor-reviewed-1",
         manifest_digest="a" * 64,
         factor_id="factor",
+        final_backtest_receipt_id=FINAL_BACKTEST_RECEIPT_ID,
         base_commit=payload["base_commit"],
         promotion_root=tmp_path / "promotions",
         worktree_root=tmp_path / "worktrees",
@@ -569,6 +642,7 @@ def test_gate3_receipt_rejects_executable_file_but_allows_restrictive_umask(
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
             factor_id="factor",
+            final_backtest_receipt_id=FINAL_BACKTEST_RECEIPT_ID,
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
             worktree_root=tmp_path / "worktrees",
@@ -958,6 +1032,11 @@ def test_final_backtest_receipt_is_content_addressed_and_exact(
     monkeypatch.setattr(fr, "require_gate1_candidate_binding", lambda **kwargs: None)
     gate_dir = tmp_path / "gate1"
     artifacts = _backtest_artifacts(tmp_path)
+    attempt_id = fr.reserve_final_backtest_once(
+        gate_dir=gate_dir,
+        candidate_id="factor-reviewed-1",
+        manifest_digest="a" * 64,
+    )
 
     receipt_id = fr.record_final_backtest_receipt(
         gate_dir=gate_dir,
@@ -974,6 +1053,7 @@ def test_final_backtest_receipt_is_content_addressed_and_exact(
         symbols=["SPY", "QQQ"],
         start="2020-01-02",
         end="2026-06-30",
+        final_attempt_id=attempt_id,
         **artifacts,
     )
 
@@ -987,6 +1067,7 @@ def test_final_backtest_receipt_is_content_addressed_and_exact(
     )
     assert record["status"] == "succeeded"
     assert record["final"] is True
+    assert record["final_attempt_id"] == attempt_id
     assert record["symbols"] == ["SPY", "QQQ"]
 
     with pytest.raises(ValueError, match="receipt values"):
@@ -999,10 +1080,36 @@ def test_final_backtest_receipt_is_content_addressed_and_exact(
         )
 
 
+def test_final_backtest_attempt_is_durably_reserved_once_per_candidate(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(fr, "require_gate1_candidate_binding", lambda **kwargs: None)
+    gate_dir = tmp_path / "gate1"
+
+    attempt_id = fr.reserve_final_backtest_once(
+        gate_dir=gate_dir,
+        candidate_id="factor-reviewed-1",
+        manifest_digest="a" * 64,
+    )
+
+    assert attempt_id.startswith("final-")
+    with pytest.raises(ValueError, match="already reserved"):
+        fr.reserve_final_backtest_once(
+            gate_dir=gate_dir,
+            candidate_id="factor-reviewed-1",
+            manifest_digest="a" * 64,
+        )
+
+
 def test_final_backtest_receipt_rejects_tampering(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(fr, "require_gate1_candidate_binding", lambda **kwargs: None)
     gate_dir = tmp_path / "gate1"
     artifacts = _backtest_artifacts(tmp_path)
+    attempt_id = fr.reserve_final_backtest_once(
+        gate_dir=gate_dir,
+        candidate_id="factor-reviewed-1",
+        manifest_digest="a" * 64,
+    )
     receipt_id = fr.record_final_backtest_receipt(
         gate_dir=gate_dir,
         experiment_output_dir=tmp_path,
@@ -1018,6 +1125,7 @@ def test_final_backtest_receipt_rejects_tampering(monkeypatch, tmp_path) -> None
         symbols=["SPY", "QQQ"],
         start="2020-01-02",
         end="2026-06-30",
+        final_attempt_id=attempt_id,
         **artifacts,
     )
     path = gate_dir / "backtests" / f"{receipt_id}.json"
@@ -1045,6 +1153,11 @@ def test_final_backtest_receipt_rejects_later_artifact_tampering(
     monkeypatch.setattr(fr, "require_gate1_candidate_binding", lambda **kwargs: None)
     gate_dir = tmp_path / "gate1"
     artifacts = _backtest_artifacts(tmp_path)
+    attempt_id = fr.reserve_final_backtest_once(
+        gate_dir=gate_dir,
+        candidate_id="factor-reviewed-1",
+        manifest_digest="a" * 64,
+    )
     receipt_id = fr.record_final_backtest_receipt(
         gate_dir=gate_dir,
         experiment_output_dir=tmp_path,
@@ -1060,6 +1173,7 @@ def test_final_backtest_receipt_rejects_later_artifact_tampering(
         symbols=["SPY", "QQQ"],
         start="2020-01-02",
         end="2026-06-30",
+        final_attempt_id=attempt_id,
         **artifacts,
     )
     Path(artifacts["report"]).write_text(
@@ -1080,10 +1194,16 @@ def test_final_backtest_receipt_refuses_synthetic_provider(
     monkeypatch, tmp_path
 ) -> None:
     monkeypatch.setattr(fr, "require_gate1_candidate_binding", lambda **kwargs: None)
+    gate_dir = tmp_path / "gate1"
+    attempt_id = fr.reserve_final_backtest_once(
+        gate_dir=gate_dir,
+        candidate_id="factor-reviewed-1",
+        manifest_digest="a" * 64,
+    )
 
     with pytest.raises(ValueError, match="real configured provider"):
         fr.record_final_backtest_receipt(
-            gate_dir=tmp_path / "gate1",
+            gate_dir=gate_dir,
             experiment_output_dir=tmp_path,
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
@@ -1097,6 +1217,7 @@ def test_final_backtest_receipt_refuses_synthetic_provider(
             symbols=["SPY"],
             start="2020-01-02",
             end="2026-06-30",
+            final_attempt_id=attempt_id,
             **_backtest_artifacts(tmp_path),
         )
 
@@ -1116,6 +1237,7 @@ def test_gate3_receipt_rejects_manifest_binding_or_patch_drift(tmp_path) -> None
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
             factor_id="factor",
+            final_backtest_receipt_id=FINAL_BACKTEST_RECEIPT_ID,
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
             worktree_root=tmp_path / "worktrees",
@@ -1135,6 +1257,7 @@ def test_gate3_receipt_rejects_manifest_binding_or_patch_drift(tmp_path) -> None
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
             factor_id="factor",
+            final_backtest_receipt_id=FINAL_BACKTEST_RECEIPT_ID,
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
             worktree_root=tmp_path / "worktrees",

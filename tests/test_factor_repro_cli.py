@@ -31,6 +31,28 @@ def _valid_gate1_binding_by_default(monkeypatch, tmp_path):
     )
 
 
+def _paper_cli_args(tmp_path: Path | None = None) -> list[str]:
+    if tmp_path is None:
+        return [
+            "--paper-doi",
+            "10.1093/rfs/hhaf057",
+            "--paper-file",
+            "/tmp/reviewed-paper.pdf",
+            "--expected-paper-digest",
+            "c" * 64,
+        ]
+    paper = tmp_path / "reviewed-paper.pdf"
+    paper.write_bytes(b"%PDF-1.7\nreviewed paper bytes\n%%EOF\n")
+    return [
+        "--paper-doi",
+        "10.1093/rfs/hhaf057",
+        "--paper-file",
+        str(paper),
+        "--expected-paper-digest",
+        hashlib.sha256(paper.read_bytes()).hexdigest(),
+    ]
+
+
 def _experiment_receipt(
     config_path,
     *,
@@ -203,6 +225,9 @@ def test_propose_requires_and_persists_exact_source_gate_before_candidate(
     source = tmp_path / "factor_src.py"
     source.write_text("# reviewed factor\n", encoding="utf-8")
     source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF-1.7\nreviewed paper bytes\n%%EOF\n")
+    paper_digest = hashlib.sha256(paper.read_bytes()).hexdigest()
     gate_dir = tmp_path / "gate1"
     monkeypatch.setattr(cli.config, "FACTOR_GATE1_DIR", gate_dir)
     seen = {}
@@ -241,6 +266,12 @@ def test_propose_requires_and_persists_exact_source_gate_before_candidate(
             source_digest,
             "--confirmation-note",
             "formula and implementation reviewed",
+            "--paper-doi",
+            "10.1093/rfs/hhaf057",
+            "--paper-file",
+            str(paper),
+            "--expected-paper-digest",
+            paper_digest,
         ]
     )
     assert rc == 0
@@ -260,6 +291,9 @@ def test_propose_requires_and_persists_exact_source_gate_before_candidate(
     bindings = list((gate_dir / "bindings").glob("*.json"))
     assert len(records) == 1
     assert len(bindings) == 1
+    confirmation = json.loads(records[0].read_text(encoding="utf-8"))
+    assert confirmation["paper_doi"] == "10.1093/rfs/hhaf057"
+    assert confirmation["paper_digest"] == paper_digest
     assert json.loads(bindings[0].read_text(encoding="utf-8"))["candidate_id"] == "factor-x-1"
 
 
@@ -301,6 +335,7 @@ def test_propose_revalidates_gate1_after_platform_returns(
         "--source-file", str(source),
         "--expected-source-digest", source_digest,
         "--confirmation-note", "formula and implementation reviewed",
+        *_paper_cli_args(tmp_path),
     ])
 
     captured = capsys.readouterr()
@@ -332,6 +367,7 @@ def test_propose_source_digest_mismatch_fails_before_platform(
             "0" * 64,
             "--confirmation-note",
             "reviewed before later change",
+            *_paper_cli_args(tmp_path),
         ]
     )
 
@@ -377,6 +413,7 @@ def test_propose_refuses_platform_candidate_with_different_source_bytes(
             source_digest,
             "--confirmation-note",
             "reviewed",
+            *_paper_cli_args(),
         ]
     )
 
@@ -398,12 +435,16 @@ def test_propose_rejects_tampered_existing_confirmation_before_platform(
     source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
     gate_dir = tmp_path / "gate1"
     monkeypatch.setattr(cli.config, "FACTOR_GATE1_DIR", gate_dir)
+    paper_args = _paper_cli_args(tmp_path)
     cli.factor_repro.prepare_gate1_confirmation(
         goal="reviewed factor",
         universe="SPY,QQQ",
         source_file=str(source),
         expected_source_digest=source_digest,
         confirmation_note="formula and translation reviewed",
+        paper_doi=paper_args[1],
+        paper_file=paper_args[3],
+        expected_paper_digest=paper_args[5],
         gate_dir=gate_dir,
     )
     confirmation_path = next((gate_dir / "confirmations").glob("*.json"))
@@ -423,6 +464,7 @@ def test_propose_rejects_tampered_existing_confirmation_before_platform(
         "--source-file", str(source),
         "--expected-source-digest", source_digest,
         "--confirmation-note", "formula and translation reviewed",
+        *paper_args,
     ])
 
     captured = capsys.readouterr()
@@ -448,6 +490,7 @@ def test_propose_returns_nonzero_when_candidate_id_missing(monkeypatch, capsys):
         "propose", "--goal", "momentum 20d reversal", "--source-file", source,
         "--expected-source-digest", source_digest,
         "--confirmation-note", "reviewed",
+        *_paper_cli_args(),
     ])
     assert rc == 1
     assert "candidate_id=?" in capsys.readouterr().out
@@ -481,6 +524,7 @@ def test_propose_timeout_is_controlled_and_never_exposes_authority(
             "--source-file", "/tmp/source.py",
             "--expected-source-digest", source_digest,
             "--confirmation-note", "reviewed",
+            *_paper_cli_args(),
         ]
     )
 
@@ -517,6 +561,7 @@ def test_propose_returns_nonzero_and_writes_no_binding_without_exact_receipt(
         "propose", "--goal", "goal", "--source-file", "/tmp/source.py",
         "--expected-source-digest", source_digest,
         "--confirmation-note", "reviewed",
+        *_paper_cli_args(tmp_path),
     ])
 
     assert rc == 1
@@ -557,6 +602,7 @@ def test_propose_binds_only_successful_machine_pending_receipt(
         "propose", "--goal", "goal", "--source-file", "/tmp/source.py",
         "--expected-source-digest", source_digest,
         "--confirmation-note", "reviewed",
+        *_paper_cli_args(tmp_path),
     ])
 
     assert rc == 1
@@ -590,6 +636,7 @@ def test_propose_does_not_promote_human_kv_output_to_authority(
         "propose", "--goal", "goal", "--source-file", "/tmp/source.py",
         "--expected-source-digest", source_digest,
         "--confirmation-note", "reviewed",
+        *_paper_cli_args(tmp_path),
     ])
 
     assert rc == 1
@@ -879,6 +926,7 @@ def test_promote_passes_exact_binding_and_requires_four_field_receipt(
         "patch_sha256": "2" * 64,
         "candidate_id": "factor-x-1",
         "candidate_digest": "a" * 64,
+        "final_backtest_receipt_id": "backtest-" + "c" * 32,
         "base_commit": "b" * 40,
         "scoped_paths": [
             "src/quant_system/factors/library/promoted/reviewed_factor.py",
@@ -972,6 +1020,7 @@ def test_promote_passes_exact_binding_and_requires_four_field_receipt(
         "platform": {
             "candidate_id": "factor-x-1",
             "expected_manifest_digest": "a" * 64,
+            "final_backtest_receipt_id": "backtest-" + "c" * 32,
             "base_commit": "b" * 40,
         },
             "verified": {
@@ -979,6 +1028,7 @@ def test_promote_passes_exact_binding_and_requires_four_field_receipt(
                 "candidate_id": "factor-x-1",
                 "manifest_digest": "a" * 64,
                 "factor_id": "reviewed_factor",
+                "final_backtest_receipt_id": "backtest-" + "c" * 32,
                 "base_commit": "b" * 40,
                 "promotion_root": Path("/tmp/promotions"),
                 "worktree_root": Path("/tmp/worktrees"),
@@ -1812,6 +1862,38 @@ def test_backtest_final_writes_full_end_and_no_holdout_note(monkeypatch, capsys,
     assert receipt["candidate_id"] == "cand-holdout_factor"
     assert receipt["manifest_digest"] == "2" * 64
     assert receipt["final"] is True
+
+
+def test_second_final_backtest_is_refused_before_provider_execution(
+    monkeypatch, capsys, tmp_path
+) -> None:
+    calls = 0
+
+    def counted_run(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return _fake_experiment_receipt(*args, **kwargs)
+
+    monkeypatch.setattr(cli.quant_cli, "run_experiment_config", counted_run)
+    monkeypatch.setattr(cli.config, "LOG_DIR", tmp_path)
+    common = [
+        "backtest",
+        "--candidate-id", "cand-once_factor",
+        "--expected-digest", "4" * 64,
+        "--symbol", "SPY",
+        "--start", "2020-01-02",
+        "--end", "2026-06-30",
+        "--final",
+    ]
+
+    first = cli.main([*common, "--config-out", str(tmp_path / "first.json")])
+    second = cli.main([*common, "--config-out", str(tmp_path / "second.json")])
+
+    captured = capsys.readouterr()
+    assert first == 0
+    assert second == 2
+    assert calls == 1
+    assert "already reserved" in captured.err
 
 
 def test_backtest_records_trial_and_final_flag(monkeypatch, capsys, tmp_path):

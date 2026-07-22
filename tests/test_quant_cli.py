@@ -315,6 +315,7 @@ def test_run_promote_candidate_uses_exact_gate3_binding_and_clean_json(monkeypat
     code, out = quant_cli.run_promote_candidate(
         candidate_id="factor-x-1",
         expected_manifest_digest="a" * 64,
+        final_backtest_receipt_id="backtest-" + "c" * 32,
         base_commit="b" * 40,
     )
 
@@ -327,6 +328,8 @@ def test_run_promote_candidate_uses_exact_gate3_binding_and_clean_json(monkeypat
         "factor-x-1",
         "--expected-digest",
         "a" * 64,
+        "--final-backtest-receipt",
+        "backtest-" + "c" * 32,
         "--base-commit",
         "b" * 40,
     ]

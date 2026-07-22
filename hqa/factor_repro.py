@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import secrets
 import stat
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -21,7 +22,10 @@ _PROMOTION_ID_RE = re.compile(
     r"^promo-[0-9a-f]{32}(?:-r(?:[2-9]|[1-9][0-9]+))?$"
 )
 _BACKTEST_RECEIPT_ID_RE = re.compile(r"^backtest-[0-9a-f]{32}$")
+_FINAL_ATTEMPT_ID_RE = re.compile(r"^final-[0-9a-f]{32}$")
+_DOI_RE = re.compile(r"^10\.\d{4,9}/[-._;()/:a-z0-9]+$")
 _MAX_GATE1_SOURCE_BYTES = 1_048_576
+_MAX_GATE1_PAPER_BYTES = 67_108_864
 _MAX_GATE3_PATCH_BYTES = 8_388_608
 _MAX_BACKTEST_ARTIFACT_BYTES = 8_388_608
 
@@ -197,6 +201,31 @@ def _read_external_gate1_source(path: Path) -> bytes:
     )
 
 
+def _canonical_paper_doi(value: str) -> str:
+    normalized = value.strip().lower()
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
+        if normalized.startswith(prefix):
+            normalized = normalized.removeprefix(prefix).strip()
+            break
+    if _DOI_RE.fullmatch(normalized) is None:
+        raise ValueError("paper-doi must be a canonical DOI")
+    return normalized
+
+
+def _read_gate1_paper(path: Path, *, external: bool = False) -> bytes:
+    absolute = Path(os.path.abspath(path))
+    if external:
+        absolute = Path(os.path.realpath(absolute.parent)) / absolute.name
+    payload = _read_regular_file(
+        absolute,
+        label="Gate 1 paper",
+        max_bytes=_MAX_GATE1_PAPER_BYTES,
+    )
+    if not payload.startswith(b"%PDF-") or b"%%EOF" not in payload[-4096:]:
+        raise ValueError("Gate 1 paper must contain real PDF bytes")
+    return payload
+
+
 def _canonical_authority_dir(path: Path) -> Path:
     absolute = Path(os.path.abspath(path))
     # macOS exposes a small set of root-owned compatibility aliases (notably
@@ -251,11 +280,14 @@ def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> None:
 
     confirmations_dir = gate_dir / "confirmations"
     sources_dir = gate_dir / "sources"
+    papers_dir = gate_dir / "papers"
     if (
         not confirmations_dir.is_dir()
         or confirmations_dir.is_symlink()
         or not sources_dir.is_dir()
         or sources_dir.is_symlink()
+        or not papers_dir.is_dir()
+        or papers_dir.is_symlink()
     ):
         raise ValueError("Gate 1 confirmation authority missing")
 
@@ -270,23 +302,32 @@ def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> None:
         "goal",
         "universe",
         "source_digest",
+        "paper_doi",
+        "paper_digest",
         "confirmation_note",
         "staged_source",
+        "staged_paper",
         "confirmation_id",
         "confirmed_at",
     }
     if set(confirmation) != confirmation_fields:
         raise ValueError(f"invalid Gate 1 confirmation schema: {confirmation_path}")
     if (
-        confirmation.get("schema_version") != "1.0"
+        confirmation.get("schema_version") != "1.1"
         or confirmation.get("gate") != "formula_translation_confirmation"
         or confirmation.get("confirmation_id") != confirmation_id
         or confirmation.get("source_digest") != source_digest
+        or not isinstance(confirmation.get("paper_doi"), str)
+        or _canonical_paper_doi(confirmation["paper_doi"])
+        != confirmation["paper_doi"]
+        or not isinstance(confirmation.get("paper_digest"), str)
+        or _HEX64.fullmatch(confirmation["paper_digest"]) is None
         or not isinstance(confirmation.get("goal"), str)
         or not isinstance(confirmation.get("universe"), str)
         or not isinstance(confirmation.get("confirmation_note"), str)
         or not confirmation["confirmation_note"].strip()
         or not isinstance(confirmation.get("staged_source"), str)
+        or not isinstance(confirmation.get("staged_paper"), str)
         or not isinstance(confirmation.get("confirmed_at"), str)
     ):
         raise ValueError(f"invalid Gate 1 confirmation values: {confirmation_path}")
@@ -299,8 +340,11 @@ def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> None:
             "goal",
             "universe",
             "source_digest",
+            "paper_doi",
+            "paper_digest",
             "confirmation_note",
             "staged_source",
+            "staged_paper",
         )
     }
     expected_confirmation_hash = hashlib.sha256(_canonical_bytes(confirmed)).hexdigest()
@@ -318,6 +362,18 @@ def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> None:
             f"expected {source_digest}, got {observed_source_digest}"
         )
 
+    paper_digest = confirmation["paper_digest"]
+    expected_paper = papers_dir / f"{paper_digest}.pdf"
+    recorded_paper = Path(confirmation["staged_paper"])
+    if Path(os.path.abspath(recorded_paper)) != Path(os.path.abspath(expected_paper)):
+        raise ValueError(f"Gate 1 staged paper path mismatch: {confirmation_path}")
+    observed_paper_digest = hashlib.sha256(_read_gate1_paper(expected_paper)).hexdigest()
+    if observed_paper_digest != paper_digest:
+        raise ValueError(
+            "Gate 1 staged paper digest mismatch: "
+            f"expected {paper_digest}, got {observed_paper_digest}"
+        )
+
 
 def prepare_gate1_confirmation(
     *,
@@ -326,12 +382,18 @@ def prepare_gate1_confirmation(
     source_file: str,
     expected_source_digest: str,
     confirmation_note: str,
+    paper_doi: str,
+    paper_file: str,
+    expected_paper_digest: str,
     gate_dir: Path,
 ) -> tuple[str, str, str]:
     """Verify human-reviewed source bytes and persist Gate 1 before proposal."""
     gate_dir = _canonical_authority_dir(gate_dir)
     if _HEX64.fullmatch(expected_source_digest) is None:
         raise ValueError("expected-source-digest must be lowercase SHA-256")
+    if _HEX64.fullmatch(expected_paper_digest) is None:
+        raise ValueError("expected-paper-digest must be lowercase SHA-256")
+    canonical_doi = _canonical_paper_doi(paper_doi)
     note = confirmation_note.strip()
     if not note:
         raise ValueError("confirmation-note must be non-empty")
@@ -342,19 +404,33 @@ def prepare_gate1_confirmation(
         raise ValueError(
             f"Gate 1 source digest mismatch: expected {expected_source_digest}, got {observed}"
         )
+    paper_payload = _read_gate1_paper(Path(paper_file), external=True)
+    observed_paper_digest = hashlib.sha256(paper_payload).hexdigest()
+    if observed_paper_digest != expected_paper_digest:
+        raise ValueError(
+            "Gate 1 paper digest mismatch: "
+            f"expected {expected_paper_digest}, got {observed_paper_digest}"
+        )
 
     stable_source = gate_dir / "sources" / f"{observed}.py"
     _write_exclusive_or_verify(stable_source, payload)
     _chmod_regular_file(stable_source, 0o400)
 
+    stable_paper = gate_dir / "papers" / f"{observed_paper_digest}.pdf"
+    _write_exclusive_or_verify(stable_paper, paper_payload)
+    _chmod_regular_file(stable_paper, 0o400)
+
     confirmed = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "gate": "formula_translation_confirmation",
         "goal": goal,
         "universe": universe,
         "source_digest": observed,
+        "paper_doi": canonical_doi,
+        "paper_digest": observed_paper_digest,
         "confirmation_note": note,
         "staged_source": str(stable_source),
+        "staged_paper": str(stable_paper),
     }
     confirmation_hash = hashlib.sha256(_canonical_bytes(confirmed)).hexdigest()
     confirmation_id = f"gate1-{confirmation_hash[:32]}"
@@ -816,6 +892,93 @@ def verify_experiment_receipt(
     }
 
 
+def reserve_final_backtest_once(
+    *,
+    gate_dir: Path,
+    candidate_id: str,
+    manifest_digest: str,
+) -> str:
+    """Atomically consume the one allowed full-window attempt for a candidate."""
+    gate_dir = _canonical_authority_dir(gate_dir)
+    require_gate1_candidate_binding(
+        gate_dir=gate_dir,
+        candidate_id=candidate_id,
+        manifest_digest=manifest_digest,
+    )
+    if _CANDIDATE_ID_RE.fullmatch(candidate_id) is None:
+        raise ValueError("final backtest reservation requires a valid candidate ID")
+    if _HEX64.fullmatch(manifest_digest) is None:
+        raise ValueError("final backtest reservation requires a lowercase SHA-256")
+    identity = {
+        "schema_version": "1.0",
+        "gate": "final_one_shot_reservation",
+        "candidate_id": candidate_id,
+        "manifest_digest": manifest_digest,
+    }
+    attempt_hash = hashlib.sha256(_canonical_bytes(identity)).hexdigest()
+    attempt_id = f"final-{attempt_hash[:32]}"
+    record = {
+        **identity,
+        "attempt_id": attempt_id,
+        "reserved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "reservation_nonce": secrets.token_hex(16),
+    }
+    path = gate_dir / "final-attempts" / f"{attempt_id}.json"
+    if path.exists():
+        raise ValueError("final backtest attempt already reserved for candidate")
+    try:
+        _write_exclusive_or_verify(path, _canonical_bytes(record))
+    except ValueError as exc:
+        if path.exists():
+            raise ValueError(
+                "final backtest attempt already reserved for candidate"
+            ) from exc
+        raise
+    return attempt_id
+
+
+def _require_final_backtest_attempt(
+    *, gate_dir: Path, attempt_id: str, candidate_id: str, manifest_digest: str
+) -> dict:
+    if _FINAL_ATTEMPT_ID_RE.fullmatch(attempt_id) is None:
+        raise ValueError("invalid final backtest attempt ID")
+    path = gate_dir / "final-attempts" / f"{attempt_id}.json"
+    record = _read_canonical_json_record(path, label="final backtest attempt")
+    expected_fields = {
+        "schema_version",
+        "gate",
+        "candidate_id",
+        "manifest_digest",
+        "attempt_id",
+        "reserved_at",
+        "reservation_nonce",
+    }
+    identity = {
+        "schema_version": "1.0",
+        "gate": "final_one_shot_reservation",
+        "candidate_id": candidate_id,
+        "manifest_digest": manifest_digest,
+    }
+    expected_id = (
+        "final-" + hashlib.sha256(_canonical_bytes(identity)).hexdigest()[:32]
+    )
+    if (
+        set(record) != expected_fields
+        or record.get("schema_version") != "1.0"
+        or record.get("gate") != "final_one_shot_reservation"
+        or record.get("candidate_id") != candidate_id
+        or record.get("manifest_digest") != manifest_digest
+        or record.get("attempt_id") != attempt_id
+        or attempt_id != expected_id
+        or not isinstance(record.get("reserved_at"), str)
+        or not record["reserved_at"].strip()
+        or not isinstance(record.get("reservation_nonce"), str)
+        or re.fullmatch(r"[0-9a-f]{32}", record["reservation_nonce"]) is None
+    ):
+        raise ValueError(f"invalid final backtest attempt values: {path}")
+    return record
+
+
 def record_final_backtest_receipt(
     *,
     gate_dir: Path,
@@ -830,6 +993,7 @@ def record_final_backtest_receipt(
     symbols: list[str],
     start: str,
     end: str,
+    final_attempt_id: str,
     config_path: str,
     config_sha256: str,
     agent_summary_path: str,
@@ -848,6 +1012,12 @@ def record_final_backtest_receipt(
         raise ValueError("final backtest receipt requires a valid candidate ID")
     if _HEX64.fullmatch(manifest_digest) is None:
         raise ValueError("final backtest receipt requires a lowercase SHA-256")
+    _require_final_backtest_attempt(
+        gate_dir=gate_dir,
+        attempt_id=final_attempt_id,
+        candidate_id=candidate_id,
+        manifest_digest=manifest_digest,
+    )
     string_fields = {
         "factor_id": factor_id,
         "experiment_id": experiment_id,
@@ -904,10 +1074,11 @@ def record_final_backtest_receipt(
     )
 
     evidence = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "gate": "final_one_shot_backtest",
         "status": "succeeded",
         "final": True,
+        "final_attempt_id": final_attempt_id,
         "candidate_id": candidate_id,
         "manifest_digest": manifest_digest,
         "factor_id": factor_id,
@@ -929,6 +1100,18 @@ def record_final_backtest_receipt(
     receipt_hash = hashlib.sha256(_canonical_bytes(evidence)).hexdigest()
     receipt_id = f"backtest-{receipt_hash[:32]}"
     record = {**evidence, "receipt_id": receipt_id}
+    completion = {
+        "schema_version": "1.0",
+        "gate": "final_one_shot_completion",
+        "final_attempt_id": final_attempt_id,
+        "receipt_id": receipt_id,
+        "candidate_id": candidate_id,
+        "manifest_digest": manifest_digest,
+    }
+    completion_path = (
+        gate_dir / "final-completions" / f"{final_attempt_id}.json"
+    )
+    _write_exclusive_or_verify(completion_path, _canonical_bytes(completion))
     path = gate_dir / "backtests" / f"{receipt_id}.json"
     _write_exclusive_or_verify(path, _canonical_bytes(record))
     require_final_backtest_receipt(
@@ -969,6 +1152,7 @@ def require_final_backtest_receipt(
         "gate",
         "status",
         "final",
+        "final_attempt_id",
         "candidate_id",
         "manifest_digest",
         "factor_id",
@@ -991,10 +1175,12 @@ def require_final_backtest_receipt(
     if set(record) != expected_fields:
         raise ValueError(f"invalid final backtest receipt schema: {path}")
     if (
-        record.get("schema_version") != "1.0"
+        record.get("schema_version") != "1.1"
         or record.get("gate") != "final_one_shot_backtest"
         or record.get("status") != "succeeded"
         or record.get("final") is not True
+        or not isinstance(record.get("final_attempt_id"), str)
+        or _FINAL_ATTEMPT_ID_RE.fullmatch(record["final_attempt_id"]) is None
         or record.get("receipt_id") != receipt_id
         or record.get("candidate_id") != candidate_id
         or record.get("manifest_digest") != manifest_digest
@@ -1032,6 +1218,28 @@ def require_final_backtest_receipt(
     )
     if receipt_id != expected_id:
         raise ValueError(f"final backtest receipt content address mismatch: {path}")
+    _require_final_backtest_attempt(
+        gate_dir=gate_dir,
+        attempt_id=record["final_attempt_id"],
+        candidate_id=candidate_id,
+        manifest_digest=manifest_digest,
+    )
+    completion_path = (
+        gate_dir / "final-completions" / f"{record['final_attempt_id']}.json"
+    )
+    completion = _read_canonical_json_record(
+        completion_path,
+        label="final backtest completion",
+    )
+    if completion != {
+        "schema_version": "1.0",
+        "gate": "final_one_shot_completion",
+        "final_attempt_id": record["final_attempt_id"],
+        "receipt_id": receipt_id,
+        "candidate_id": candidate_id,
+        "manifest_digest": manifest_digest,
+    }:
+        raise ValueError(f"invalid final backtest completion: {completion_path}")
     for path_field, digest_field in (
         ("config_path", "config_sha256"),
         ("agent_summary_path", "agent_summary_sha256"),
@@ -1085,6 +1293,7 @@ def verify_gate3_receipt(
     candidate_id: str,
     manifest_digest: str,
     factor_id: str,
+    final_backtest_receipt_id: str,
     base_commit: str,
     promotion_root: Path,
     worktree_root: Path,
@@ -1097,6 +1306,7 @@ def verify_gate3_receipt(
         _CANDIDATE_ID_RE.fullmatch(candidate_id) is None
         or _CANDIDATE_ID_RE.fullmatch(factor_id) is None
         or _HEX64.fullmatch(manifest_digest) is None
+        or _BACKTEST_RECEIPT_ID_RE.fullmatch(final_backtest_receipt_id) is None
         or _GIT_COMMIT_RE.fullmatch(base_commit) is None
     ):
         raise ValueError("invalid Gate 3 expected binding")
@@ -1184,6 +1394,7 @@ def verify_gate3_receipt(
         "base_commit",
         "candidate_id",
         "candidate_digest",
+        "final_backtest_receipt_id",
         "scoped_paths",
         "files",
         "patch_sha256",
@@ -1191,11 +1402,13 @@ def verify_gate3_receipt(
     if not isinstance(manifest, dict) or set(manifest) != manifest_fields:
         raise ValueError("invalid Gate 3 manifest schema")
     if (
-        manifest.get("schema_version") != "1.0"
+        manifest.get("schema_version") != "1.1"
         or manifest.get("promotion_id") != promotion_id
         or manifest.get("base_commit") != base_commit
         or manifest.get("candidate_id") != candidate_id
         or manifest.get("candidate_digest") != manifest_digest
+        or manifest.get("final_backtest_receipt_id")
+        != final_backtest_receipt_id
         or not isinstance(manifest.get("scoped_paths"), list)
         or not manifest["scoped_paths"]
         or not all(isinstance(path, str) and path for path in manifest["scoped_paths"])
@@ -1294,6 +1507,7 @@ def verify_gate3_receipt(
         "base_commit": base_commit,
         "candidate_digest": manifest_digest,
         "candidate_id": candidate_id,
+        "final_backtest_receipt_id": final_backtest_receipt_id,
         "files": manifest["files"],
         "patch_sha256": manifest["patch_sha256"],
         "scoped_paths": manifest["scoped_paths"],
@@ -1374,6 +1588,7 @@ def verify_gate3_receipt(
         "patch_sha256": manifest["patch_sha256"],
         "candidate_id": candidate_id,
         "candidate_digest": manifest_digest,
+        "final_backtest_receipt_id": final_backtest_receipt_id,
         "base_commit": base_commit,
         "scoped_paths": manifest["scoped_paths"],
     }

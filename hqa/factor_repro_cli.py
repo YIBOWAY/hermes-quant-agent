@@ -232,9 +232,27 @@ def main(argv: Optional[list[str]] = None) -> int:
         dest="confirmation_note",
         help="Non-empty human formula/translation review note (Gate 1)",
     )
+    p_propose.add_argument(
+        "--paper-doi",
+        required=True,
+        dest="paper_doi",
+        help="DOI of the exact paper whose formula was reviewed (Gate 1)",
+    )
+    p_propose.add_argument(
+        "--paper-file",
+        required=True,
+        dest="paper_file",
+        help="local PDF whose exact bytes were reviewed (Gate 1)",
+    )
+    p_propose.add_argument(
+        "--expected-paper-digest",
+        required=True,
+        dest="expected_paper_digest",
+        help="SHA-256 of the exact reviewed PDF bytes (Gate 1)",
+    )
     p_propose.add_argument("--universe", default="SPY,QQQ")
 
-    p_list = sub.add_parser("list", help="List non-authoritative candidate evidence")
+    sub.add_parser("list", help="List non-authoritative candidate evidence")
     p_detail = sub.add_parser("detail", help="Show one candidate from list output")
     p_detail.add_argument("--candidate-id", required=True)
 
@@ -308,6 +326,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                     source_file=args.source_file,
                     expected_source_digest=args.expected_source_digest,
                     confirmation_note=args.confirmation_note,
+                    paper_doi=args.paper_doi,
+                    paper_file=args.paper_file,
+                    expected_paper_digest=args.expected_paper_digest,
                     gate_dir=config.FACTOR_GATE1_DIR,
                 )
             )
@@ -543,6 +564,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             code, out = quant_cli.run_promote_candidate(
                 candidate_id=args.candidate_id,
                 expected_manifest_digest=args.expected_digest,
+                final_backtest_receipt_id=args.final_backtest_receipt,
                 base_commit=args.base_commit,
             )
         except subprocess.TimeoutExpired as exc:
@@ -598,6 +620,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 candidate_id=args.candidate_id,
                 manifest_digest=args.expected_digest,
                 factor_id=factor_id,
+                final_backtest_receipt_id=args.final_backtest_receipt,
                 base_commit=args.base_commit,
                 promotion_root=promotion_root,
                 worktree_root=worktree_root,
@@ -633,6 +656,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "patch_sha256",
                     "candidate_id",
                     "candidate_digest",
+                    "final_backtest_receipt_id",
                     "base_commit",
                     "scoped_paths",
                 }
@@ -648,6 +672,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                         "patch_sha256",
                         "candidate_id",
                         "candidate_digest",
+                        "final_backtest_receipt_id",
                         "base_commit",
                         "scoped_paths",
                     )
@@ -712,6 +737,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         except (OSError, ValueError) as exc:
             print(f"ERROR: experiment config write failed: {exc}", file=sys.stderr)
             return 1
+        final_attempt_id: str | None = None
+        if args.final:
+            try:
+                final_attempt_id = factor_repro.reserve_final_backtest_once(
+                    gate_dir=config.FACTOR_GATE1_DIR,
+                    candidate_id=args.candidate_id,
+                    manifest_digest=args.expected_digest,
+                )
+            except (OSError, ValueError) as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                return 2
+            print(f"final_backtest_attempt={final_attempt_id}")
         if holdout_note:
             print(holdout_note)
         try:
@@ -724,13 +761,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
         except (OSError, subprocess.SubprocessError):
             print(
-                "ERROR: backtest platform outcome is unknown; no trial or final "
-                "authority was recorded",
+                "ERROR: backtest platform outcome is unknown; no trial or successful "
+                "final receipt was recorded",
                 file=sys.stderr,
             )
             print(
                 f"candidate_id={args.candidate_id} outcome_unknown=true "
-                f"config={config_out} recovery=inspect_platform_artifacts_read_only"
+                f"final_attempt={final_attempt_id or '?'} config={config_out} "
+                "recovery=inspect_platform_artifacts_read_only; "
+                "a reserved final attempt is never retried automatically"
             )
             return 1
         binding = factor_repro.parse_candidate_binding(out)
@@ -790,6 +829,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         if warning:
             print(warning)
         if args.final:
+            if final_attempt_id is None:
+                print(
+                    "ERROR: final backtest attempt reservation missing",
+                    file=sys.stderr,
+                )
+                return 1
             try:
                 receipt_id = factor_repro.record_final_backtest_receipt(
                     gate_dir=config.FACTOR_GATE1_DIR,
@@ -804,6 +849,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     symbols=args.symbols,
                     start=args.start,
                     end=effective_end,
+                    final_attempt_id=final_attempt_id,
                     config_path=evidence["config_path"],
                     config_sha256=evidence["config_sha256"],
                     agent_summary_path=evidence["agent_summary_path"],

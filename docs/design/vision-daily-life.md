@@ -95,7 +95,12 @@ Hermes 读完论文，输出：
 # Hermes 会话内先把已确认的公式翻译成源码，并写入临时文件（Gate 1 后）
 python3 -m hqa.factor_repro_cli propose \
   --goal "Amihud illiquidity weekly change × turnover decay..." \
-  --source-file /tmp/factor_src.py
+  --source-file /tmp/factor_src.py \
+  --expected-source-digest "$(shasum -a 256 /tmp/factor_src.py | awk '{print $1}')" \
+  --confirmation-note "已核对论文公式、字段与源码翻译" \
+  --paper-doi 10.1093/rfs/hhaf057 \
+  --paper-file /tmp/reviewed-paper.pdf \
+  --expected-paper-digest "$(shasum -a 256 /tmp/reviewed-paper.pdf | awk '{print $1}')"
 # → candidate_id=factor-amihud_liquidity-a1b2c3d4e5
 # → HUMAN GATE: inspect the generated candidate factor...
 
@@ -136,6 +141,7 @@ python3 -m hqa.factor_repro_cli backtest \
   --candidate-id factor-amihud_liquidity-a1b2c3d4e5 \
   --expected-digest <sha256-from-verified-detail> ... --final
 # stdout: final_backtest_receipt=backtest-<content-address>
+# 注意：系统在调用 provider 前就持久占用这次 final attempt；失败或未知结果也不能重试。
 
 # Gate 3：在隔离 review worktree 生成 scoped patch（绝不自动 commit）
 cd /Users/sunyibo/programs/Hermes-quant-agent

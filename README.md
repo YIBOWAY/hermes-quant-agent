@@ -94,11 +94,12 @@ record, not an executable queue. Platform Phase 15 is reference only.
   malformed sources degrade locally instead of breaking the whole projection.
 - **Scene-B factor reproduction** (`hqa.factor_repro_cli`) — human-gated
   `propose|detail|approve|backtest|promote` flow covering the three human gates: factor
-  formula confirm (exact reviewed source SHA-256 + non-empty note, persisted and
-  bound to the resulting candidate manifest) → Gate 2 digest CAS approve
+  formula confirm (canonical paper DOI + exact reviewed PDF/source SHA-256 +
+  non-empty note, persisted and bound to the resulting candidate manifest) → Gate 2 digest CAS approve
   (`--candidate-id` + `--expected-digest` + `--expected-status pending` +
   `--note`; never refetch and require the exact machine receipt) → successful
-  content-addressed `--final` one-shot backtest receipt → Gate 3 HQA
+  content-addressed `--final` one-shot backtest receipt (the durable attempt is
+  consumed before provider invocation, including failed/unknown outcomes) → Gate 3 HQA
   `promote --candidate-id --expected-digest --final-backtest-receipt --base-commit`
   Gate-1/backtest-revalidated isolated review worktree (human `git diff` + commit; never
   auto-commits). Raw platform review/promotion commands are generic primitives,
