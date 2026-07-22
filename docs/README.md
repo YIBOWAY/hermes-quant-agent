@@ -12,7 +12,7 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。V0–V5 DONE（V2 live durable 仍 OFF）；**V6 本地 dark enablement ACCEPT@2026-07-21**；**L2a–L5c thin rail ACCEPT@2026-07-22**；**V7a-Hermes-Approval-Decide M1 ACCEPT@2026-07-22**（exact `allow_once|deny` CAS；无 always-allow；≠ Gate；public write 仍 OFF）。Plan-V6 剩余 UI（token stream）+ V7b+ / public V8 仍未完成。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。V0–V5 DONE（V2 live durable 仍 OFF）；**V6 本地 dark enablement ACCEPT@2026-07-21**；**L2a–L5c thin rail ACCEPT@2026-07-22**；**V7a decide + V7b release M1 ACCEPT@2026-07-22**（exact `allow_once|deny` CAS + hermetic `respond_approval` release/signal；无 always-allow；≠ Gate；public write 仍 OFF）。Plan-V6 剩余 UI（token stream）+ V7c+ / public V8 仍未完成。 |
 | V0 Workspace v1 candidate ADR | [`design/2026-07-16-agent-workspace-v1-adr.md`](design/2026-07-16-agent-workspace-v1-adr.md) | **SOURCE + FORMAL EVIDENCE + INDEPENDENT CLOSE-OUT DONE**；这只冻结 interface/cardinality/authority，不授权 runtime/live effect。 |
 | L2a-Send thin write rail ADR | [`design/2026-07-22-l2a-send-thin-write-rail-adr.md`](design/2026-07-22-l2a-send-thin-write-rail-adr.md) | Browser composite `submit-turn` → HQA Intent Payload Store → ledger `conversation_turn` → worker bind/resolve → Hermes；**M1+M2 ACCEPT@2026-07-22**。≠ Plan-V6 全 UI。 |
 | V0/V2 release closure | [`audits/2026-07-19-v0-v2-release-closure.md`](audits/2026-07-19-v0-v2-release-closure.md) | 三仓 source、live identity、validation binding 与 independent `CLEAR` 的事实源；verdict 明确 `release_authorized=false`。 |
@@ -70,7 +70,12 @@ expires_at；`allow_once|deny` only；single-use + idempotent same action；snap
 `command_approval=ready` + empty-honest `approvals[]`；FE marker
 `data-hermes-approval-decide=v7a-m1`；mutation 关则按钮不出现；≠ Gate 1/2/3、≠ always-allow、
 ≠ live Hermes projector）。
-**Plan-V6 完整 Web Chat UI（token stream）/ V7b+（stop/Gates/results）/ launchd 常驻
+**V7b-Hermes-Approval-Release M1 ACCEPT@2026-07-22**（hermetic `FakeHermesApprovalReleaseAdapter`
++ `project_pending_challenge` dual-seed；saga CAS 后 `respond_approval`；choice
+`allow_once→once` / `deny→deny`；events `approval.responded|release_committed|signalled`；
+idempotent replay 不双 signal；release fail → `reconciling` 且不复活 pending；
+**无** always-allow / Gate / stop / live HTTP / `import hqa`）。
+**Plan-V6 完整 Web Chat UI（token stream）/ V7c+（stop/Gates/results）/ launchd 常驻
 daemon / public V8 仍未完成**；public write 仍 OFF。Discord 保持当前可用入口，
 但不是临时网页方案或 fallback；Discord/历史 session 在 Web 只读，网页写入只能新建
 或显式 fork 到新的 managed Hermes Session。
@@ -251,7 +256,7 @@ periodic/manual update + no-agent watcher；watcher 只报告漂移，不得 ins
 7. **V6 本地 dark enablement + L2a–L5c thin rail：ACCEPT（2026-07-21…22）。** 真实 adapter、
    local mutation/composer flags、composite `submit-turn`、command-aware snapshot/follow、
    delivered 后 Hermes messages 预览已通；L3a–L5c（含 L5a Approvals observe + L5b Authority
-   projection + L5c workbench a11y）ACCEPT。**不等于** Plan-V6 完整 Web Chat UI / public cutover。V7a decide ACCEPT。下一施工：V7b+（stop / Gate surfaces / durable approval projector / token stream 另议）；ops restart 纪律；public write 始终 OFF 直至 V8。
+   projection + L5c workbench a11y）ACCEPT。**不等于** Plan-V6 完整 Web Chat UI / public cutover。V7a decide + V7b release ACCEPT。下一施工：V7c+（stop / Gate surfaces / durable approval projector / token stream 另议）；ops restart 纪律；public write 始终 OFF 直至 V8。
 8. **V8 adversarial acceptance/release。** 两轮冷启动、独立 security review、真实用户验收
    全绿后一次开放 Agent v0.2；legacy redirect 仍另行审批。
 
