@@ -73,8 +73,9 @@ Rules for AI agents working in this repository.
   M1 ACCEPT (shared follow spine: BFF SSE + FE EventSource/poll; Activity
   consumes spine; no assistant bodies). L5a-Hermes-Approval-Observe M1 ACCEPT
   (honest empty command-approval slot + Composer on shared spine; no
-  allow/deny write; ≠ Gate 1/2/3). Plan-V6 remainder (a11y/richer
-  Task·Attempt) + public V8 still open.
+  allow/deny write; ≠ Gate 1/2/3). L5b-Authority-Projection M1 ACCEPT
+  (honest empty Task/Attempt/Run/result slots + health on spine; no invented
+  HQA rows). Plan-V6 remainder (a11y) + public V8 still open.
   Authoritative status: `docs/README.md` + active plan; L2a ADR
   `docs/design/2026-07-22-l2a-send-thin-write-rail-adr.md`.
 - Hermes updates are operator-controlled and periodic/manual. The no-agent

@@ -20,7 +20,7 @@
 > migration、browser mutation、worker claim/dispatch、provider、Gate、paper/live 与 public composer
 > 等所有 live gates 保持 OFF；本 addendum 不构成任何 live 授权。
 
-> **状态（2026-07-22）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a-Send M1+M2 ACCEPT@2026-07-22 / L2b-Observe M1+M2 ACCEPT@2026-07-22 / L3a-Transcript M1 ACCEPT@2026-07-22 / L3b-Transcript-Polish M1 ACCEPT@2026-07-22 / L4a-Task-Drawer M1 ACCEPT@2026-07-22 / L4b-SSE-Follow M1 ACCEPT@2026-07-22 / L5a-Hermes-Approval-Observe M1 ACCEPT@2026-07-22 / Plan-V6 FULL UI PARTIAL / NEXT 剩余 Plan-V6 UI（a11y/richer 投影）+ V7（public write 仍 OFF）。** 本计划是 D-32 唯一 active
+> **状态（2026-07-22）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a-Send M1+M2 ACCEPT@2026-07-22 / L2b-Observe M1+M2 ACCEPT@2026-07-22 / L3a-Transcript M1 ACCEPT@2026-07-22 / L3b-Transcript-Polish M1 ACCEPT@2026-07-22 / L4a-Task-Drawer M1 ACCEPT@2026-07-22 / L4b-SSE-Follow M1 ACCEPT@2026-07-22 / L5a-Hermes-Approval-Observe M1 ACCEPT@2026-07-22 / L5b-Authority-Projection M1 ACCEPT@2026-07-22 / Plan-V6 FULL UI PARTIAL / NEXT L5c a11y + V7（public write 仍 OFF）。** 本计划是 D-32 唯一 active
 > implementation plan。此前的 Wave 3 文档保留为已交付事实与问题输入，不再从其中的旧顺序、
 > unchecked checkbox 或“下一步”继续施工。
 >
@@ -31,8 +31,10 @@
 > （workspace `commands[]` lifecycle；Task/Attempt 权威仍空）；L4b shared follow spine
 > （BFF SSE + FE EventSource/poll；Activity 消费 spine；follow 无 assistant body）；L5a
 > Hermes command-approval observe（snapshot `approvals=[]` + Composer 改走 spine；
-> 只读 Approvals 面板；无 allow/deny 写；≠ Gate 1/2/3）。
-> a11y / richer Task·Attempt / launchd 常驻 / public V8 仍未做。
+> 只读 Approvals 面板；无 allow/deny 写；≠ Gate 1/2/3）；L5b Authority projection
+> （诚实空 Task/Attempt/Run/result + health on spine；只读 Authority 面板；不从
+> conversation_turn 伪造 Attempt）。
+> a11y / launchd 常驻 / public V8 仍未做。
 >
 > **产品决策已冻结：** Discord 继续作为当前可用的 Hermes 原生自然语言入口，但不是网页端的
 > 临时方案、fallback 或验收替身。项目不再交付临时 chat、直连 Hermes 的简化 composer、旧
@@ -852,7 +854,8 @@ action 还有一个 exact Attempt；零盲重发、authority audit consistent。
 | L4a-Task-Drawer | **M1 ACCEPT@2026-07-22** | workbench 只读 **Activity**：workspace `commands[]` newest-first lifecycle；markers `data-hermes-command-activity` + `data-hermes-task-drawer=l4a-m1`；Task/Attempt 权威仍空；≠ `/hermes/tasks` 研究任务页；无 mutation。L4b 起由共享 spine 驱动（不再私有 8s snapshot poll） |
 | L4b-SSE-Follow | **M1 ACCEPT@2026-07-22** | 共享 durable follow spine：BFF `GET …/follow/stream` SSE（`ready`/`command`/`cursor`/`resync`/`heartbeat`/`reconnect`/`error`；scope=`command_lifecycle`）；FE EventSource 优先 + poll 回退 + snapshot bootstrap/reconcile；Activity + delivered bind/bump 共用；**follow/SSE 无 assistant body**；test knobs `max_ticks`/`poll_seconds` |
 | L5a-Hermes-Approval-Observe | **M1 ACCEPT@2026-07-22** | snapshot `approvals=[]` + `authority_health.command_approval=unavailable`（诚实空；不发明挑战）；Composer 改走 `waitForCommandTerminalOnSpine`（去掉私有 follow poll）；只读 Approvals 面板 `data-hermes-approval-observe=l5a-m1`；**无 allow/deny 写**；≠ Gate 1/2/3、≠ `/hermes/approvals` 候选页 |
-| Plan-V6 完整 UI | **PARTIAL / NEXT** | 多断点 a11y、更厚 Task/Attempt/Run 投影、assistant token stream、approval **decision** mutation 等仍未做 |
+| L5b-Authority-Projection | **M1 ACCEPT@2026-07-22** | snapshot/spine 诚实空 `tasks/attempts/runs/results` + `authority_health.task|attempt|run|result=unavailable`；只读 Authority 面板 `data-hermes-authority-observe=l5b-m1`；conversation_turn **不**伪造 Attempt；≠ `/hermes/tasks`；无 stop/gate 写 |
+| Plan-V6 完整 UI | **PARTIAL / NEXT** | 多断点 a11y（L5c）、assistant token stream、approval **decision** mutation 等仍未做 |
 
 交付（完整 Plan-V6 目标，部分已由 L2a/L2b/L4 覆盖）：
 
@@ -1014,7 +1017,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
 | V4 PG schema/BFF saga/security | CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21） | live 006/007 applied；public write/composer/claim 仍 OFF；证据 platform `docs/audits/2026-07-21-v4-live-migrate-006-007.md` |
 | V5 supervised dispatch worker | DARK CODE + CRASH-MATRIX ACCEPT（2026-07-21） | dark claim/lease/`FakeHermesDispatchAdapter` + unit/PG crash matrix 全绿；CLI 默认仍 reconcile-only；provider smoke 另授权；public composer 仍 OFF |
-| V6 final workspace UI | **PARTIAL（2026-07-22）** | 本地 dark enablement + L2a–L5a thin rail ACCEPT（L4b SSE spine + L5a empty-honest Approvals observe + Composer on spine）；a11y / richer Task·Attempt 投影（L5b+）仍 NEXT；public chat 仍 OFF |
+| V6 final workspace UI | **PARTIAL（2026-07-22）** | 本地 dark enablement + L2a–L5b thin rail ACCEPT（含 L5b Authority projection）；a11y（L5c）仍 NEXT；public chat 仍 OFF |
 | V7 decisions/results/vertical slices | NOT STARTED | 两纵切 + exact approvals + stop green |
 | V8 adversarial acceptance/release | NOT STARTED | independent CLEAR + user acceptance + one-time cutover |
 
@@ -1043,12 +1046,10 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
    `FakeHermesDispatchAdapter` 覆盖 accept/recover/timeout/reject/accept_drop_ack；
    hermetic + `QS_TEST_DATABASE_URL` PG crash matrix 全绿；空队列零 Hermes/provider；
    production CLI 仍默认 reconcile-only（无 adapter 不 claim）。public composer 仍 OFF。
-8. **V6 本地 dark + L2a/L2b/L3/L4/L5a thin rail ACCEPT（2026-07-21…22）**：真实 HTTP adapter、
+8. **V6 本地 dark + L2a–L5b thin rail ACCEPT（2026-07-21…22）**：真实 HTTP adapter、
    local mutation/composer flags、composite submit-turn、command-aware snapshot/follow、
-   delivered 后 messages 预览、L3a canvas + L3b polish + L4a command Activity + L4b shared
-   SSE/poll follow spine + L5a empty-honest Approvals observe（Composer 改走 spine）。
-   **Plan-V6 完整 UI 仍 PARTIAL。** 当前施工入口：剩余 Plan-V6 UI
-   （a11y/richer projections）与 V7 两纵切；public chat 始终 OFF 直至 V8。
+   delivered 后 messages 预览、L3a–L5b（含 L5a Approvals observe + L5b Authority projection）。
+   **Plan-V6 完整 UI 仍 PARTIAL。** 当前施工入口：L5c a11y 与 V7 两纵切；public chat 始终 OFF 直至 V8。
    V2 controlled install/canary 仍是另行授权的独立 live 轨道。
 9. V8 完成后一次开放 v0.2；legacy redirect 仍另开后续计划。
 
