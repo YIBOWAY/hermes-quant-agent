@@ -443,6 +443,9 @@ class _InMemoryRunAuthority:
                 return RunHandle(run_id=record.run_id, created=False, idempotency_key=key)
             run_id = f"run_{uuid.uuid4().hex}"
             record = _RunRecord(run_id, key, digest)
+            session_id = request_body.get("session_id")
+            if isinstance(session_id, str) and session_id:
+                record.session_id = session_id
             # Capture the requested provider policy at submit (immutable), so the
             # evidence plane can show requested -> actual divergence (plan §V2 508).
             requested = request_body.get("model") if isinstance(request_body, Mapping) else None
@@ -668,7 +671,16 @@ class ScriptedFakeHermesAdapter(HermesRunPort):
     def clear_faults(self) -> None:
         self._faults.clear()
 
-    def drive_to_terminal(self, run_id: str, *, outcome: str = "succeeded", fallback_model: Optional[str] = None) -> None:
+    def drive_to_terminal(
+        self,
+        run_id: str,
+        *,
+        outcome: str = "succeeded",
+        fallback_model: Optional[str] = None,
+        actual_model: Optional[str] = None,
+        actual_provider: Optional[str] = None,
+        usage: Optional[Mapping[str, Any]] = None,
+    ) -> None:
         """Advance a run through a normal lifecycle to a terminal state.
 
         When the QUOTA_FALLBACK fault is active, the run falls back — but ONLY
@@ -678,6 +690,20 @@ class ScriptedFakeHermesAdapter(HermesRunPort):
         a = self._authority
         a.set_status(run_id, "running")
         a.append_event(run_id, "message.delta", {"delta": "working"})
+        if actual_model is not None or actual_provider is not None or usage is not None:
+            actual_policy = {
+                key: value
+                for key, value in {
+                    "model": actual_model,
+                    "provider": actual_provider,
+                }.items()
+                if value is not None
+            }
+            a.record_outcome(
+                run_id,
+                actual_policy=actual_policy or None,
+                usage=usage,
+            )
         if ScriptedFault.QUOTA_FALLBACK in self._faults:
             target = fallback_model or "fallback-model"
             if target not in self._authorized_fallback_chain:
