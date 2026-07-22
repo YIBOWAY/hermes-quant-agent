@@ -6,7 +6,8 @@
   mutation flags). ComposerDock is still `preventDefault`-only. Plan-V6 UI and
   public chat cutover are **out of scope** for this package.
 - **Grilling:** `/grill-with-docs` session; decisions Q1–Q25 locked with user.
-- **Follow-on:** L2b-Observe M1+M2 ACCEPT@2026-07-22 (lifecycle + messages preview).
+- **Follow-on:** L2b-Observe M1+M2 ACCEPT@2026-07-22 (lifecycle + messages preview);
+  L3a-Transcript M1 ACCEPT@2026-07-22 (workbench Conversation canvas).
   Plan-V6 full UI / SSE / public V8 still open.
 
 ## 1. Problem

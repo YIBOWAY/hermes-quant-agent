@@ -65,8 +65,9 @@ Rules for AI agents working in this repository.
   V6 local dark enablement ACCEPT (real HTTP adapter + local mutation flags).
   L2a-Send M1+M2 ACCEPT (composite submit-turn → store → worker → Hermes
   `L2a-pong`). L2b-Observe M1+M2 ACCEPT (command snapshot/follow + messages
-  preview after deliver). Plan-V6 full UI/SSE/public V8 still open. Authoritative
-  status: `docs/README.md` + active plan; L2a ADR
+  preview after deliver). L3a-Transcript M1 ACCEPT (workbench Conversation
+  canvas + live `L3a-pong` bubbles). Plan-V6 full UI/SSE/public V8 still open.
+  Authoritative status: `docs/README.md` + active plan; L2a ADR
   `docs/design/2026-07-22-l2a-send-thin-write-rail-adr.md`.
 - Hermes updates are operator-controlled and periodic/manual. The no-agent
   compatibility watcher may report drift but must never pull, merge, install,

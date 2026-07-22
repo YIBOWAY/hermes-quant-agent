@@ -20,13 +20,14 @@
 > migration、browser mutation、worker claim/dispatch、provider、Gate、paper/live 与 public composer
 > 等所有 live gates 保持 OFF；本 addendum 不构成任何 live 授权。
 
-> **状态（2026-07-22）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a-Send M1+M2 ACCEPT@2026-07-22 / L2b-Observe M1+M2 ACCEPT@2026-07-22 / Plan-V6 FULL UI PARTIAL / NEXT L3·剩余 Plan-V6 UI + V7（public write 仍 OFF）。** 本计划是 D-32 唯一 active
+> **状态（2026-07-22）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a-Send M1+M2 ACCEPT@2026-07-22 / L2b-Observe M1+M2 ACCEPT@2026-07-22 / L3a-Transcript M1 ACCEPT@2026-07-22 / Plan-V6 FULL UI PARTIAL / NEXT L3b polish + 剩余 Plan-V6 UI + V7（public write 仍 OFF）。** 本计划是 D-32 唯一 active
 > implementation plan。此前的 Wave 3 文档保留为已交付事实与问题输入，不再从其中的旧顺序、
 > unchecked checkbox 或“下一步”继续施工。
 >
 > **本地 thin rail（≠ Plan-V6 全 UI 验收）：** L2a composite `submit-turn` + Intent Payload Store
 > + worker bind/resolve + live `L2a-pong`；L2b command-aware snapshot/follow + delivered 后
-> Hermes messages 预览。SSE / 完整 transcript UI / launchd 常驻 / public V8 仍未做。
+> Hermes messages 预览；L3a workbench Conversation canvas（live `L3a-pong` bubbles）。SSE /
+> Task drawer / launchd 常驻 / public V8 仍未做。
 >
 > **产品决策已冻结：** Discord 继续作为当前可用的 Hermes 原生自然语言入口，但不是网页端的
 > 临时方案、fallback 或验收替身。项目不再交付临时 chat、直连 Hermes 的简化 composer、旧
@@ -841,7 +842,8 @@ action 还有一个 exact Attempt；零盲重发、authority audit consistent。
 | V6 本地 dark enablement | **ACCEPT@2026-07-21** | 真实 `HttpHermesDispatchAdapter`、CLI `--mode supervised_dispatch`、provider smoke、`QS_LOCAL_MUTATION_*` / FE chat draft flag；交易 kill_switch 仍 true。证据：platform `docs/audits/2026-07-21-v6-local-off-to-on.md` |
 | L2a-Send thin write rail | **M1+M2 ACCEPT@2026-07-22** | composite `POST …/submit-turn` → Keychain Intent Payload Store → ledger `conversation_turn` → worker bind/resolve → Hermes delivered（live `L2a-pong`）。ADR：`../../design/2026-07-22-l2a-send-thin-write-rail-adr.md`；migration `008_l2a_conversation_turn_claim.sql` |
 | L2b-Observe | **M1+M2 ACCEPT@2026-07-22** | snapshot `commands[]` public objects；follow 页 workspace-scoped events；cursor=`max(event_id)`；Composer poll lifecycle；delivered 后 same-origin Hermes messages 预览。**无 SSE、follow 无 assistant body** |
-| Plan-V6 完整 UI | **PARTIAL / NEXT** | 完整 transcript canvas、Task drawer、SSE/live stream、approval surface、多断点 a11y 等仍未做 |
+| L3a-Transcript | **M1 ACCEPT@2026-07-22** | workbench Conversation 面板；deliver bind + snapshot bootstrap（onlyIfEmpty）；same-origin messages 气泡；拒 `web_`/`wm_`；live `L3a-pong` + FE marker。默认 owner `accepted_origin`=`http://127.0.0.1:3001` |
+| Plan-V6 完整 UI | **PARTIAL / NEXT** | L3b polish、Task drawer、SSE/live stream、approval surface、多断点 a11y 等仍未做 |
 
 交付（完整 Plan-V6 目标，部分已由 L2a/L2b 覆盖）：
 
@@ -854,7 +856,7 @@ action 还有一个 exact Attempt；零盲重发、authority audit consistent。
   submitting/accepted/outcome_unknown/conflict/unavailable + lifecycle Queued/Leased/Delivered
   + assistant 预览。external session fork UI 仍未做。
 - transcript + assistant stream、Task drawer、plan/step、typed result canvas、provider/usage、
-  source/freshness：**未做**（M2 仅 status 行预览最新 assistant）。
+  source/freshness：**L3a-M1 已做 workbench Conversation 气泡（无 stream）**；stream/drawer/a11y 仍未做。
 - connection state 与 Run/Task state 正交；用户向上阅读时不抢滚动：**未做**。
 - 1440/1280/768/390、中文英文长文本、长 ID、键盘/focus/reduced-motion/WCAG AA：**未做**。
 
@@ -1000,7 +1002,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
 | V4 PG schema/BFF saga/security | CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21） | live 006/007 applied；public write/composer/claim 仍 OFF；证据 platform `docs/audits/2026-07-21-v4-live-migrate-006-007.md` |
 | V5 supervised dispatch worker | DARK CODE + CRASH-MATRIX ACCEPT（2026-07-21） | dark claim/lease/`FakeHermesDispatchAdapter` + unit/PG crash matrix 全绿；CLI 默认仍 reconcile-only；provider smoke 另授权；public composer 仍 OFF |
-| V6 final workspace UI | **PARTIAL（2026-07-22）** | 本地 dark enablement + L2a-Send + L2b-Observe ACCEPT；完整 transcript/SSE/Task drawer/a11y 仍 NEXT；public chat 仍 OFF |
+| V6 final workspace UI | **PARTIAL（2026-07-22）** | 本地 dark enablement + L2a-Send + L2b-Observe + L3a-Transcript M1 ACCEPT；L3b polish / SSE / Task drawer / a11y 仍 NEXT；public chat 仍 OFF |
 | V7 decisions/results/vertical slices | NOT STARTED | 两纵切 + exact approvals + stop green |
 | V8 adversarial acceptance/release | NOT STARTED | independent CLEAR + user acceptance + one-time cutover |
 
