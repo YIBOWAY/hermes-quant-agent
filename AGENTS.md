@@ -76,7 +76,7 @@ Rules for AI agents working in this repository.
   allow/deny write; ≠ Gate 1/2/3). L5b-Authority-Projection M1 ACCEPT
   (honest empty Task/Attempt/Run/result slots + health on spine; no invented
   HQA rows). L5c-Workbench-A11y M1 ACCEPT (FE-only shell a11y contracts (region landmark, not nested main);
-  marker `l5c-m1`). **V7a–V7e M1 ACCEPT** (exact allow_once|deny CAS + hermetic respond_approval release/signal + hermetic Run-scoped stop with §5.5 layered receipt + durable approval projector + Domain Gate 1/2/3 surfaces on spine; no always-allow; Gates ≠ command-approval; no Task invention; no dual private poll). Plan-V6 remainder (token stream) + V7f+ (typed results/verticals) + public V8 still open.
+  marker `l5c-m1`). **V7a–V7f M1 ACCEPT** (exact allow_once|deny CAS + hermetic respond_approval release/signal + hermetic Run-scoped stop with §5.5 layered receipt + durable approval projector + Domain Gate 1/2/3 surfaces + typed results on spine; sample/real fail-closed; no always-allow; Gates ≠ command-approval ≠ results; no Task invention; no dual private poll; no catalog-on-spine). Plan-V6 remainder (token stream) + V7g (verticals) + public V8 still open.
   Authoritative status: `docs/README.md` + active plan; L2a ADR
   `docs/design/2026-07-22-l2a-send-thin-write-rail-adr.md`.
 - Hermes updates are operator-controlled and periodic/manual. The no-agent
