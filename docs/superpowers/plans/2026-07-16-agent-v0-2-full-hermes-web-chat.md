@@ -20,9 +20,13 @@
 > migration、browser mutation、worker claim/dispatch、provider、Gate、paper/live 与 public composer
 > 等所有 live gates 保持 OFF；本 addendum 不构成任何 live 授权。
 
-> **状态（2026-07-21）：CURRENT / PLAN ACCEPTED / V0 + V3 DONE / V4 CODE+ISOLATED+LIVE SCHEMA ACCEPT / V2 LIVE NOT RELEASED / NEXT V5（public write 仍 OFF）。** 本计划是 D-32 唯一 active
+> **状态（2026-07-22）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a-Send M1+M2 ACCEPT@2026-07-22 / L2b-Observe M1+M2 ACCEPT@2026-07-22 / Plan-V6 FULL UI PARTIAL / NEXT L3·剩余 Plan-V6 UI + V7（public write 仍 OFF）。** 本计划是 D-32 唯一 active
 > implementation plan。此前的 Wave 3 文档保留为已交付事实与问题输入，不再从其中的旧顺序、
 > unchecked checkbox 或“下一步”继续施工。
+>
+> **本地 thin rail（≠ Plan-V6 全 UI 验收）：** L2a composite `submit-turn` + Intent Payload Store
+> + worker bind/resolve + live `L2a-pong`；L2b command-aware snapshot/follow + delivered 后
+> Hermes messages 预览。SSE / 完整 transcript UI / launchd 常驻 / public V8 仍未做。
 >
 > **产品决策已冻结：** Discord 继续作为当前可用的 Hermes 原生自然语言入口，但不是网页端的
 > 临时方案、fallback 或验收替身。项目不再交付临时 chat、直连 Hermes 的简化 composer、旧
@@ -31,7 +35,8 @@
 >
 > **本计划本身不授权** migration apply、worker claim/dispatch、真实 provider smoke、浏览器
 > mutation、Gate mutation、远程访问、paper/live 执行或旧页 redirect。涉及这些状态变化时，
-> 仍须按本计划所列独立 Gate 获取明确授权。
+> 仍须按本计划所列独立 Gate 获取明确授权。本地 dark enablement / L2a / L2b 的授权是单用户
+> 本机授权，不等于 public cutover。
 
 ## 1. 最终要交付什么
 
@@ -809,33 +814,61 @@ terminal reconcile 前
 action 还有一个 exact Attempt；零盲重发、authority audit consistent。只有 fake fault matrix
 全绿后，才向用户单独请求一次低成本真实 provider smoke 授权；计划批准本身不授权该调用。
 
+**V5 acceptance（2026-07-21，dark）：**
+
+- 新增 `ai-quant-platform/src/quant_system/hermes/dispatch_adapter.py`
+  （`HermesDispatchPort` / `FakeHermesDispatchAdapter`，metadata-only，默认零 provider）。
+- 深化 `connector_worker.py`：`supervised_dispatch` = reconcile → claim → gate →
+  `mark_dispatch_started` → adapter **事务外** → delivered / rejected / `outcome_unknown`；
+  gate deny 零 Hermes；timeout 不盲重试。
+- `connector_cli.build_connector_runtime` 支持 mode/adapter 注入；CLI 默认仍
+  `reconcile_only`。
+- `composer_readiness`：`command_dispatch_adapter_unavailable` 改为 binding-schema 动态
+  blocker；新增 `dark_dispatch_ready`（schema-only，不打开 public write）。
+- 测试：`tests/test_hermes_connector_dispatch.py`（unit + PG crash matrix）+ readiness/CLI/
+  worker 回归全绿（`QS_TEST_DATABASE_URL=…/quantplatform_v4_tmp`）。
+- **未做 / 仍 OFF：** 真实 Hermes adapter 接线、真实 provider smoke、常驻 supervised
+  daemon、public composer、browser mutation、HQA Attempt observe 全链路。
+
 ### Slice V6 — Workspace snapshot/follow 与完整 Web Chat UI（C2）
 
 **目标：** 直接把现有 production `/hermes` shell 变成最终 workspace；不另写临时 frontend。
 
-交付：
+**状态（2026-07-22）拆分：**
+
+| 子包 | 状态 | 含义 |
+|---|---|---|
+| V6 本地 dark enablement | **ACCEPT@2026-07-21** | 真实 `HttpHermesDispatchAdapter`、CLI `--mode supervised_dispatch`、provider smoke、`QS_LOCAL_MUTATION_*` / FE chat draft flag；交易 kill_switch 仍 true。证据：platform `docs/audits/2026-07-21-v6-local-off-to-on.md` |
+| L2a-Send thin write rail | **M1+M2 ACCEPT@2026-07-22** | composite `POST …/submit-turn` → Keychain Intent Payload Store → ledger `conversation_turn` → worker bind/resolve → Hermes delivered（live `L2a-pong`）。ADR：`../../design/2026-07-22-l2a-send-thin-write-rail-adr.md`；migration `008_l2a_conversation_turn_claim.sql` |
+| L2b-Observe | **M1+M2 ACCEPT@2026-07-22** | snapshot `commands[]` public objects；follow 页 workspace-scoped events；cursor=`max(event_id)`；Composer poll lifecycle；delivered 后 same-origin Hermes messages 预览。**无 SSE、follow 无 assistant body** |
+| Plan-V6 完整 UI | **PARTIAL / NEXT** | 完整 transcript canvas、Task drawer、SSE/live stream、approval surface、多断点 a11y 等仍未做 |
+
+交付（完整 Plan-V6 目标，部分已由 L2a/L2b 覆盖）：
 
 - `WorkspaceSnapshot` 并列展示 command、Task、Attempt、Run、provider evidence、approval、
   result refs 和各 authority health；冲突派生为 `reconciling`，不覆盖 source facts。
-- durable workspace observation cursor、snapshot -> replay -> live SSE；BFF 重启不依赖内存
-  buffer，projection 可从 source cursors 重建。
-- composer 只对 managed session 启用；external session 显示只读来源和“fork 到 Web managed”
-  入口。composer 支持新 managed session/fork、普通 turn、显式研究模式；发送状态区分
-  submitting/checking/accepted/reconciling/conflict/unavailable。
+  **已有：** sessions + command public objects + authority_health + mutation_enabled；Task/Attempt/Run/results 投影仍薄。
+- durable workspace observation cursor、snapshot → follow poll（**当前无 SSE**）；resync 当
+  `after_cursor > head` → `resnapshot_workspace`。BFF 重启不依赖内存 buffer。
+- composer：owner gate + managed session + composite submit；发送状态
+  submitting/accepted/outcome_unknown/conflict/unavailable + lifecycle Queued/Leased/Delivered
+  + assistant 预览。external session fork UI 仍未做。
 - transcript + assistant stream、Task drawer、plan/step、typed result canvas、provider/usage、
-  source/freshness；技术事件默认折叠。
-- connection state 与 Run/Task state 正交；用户向上阅读时不抢滚动。
-- 1440/1280/768/390、中文英文长文本、长 ID、键盘/focus/reduced-motion/WCAG AA。
+  source/freshness：**未做**（M2 仅 status 行预览最新 assistant）。
+- connection state 与 Run/Task state 正交；用户向上阅读时不抢滚动：**未做**。
+- 1440/1280/768/390、中文英文长文本、长 ID、键盘/focus/reduced-motion/WCAG AA：**未做**。
 
-验收：
+验收（完整目标）：
 
 - 任意事件边界断网 30 秒，重连后不丢、不重；未知 cursor 明确 resync。
 - 浏览器刷新、BFF/worker/Hermes 重启后同一 workspace 可恢复。
 - internal compaction、空 assistant、system/tool/reasoning、secret 永不进入用户 transcript。
-- 前端只调用 `AgentWorkspace` adapter；无 direct Hermes、provider 或旧 agent-task fallback。
+- 前端只调用 `AgentWorkspace` adapter + 既有 loopback Hermes messages 读路径；无 direct Hermes key、
+  provider 或旧 agent-task fallback。
 
-本 Slice 完成后仍保持公共 `chat_write_ready=false`；只允许 hermetic fake 和受控 dark smoke。
-
+**L2a/L2b 已证明（本地 dark，≠ public）：** live command delivered + messages 正文 `L2a-pong`；
+Composer 可 poll lifecycle 并在 delivered 后拉 assistant 预览。本 Slice 的 **public**
+`chat_write_ready` 仍 false 直至 V8。
 ### Slice V7 — Decisions、typed results 与两条最终纵切（C4 + C5）
 
 **目标：** 补齐完整 Agent 所需的 command approval、Gate 1/2/3、stop 和可独立理解的量化结果。
@@ -966,8 +999,8 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 | V2 Hermes DurableRunAuthority | SOURCE ACCEPTED / LIVE NOT RELEASED / WRITE GATES OFF | 九语义 source 已在 `2eb5fa27790f` 独立 ACCEPT 并推送；live 为 upstream `c0c76a471533`，candidate 未安装。install/canary 另授权；见 §7 |
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
 | V4 PG schema/BFF saga/security | CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21） | live 006/007 applied；public write/composer/claim 仍 OFF；证据 platform `docs/audits/2026-07-21-v4-live-migrate-006-007.md` |
-| V5 supervised dispatch worker | NEXT / NOT STARTED | dark claim/lease/dispatch adapter + crash matrix；provider smoke 另授权；不开放 public composer |
-| V6 final workspace UI | NOT STARTED | fake/real dark E2E green；public chat 仍 OFF |
+| V5 supervised dispatch worker | DARK CODE + CRASH-MATRIX ACCEPT（2026-07-21） | dark claim/lease/`FakeHermesDispatchAdapter` + unit/PG crash matrix 全绿；CLI 默认仍 reconcile-only；provider smoke 另授权；public composer 仍 OFF |
+| V6 final workspace UI | **PARTIAL（2026-07-22）** | 本地 dark enablement + L2a-Send + L2b-Observe ACCEPT；完整 transcript/SSE/Task drawer/a11y 仍 NEXT；public chat 仍 OFF |
 | V7 decisions/results/vertical slices | NOT STARTED | 两纵切 + exact approvals + stop green |
 | V8 adversarial acceptance/release | NOT STARTED | independent CLEAR + user acceptance + one-time cutover |
 
@@ -991,10 +1024,17 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 6. **V4 CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21）**：修订 006/007 已 live apply
    （backup + idempotent replay + readiness；业务行 0；write flags false）。public write/claim
    仍 OFF。
-7. **当前施工入口是 V5**：supervised claim/dispatch/reconcile worker 先 dark 交付 + crash
-   matrix；公共 Web Chat 始终 OFF。V6 UI、V7 两纵切按 Gate 逐步集成。V2 controlled
-   install/canary 与 provider smoke 仍是另行授权的独立 live 轨道。
-8. V8 完成后一次开放 v0.2；legacy redirect 仍另开后续计划。
+7. **V5 DARK CODE + CRASH-MATRIX ACCEPT（2026-07-21）**：platform 深化同一 connector
+   worker（`reconcile_only` 默认 + `supervised_dispatch` 注入 `HermesDispatchPort`）；
+   `FakeHermesDispatchAdapter` 覆盖 accept/recover/timeout/reject/accept_drop_ack；
+   hermetic + `QS_TEST_DATABASE_URL` PG crash matrix 全绿；空队列零 Hermes/provider；
+   production CLI 仍默认 reconcile-only（无 adapter 不 claim）。public composer 仍 OFF。
+8. **V6 本地 dark + L2a/L2b thin rail ACCEPT（2026-07-21…22）**：真实 HTTP adapter、
+   local mutation/composer flags、composite submit-turn、command-aware snapshot/follow、
+   delivered 后 messages 预览。**Plan-V6 完整 UI / SSE 仍 PARTIAL。** 当前施工入口：
+   L3/剩余 Plan-V6 UI 与 V7 两纵切；public chat 始终 OFF 直至 V8。V2 controlled
+   install/canary 仍是另行授权的独立 live 轨道。
+9. V8 完成后一次开放 v0.2；legacy redirect 仍另开后续计划。
 
 这条顺序不再以“把九个 blocker 做完”为模糊任务，而是以最终用户路径、三入口 Interface、四份
 权威和不可伪造的故障验收为施工边界。

@@ -3,7 +3,7 @@
 这份文件只回答三个问题：**现在按哪份计划做、实际做到哪里、其他文档该怎么读**。
 长期方向、历史实现细节和特定日期审计分别留在 roadmap、plan 和 audit 中。
 
-> 事实快照：2026-07-19。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
+> 事实快照：2026-07-22。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
 > 必须重新检查 git、进程、HTTP smoke 和测试。
 
 ## 当前执行入口
@@ -12,8 +12,9 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。V0/V3 DONE；**V4 code + isolated + live schema ACCEPT**（006/007 已于 2026-07-21 apply；public write 仍 OFF）；下一代码切片默认 V5。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。V0–V5 DONE（V2 live durable 仍 OFF）；**V6 本地 dark enablement ACCEPT@2026-07-21**（真实 adapter + supervised dispatch + local mutation/composer flags）；**L2a-Send M1+M2 ACCEPT@2026-07-22**；**L2b-Observe M1+M2 ACCEPT@2026-07-22**。Plan-V6 全 UI / SSE / public V8 仍未完成；public write 仍 OFF。 |
 | V0 Workspace v1 candidate ADR | [`design/2026-07-16-agent-workspace-v1-adr.md`](design/2026-07-16-agent-workspace-v1-adr.md) | **SOURCE + FORMAL EVIDENCE + INDEPENDENT CLOSE-OUT DONE**；这只冻结 interface/cardinality/authority，不授权 runtime/live effect。 |
+| L2a-Send thin write rail ADR | [`design/2026-07-22-l2a-send-thin-write-rail-adr.md`](design/2026-07-22-l2a-send-thin-write-rail-adr.md) | Browser composite `submit-turn` → HQA Intent Payload Store → ledger `conversation_turn` → worker bind/resolve → Hermes；**M1+M2 ACCEPT@2026-07-22**。≠ Plan-V6 全 UI。 |
 | V0/V2 release closure | [`audits/2026-07-19-v0-v2-release-closure.md`](audits/2026-07-19-v0-v2-release-closure.md) | 三仓 source、live identity、validation binding 与 independent `CLEAR` 的事实源；verdict 明确 `release_authorized=false`。 |
 | V3 acceptance | [`audits/2026-07-19-agent-v0-2-v3-acceptance.md`](audits/2026-07-19-agent-v0-2-v3-acceptance.md) | encrypted intent + multi-Attempt workflow authority 已 source-accepted、本地暗态安装并注册唯一 no-agent retention；不等于 Web Chat 可写。 |
 | V3 运维 | [`runbooks/agent-v0-2-v3-authorities.md`](runbooks/agent-v0-2-v3-authorities.md) | authority 路径、只读 Hermes CLI、retention、backup/restore、audit/rebuild 与回滚边界。 |
@@ -37,10 +38,15 @@ intent / multi-Attempt workflow 暗态地基已完成独立验收；V1.2 live ro
 candidate 仍未被 live Hermes 加载。**V4 code + isolated + live schema ACCEPT**（修订 006 Scheme A、007 session registry、
 owner session/CSRF、AgentWorkspace/saga、thin BFF、`composer_readiness`；live
 `quantplatform` 已于 2026-07-21 apply 006/007，fingerprint `4d952fe…`，业务行仍 0，
-write flags 仍 false）。**public write / claim / dispatch / composer 仍 OFF**。下一代码
-切片默认 V5 supervised claim/dispatch（dark）。Discord 保持当前可用入口，但不是临时
-网页方案或 fallback；Discord/历史 session 在 Web 只读，网页写入只能新建或显式 fork
-到新的 managed Hermes Session。
+write flags 仍 false）。**V5 dark supervised claim/dispatch 已代码+crash-matrix 验收**
+（`FakeHermesDispatchAdapter`；CLI 默认仍 `reconcile_only`）。**V6 本地 dark enablement
+ACCEPT@2026-07-21**：真实 `HttpHermesDispatchAdapter`、supervised CLI、provider smoke、
+settings-gated local mutation/composer；交易 `kill_switch` 仍 true。**L2a-Send M1+M2
+ACCEPT@2026-07-22**（composite submit-turn + live `L2a-pong` delivered）。**L2b-Observe
+M1+M2 ACCEPT@2026-07-22**（command-aware snapshot/follow + delivered 后 messages 预览）。
+**Plan-V6 完整 Web Chat UI / SSE / launchd 常驻 daemon / public V8 仍未完成**；public
+write 仍 OFF。Discord 保持当前可用入口，但不是临时网页方案或 fallback；Discord/历史
+session 在 Web 只读，网页写入只能新建或显式 fork 到新的 managed Hermes Session。
 
 ## D-31 当前事实
 
@@ -212,11 +218,15 @@ periodic/manual update + no-agent watcher；watcher 只报告漂移，不得 ins
    这不开放 composer/dispatch。
 5. **V4 PostgreSQL schema/BFF/security：CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21）。**
    修订 006/007 已 live apply（backup + idempotent replay + readiness 证据见 platform
-   `docs/audits/2026-07-21-v4-live-migrate-006-007.md`）。research.* 仅 typed fail-closed；
-   **public write / claim / dispatch 仍 OFF**。
-6. **V5 supervised worker（当前下一代码切片）、V6 最终 Workspace UI、V7 decisions/results/two
-   vertical slices。** 所有切片只落最终架构，公共 Web Chat 保持 OFF。
-7. **V8 adversarial acceptance/release。** 两轮冷启动、独立 security review、真实用户验收
+   `docs/audits/2026-07-21-v4-live-migrate-006-007.md`）。research.* 仅 typed fail-closed。
+6. **V5 supervised worker：DARK CODE + CRASH-MATRIX ACCEPT（2026-07-21）。** CLI 默认仍
+   `reconcile_only`；`supervised_dispatch` + Fake adapter hermetic/PG green。
+7. **V6 本地 dark enablement + L2a/L2b thin rail：ACCEPT（2026-07-21…22）。** 真实 adapter、
+   local mutation/composer flags、composite `submit-turn`、command-aware snapshot/follow、
+   delivered 后 Hermes messages 预览已通。**不等于** Plan-V6 完整 Web Chat UI / SSE /
+   public cutover。下一施工：L3/剩余 Plan-V6 UI、V7 两纵切、ops restart 纪律；public
+   write 始终 OFF 直至 V8。
+8. **V8 adversarial acceptance/release。** 两轮冷启动、独立 security review、真实用户验收
    全绿后一次开放 Agent v0.2；legacy redirect 仍另行审批。
 
 不得从旧 Wave 3、旧 1a-4、历史 audit 或 unchecked checkbox 自行增加/重排当前步骤。

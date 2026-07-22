@@ -99,7 +99,8 @@ private func strictObject(_ data: Data) throws -> [String: Any] {
     // values. JSONSerialization otherwise accepts duplicate keys using a
     // last-value-wins rule, so count the raw key tokens and reject escaped,
     // duplicated, nested, or whitespace-variant key syntax before dispatch.
-    let expression = try NSRegularExpression(pattern: "\\\"([A-Za-z_]+)\\\":")
+    // Field names are ASCII identifiers; digits are allowed (aad_b64, plaintext_b64, …).
+    let expression = try NSRegularExpression(pattern: "\\\"([A-Za-z_][A-Za-z0-9_]*)\\\":")
     let range = NSRange(text.startIndex..<text.endIndex, in: text)
     let matches = expression.matches(in: text, range: range)
     var keys = Set<String>()
@@ -146,12 +147,16 @@ private func base64(_ value: Any?, maximum: Int) throws -> Data {
 }
 
 private func keyQuery(_ keyID: String) -> [CFString: Any] {
+    // Use the traditional file-based keychain. Data Protection Keychain
+    // (kSecUseDataProtectionKeychain) requires a keychain-access-groups
+    // entitlement that adhoc/linker-signed CLI helpers do not carry
+    // (OSStatus -34018 errSecMissingEntitlement). Traditional keychain
+    // still honors kSecAttrAccessibleWhenUnlockedThisDeviceOnly below.
     return [
         kSecClass: kSecClassGenericPassword,
         kSecAttrService: keychainService,
         kSecAttrAccount: keyID,
         kSecAttrSynchronizable: kCFBooleanFalse as Any,
-        kSecUseDataProtectionKeychain: kCFBooleanTrue as Any,
     ]
 }
 

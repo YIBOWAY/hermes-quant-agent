@@ -54,10 +54,20 @@ Rules for AI agents working in this repository.
   `121926388d86`; see `docs/audits/2026-07-19-agent-v0-2-v3-acceptance.md` and
   `docs/runbooks/agent-v0-2-v3-authorities.md`. `IntentPayloadStore` owns encrypted
   bodies/TTL/tombstones; `WorkflowAuthority` owns Task/Attempt facts. Hermes may
-  only call `show|events|audit|rebuild`; workflow mutation and payload resolve are
-  trusted in-process seams only. The retention cron is local `--no-agent` and
-  must stay free of provider, HTTP, database and trading calls. V3 completion
-  does not enable Web writes, claim/dispatch, migration or V2 live install.
+  only call `show|events|audit|rebuild` on the workflow surface; payload put /
+  bind_resolve go through `python -m hqa.intent_payload_cli` (platform subprocess
+  port — platform must never `import hqa`). The retention cron is local
+  `--no-agent` and must stay free of provider, HTTP, database and trading calls.
+  V3 alone did not enable Web writes; later V6 local dark + L2a did under
+  separate local authorization (public cutover still OFF).
+- **V4–V6 / L2a / L2b (2026-07-21…22) status for agents:** V4 live schema ACCEPT
+  (006/007). V5 dark claim/dispatch ACCEPT (CLI default still `reconcile_only`).
+  V6 local dark enablement ACCEPT (real HTTP adapter + local mutation flags).
+  L2a-Send M1+M2 ACCEPT (composite submit-turn → store → worker → Hermes
+  `L2a-pong`). L2b-Observe M1+M2 ACCEPT (command snapshot/follow + messages
+  preview after deliver). Plan-V6 full UI/SSE/public V8 still open. Authoritative
+  status: `docs/README.md` + active plan; L2a ADR
+  `docs/design/2026-07-22-l2a-send-thin-write-rail-adr.md`.
 - Hermes updates are operator-controlled and periodic/manual. The no-agent
   compatibility watcher may report drift but must never pull, merge, install,
   restart or enable gates. The upstream Hermes 40k full suite is not an Agent
@@ -78,16 +88,18 @@ Rules for AI agents working in this repository.
 
 - Keep Phase 0/1a read-only or proposal-only unless a plan explicitly says
   otherwise.
-- Agent v0.2 development may use final production modules behind dark gates, but
-  `chat_write_ready`, browser mutation, worker claim/dispatch, and public
-  composer submission stay OFF until the active plan's V8 release gate. A fake
-  Hermes adapter is for hermetic tests only, never a temporary user path.
-- Do not live-apply the current migration 006. Its `UNIQUE(task_id)` conflicts
-  with the required multi-Attempt research cardinality. Migration auto-apply
-  must be fixed first; revise never-live 006 together with schema metadata,
-  readiness, repository/claim SQL, reverse audit, rollback and tests. Under the
-  current replay-all runner, do not assume an appended 007 can repair it. The
-  reviewed final migration still needs a new explicit live authorization.
+- Agent v0.2 development may use final production modules behind dark gates.
+  **Public** `chat_write_ready` / public composer stay OFF until V8. Local
+  single-user dark enablement may open settings-gated mutation/composer and
+  supervised dispatch under the trading kill switch — that is not public cutover
+  and not Plan-V6 full-UI acceptance. A fake Hermes adapter is for hermetic
+  tests only, never a temporary public user path.
+- Migration 006 was revised (Scheme A) and **live-applied 2026-07-21** with 007
+  on `quantplatform` after explicit authorization. Do not re-apply obsolete
+  `UNIQUE(task_id)`-only 006. Schema readiness is not write authorization.
+  Additive L2a migration `008_l2a_conversation_turn_claim.sql` enables
+  `conversation_turn` claim alongside research binding — apply only with
+  explicit live auth and evidence.
 - Treat the local `~/.hermes/hermes-agent` checkout as a third owned dependency
   for v0.2 Durable Run work. Pin source/install/runtime identity and develop in a
   controlled branch/worktree; do not patch an unidentified live checkout in

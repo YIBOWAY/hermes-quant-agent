@@ -38,6 +38,30 @@ while [ "$#" -gt 0 ]; do
       forward+=("$1" "$2")
       shift 2
       ;;
+    --mode)
+      [ "$#" -ge 2 ] || refuse
+      case "$2" in
+        reconcile_only|supervised_dispatch) ;;
+        *) refuse ;;
+      esac
+      forward+=("$1" "$2")
+      shift 2
+      ;;
+    --worker-id)
+      [ "$#" -ge 2 ] || refuse
+      [[ "$2" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || refuse
+      forward+=("$1" "$2")
+      shift 2
+      ;;
+    --fixed-input)
+      [ "$#" -ge 2 ] || refuse
+      # Bound length without echoing the value.
+      if [ "${#2}" -lt 1 ] || [ "${#2}" -gt 4096 ]; then
+        refuse
+      fi
+      forward+=("$1" "$2")
+      shift 2
+      ;;
     *)
       refuse
       ;;
