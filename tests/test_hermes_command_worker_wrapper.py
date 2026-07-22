@@ -91,6 +91,25 @@ def test_wrapper_refuses_non_numeric_lifecycle_values_without_echoing_them(
     assert "ARGV" not in result.stdout
 
 
+def test_wrapper_refuses_fixed_input_so_prompt_never_enters_process_argv(
+    tmp_path: Path,
+) -> None:
+    wrapper = _materialize_wrapper(tmp_path)
+    sensitive_prompt = "private research prompt must not enter argv"
+
+    result = subprocess.run(
+        ["bash", str(wrapper), "--fixed-input", sensitive_prompt],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "REFUSED: unsupported connector-worker argument" in result.stderr
+    assert sensitive_prompt not in result.stdout + result.stderr
+    assert "ARGV" not in result.stdout
+
+
 def test_wrapper_forwards_only_documented_loop_controls_from_platform_cwd(
     tmp_path: Path,
 ) -> None:

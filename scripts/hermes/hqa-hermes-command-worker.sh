@@ -53,15 +53,6 @@ while [ "$#" -gt 0 ]; do
       forward+=("$1" "$2")
       shift 2
       ;;
-    --fixed-input)
-      [ "$#" -ge 2 ] || refuse
-      # Bound length without echoing the value.
-      if [ "${#2}" -lt 1 ] || [ "${#2}" -gt 4096 ]; then
-        refuse
-      fi
-      forward+=("$1" "$2")
-      shift 2
-      ;;
     *)
       refuse
       ;;
