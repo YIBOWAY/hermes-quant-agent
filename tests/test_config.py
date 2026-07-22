@@ -8,7 +8,11 @@ import hqa.config as config
 
 
 def test_repo_and_platform_paths():
-    assert config.REPO_DIR.name == "Hermes-quant-agent"
+    # Linked worktrees and clones may legitimately use a different directory
+    # name.  The invariant is that configuration resolves this checkout's
+    # repository root, not that the parent folder has one machine-specific
+    # spelling.
+    assert config.REPO_DIR == Path(__file__).resolve().parents[1]
     assert config.AIQP_DIR == Path("/Users/sunyibo/programs/ai-quant-platform")
     assert (
         config.QUANT_SYSTEM_BIN == config.AIQP_DIR / "ai-quant" / "bin" / "quant-system"
