@@ -3,8 +3,19 @@
 这份文件只回答三个问题：**现在按哪份计划做、实际做到哪里、其他文档该怎么读**。
 长期方向、历史实现细节和特定日期审计分别留在 roadmap、plan 和 audit 中。
 
-> 事实快照：2026-07-22。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
+> 事实快照：2026-07-23。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
 > 必须重新检查 git、进程、HTTP smoke 和测试。
+
+> **V4–V7 对抗修复状态（优先于本文后面的历史 ACCEPT 记录）：** **SOURCE + ISOLATED
+> ACCEPT**；remediation 已将
+> V4 runtime role/RLS、registry action idempotency、V5/V6 durable Run recovery/fair reconcile、
+> production/fake isolation、SSE client isolation、V7 Gate 3/final receipt 与 owner bootstrap
+> 边界重新封口。平台 migration 009/010、constrained runtime LOGIN 和 reviewed Hermes/HQA
+> durable candidate 仍未 live apply/install/restart/canary，因此 local/public composer 均必须
+> OFF。历史 `V6 LOCAL DARK ENABLEMENT ACCEPT` 只说明 2026-07-21 当时的增量证据，不再代表
+> 当前 release readiness。见
+> [`audits/2026-07-23-v4-v7-adversarial-remediation.md`](audits/2026-07-23-v4-v7-adversarial-remediation.md)
+> 和 [`runbooks/agent-v0-2-v4-v7-cutover.md`](runbooks/agent-v0-2-v4-v7-cutover.md)。
 
 ## 当前执行入口
 
@@ -12,7 +23,9 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。V0–V5 DONE（V2 live durable 仍 OFF）；**V6 本地 dark enablement ACCEPT@2026-07-21**；**L2a–L5c thin rail ACCEPT@2026-07-22**；**V7a–V7g-A-M1 ACCEPT@2026-07-22…23**（exact `allow_once|deny` CAS + hermetic `respond_approval` release/signal + hermetic Run-scoped stop + §5.5 layered receipt + durable approval projector + Domain Gate 1/2/3 surfaces + typed results on spine + **hermetic Vertical A bind** → Task/Attempt/Run + typed result → completed\|completed_degraded；sample/real fail-closed；无 always-allow；Gates ≠ command-approval ≠ results；不发明 Task from conversation.turn；zero live Futu/orders；public write 仍 OFF）。Plan-V6 剩余 UI（token stream）+ V7g-A-M2 live Futu RO / V7g-B / public V8 仍未完成。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。V4–V7 remediation 已 SOURCE + ISOLATED ACCEPT，优先于旧切片标签；live 009/010、runtime LOGIN、Hermes/HQA install/canary 未完成，故 composer OFF。Plan-V6 token stream、V7g-A-M2 live Futu RO、V7g-B 与 public V8 仍未完成。 |
+| V4–V7 对抗修复验收 | [`audits/2026-07-23-v4-v7-adversarial-remediation.md`](audits/2026-07-23-v4-v7-adversarial-remediation.md) | 修复前 4.8/10；修复后 source/isolated 工程质量 8.2、综合完成度 7.4，live 可用度仍 4.0。记录问题、提交、全量测试和不可越过的 live 边界。 |
+| V4–V7 live cutover | [`runbooks/agent-v0-2-v4-v7-cutover.md`](runbooks/agent-v0-2-v4-v7-cutover.md) | 两次独立授权：platform 009/010 + constrained LOGIN；Hermes/HQA install/restart/canary。不是当前授权。 |
 | V0 Workspace v1 candidate ADR | [`design/2026-07-16-agent-workspace-v1-adr.md`](design/2026-07-16-agent-workspace-v1-adr.md) | **SOURCE + FORMAL EVIDENCE + INDEPENDENT CLOSE-OUT DONE**；这只冻结 interface/cardinality/authority，不授权 runtime/live effect。 |
 | L2a-Send thin write rail ADR | [`design/2026-07-22-l2a-send-thin-write-rail-adr.md`](design/2026-07-22-l2a-send-thin-write-rail-adr.md) | Browser composite `submit-turn` → HQA Intent Payload Store → ledger `conversation_turn` → worker bind/resolve → Hermes；**M1+M2 ACCEPT@2026-07-22**。≠ Plan-V6 全 UI。 |
 | V0/V2 release closure | [`audits/2026-07-19-v0-v2-release-closure.md`](audits/2026-07-19-v0-v2-release-closure.md) | 三仓 source、live identity、validation binding 与 independent `CLEAR` 的事实源；verdict 明确 `release_authorized=false`。 |
@@ -29,7 +42,10 @@
 | 完整 9H 完成记录 | [`superpowers/plans/2026-07-12-full-9h-automation-notifications.md`](superpowers/plans/2026-07-12-full-9h-automation-notifications.md) | 只读 automation、weekly、freshness、feed 1.1 与 local notification 的交付/运行验收。 |
 | 平台 Slice 0–8 | `/Users/sunyibo/programs/ai-quant-platform/docs/superpowers/plans/2026-07-08-frontend-redesign-hermes-integration.md` | 已完成的前端/数据库历史交付与 parity 输入，不是独立路线图。 |
 
-## 一句话项目阶段
+## 历史增量阶段记录
+
+本节保留 2026-07-21…23 各切片当时的证据；当前 release 判断必须以上方 V4–V7 对抗修复
+验收为准，不能从本节单独推导 composer readiness。
 
 **Phase 1a-4 / 9H 已收口；D-31 已交付真实 Hermes 会话只读、durable ledger、reconcile-only
 worker、3C.1 代码地基和 3E-A 只读 Unified Results。当前执行主线已由 D-32 收敛为真正 Agent
@@ -85,7 +101,7 @@ daemon / public V8 仍未完成**；public write 仍 OFF。Discord 保持当前�
 但不是临时网页方案或 fallback；Discord/历史 session 在 Web 只读，网页写入只能新建
 或显式 fork 到新的 managed Hermes Session。
 
-## D-31 当前事实
+## D-31 历史交付事实
 
 | 能力 | 状态 | 真实含义 |
 |---|---|---|

@@ -45,9 +45,12 @@ Rules for AI agents working in this repository.
 - Slice V0 is source/formal DONE: the three-repo identity manifest, validation
   binding and independent `CLEAR` verdict are closed in
   `docs/audits/2026-07-19-v0-v2-release-closure.md`. The verdict explicitly has
-  `release_authorized=false`. V1 code remediation is accepted, but live V1.2
-  role/RLS remains PARTIAL: migration 006 is absent and `quant` is still
-  superuser/bypassrls. V2 `DurableRunAuthority` source is accepted and pushed at
+  `release_authorized=false`. V1 code remediation is accepted, but the live
+  runtime-role/RLS boundary remains PARTIAL: 006/007/008 are live, while the
+  application still runs as historical `quant` superuser/bypassrls. V4-R
+  migrations 009/010 and a constrained runtime LOGIN exist only in reviewed
+  source/isolated evidence and are not live-applied. V2 `DurableRunAuthority`
+  source is accepted and pushed at
   Hermes integration `2eb5fa27790f`; it is not installed in the live upstream
   Hermes runtime, so Durable Run and every write gate remain OFF.
 - Slice V3 is source-accepted and installed locally in dark mode at HQA
@@ -79,6 +82,17 @@ Rules for AI agents working in this repository.
   marker `l5c-m1`). **V7a–V7g-A-M1 ACCEPT** (exact allow_once|deny CAS + hermetic respond_approval release/signal + hermetic Run-scoped stop with §5.5 layered receipt + durable approval projector + Domain Gate 1/2/3 surfaces + typed results on spine + hermetic Vertical A options bind → Task/Attempt/Run + typed result → completed|completed_degraded; sample/real fail-closed; no always-allow; Gates ≠ command-approval ≠ results; no Task invention from conversation.turn; no dual private poll; no catalog-on-spine; zero live Futu/orders). Plan-V6 remainder (token stream) + V7g-A-M2 live Futu RO + V7g-B + public V8 still open.
   Authoritative status: `docs/README.md` + active plan; L2a ADR
   `docs/design/2026-07-22-l2a-send-thin-write-rail-adr.md`.
+- **2026-07-23 V4–V7 adversarial remediation is SOURCE + ISOLATED ACCEPT and
+  overrides the historical release implication of the ACCEPT labels above.**
+  The remediation separates schema,
+  runtime identity, durable dispatch and public cutover; makes managed-session
+  create/fork idempotent in the registry instead of the dispatch ledger; closes
+  ACK-loss/final-receipt recovery, SSE client isolation, projection-outage,
+  Gate 3 and paper-proxy evidence gaps; and keeps hermetic V7 authorities out of
+  production. Migrations 009/010, the constrained runtime LOGIN and the reviewed
+  Hermes durable candidate remain **NOT LIVE**. Until separately authorized
+  apply/install/restart/canary evidence exists, local/public composer readiness
+  must stay OFF. See `docs/audits/2026-07-23-v4-v7-adversarial-remediation.md`.
 - Hermes updates are operator-controlled and periodic/manual. The no-agent
   compatibility watcher may report drift but must never pull, merge, install,
   restart or enable gates. The upstream Hermes 40k full suite is not an Agent
@@ -111,6 +125,11 @@ Rules for AI agents working in this repository.
   Additive L2a migration `008_l2a_conversation_turn_claim.sql` enables
   `conversation_turn` claim alongside research binding — apply only with
   explicit live auth and evidence.
+- V4-R migrations `009_agent_v0_2_v4r_security.sql` and
+  `010_hermes_session_action_idempotency.sql` are source/isolated-only. Do not
+  apply them, provision/switch the runtime LOGIN, or retire legacy queued
+  control rows without a separate live authorization, backup/fingerprint and
+  the cutover runbook. Source readiness is not live readiness.
 - Treat the local `~/.hermes/hermes-agent` checkout as a third owned dependency
   for v0.2 Durable Run work. Pin source/install/runtime identity and develop in a
   controlled branch/worktree; do not patch an unidentified live checkout in

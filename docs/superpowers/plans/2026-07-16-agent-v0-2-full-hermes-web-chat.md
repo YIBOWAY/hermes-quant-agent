@@ -1,5 +1,22 @@
 # Agent v0.2 — 完整 `/hermes` Web Chat 实施计划
 
+> **V4–V7 对抗修复 ADDENDUM（2026-07-23，优先于下方历史 ACCEPT 标签）：**
+> 复核发现原增量验收把“源码存在 / hermetic fake 通过 / 本机曾成功调用”混在了一起，不能继续
+> 推导当前 write readiness。修复后的权威边界是：managed session create/fork 的幂等事实属于
+> session registry，不生成可 dispatch command；普通 turn/research action 才进入 transport
+> ledger。生产路径只接受 HQA durable subprocess port 与真实 Hermes Run HTTP port，hermetic
+> approval/Gate/result authority 仅允许测试。ACK 丢失、terminal fold、final receipt 崩溃恢复、
+> bounded Run reconcile 公平轮转、SSE client isolation、projection outage、Gate 3 schema/provenance、
+> owner bootstrap 与 runtime role/RLS 均已完成 V4–V7 remediation 的 SOURCE + ISOLATED
+> ACCEPT。
+>
+> 这仍**不是 live release**：平台 009/010 尚未 live apply，`quant_app_runtime` 尚未 provision/
+> 切换，HQA/Hermes durable candidate 尚未安装/重启/canary；因此 local/public composer 均须
+> fail closed。下方 `V6 LOCAL DARK ENABLEMENT ACCEPT` 等字样只表示当时的历史切片证据，不能
+> 覆盖这一更晚的审计结论。public V8、真实下单以及任何 trading mutation 继续 OFF。验收与
+> cutover 入口分别见 `../../audits/2026-07-23-v4-v7-adversarial-remediation.md` 与
+> `../../runbooks/agent-v0-2-v4-v7-cutover.md`。
+>
 > **V0/V2/V3 CLOSE-OUT ADDENDUM（2026-07-19）：** V3 implementation source 为
 > `codex/full-9h@121926388d86`；其后的 documentation-only commit 可以继续推进分支；V0 formal
 > snapshot 为 `4fdad9e7b31b`，closure bundle commit
@@ -283,6 +300,12 @@ interface。fake 不是临时产品路径，也不能通过 feature flag 面向�
 
 ### 5.1 每个 user action
 
+这里的 transport 步骤适用于会执行工作的普通 turn / research / approval / stop action。
+`managed_session_create` 与 `managed_session_fork` 是唯一例外：它们只在 session registry 中以
+`owner_id + workspace_id + client_action_id + canonical action digest` 做事务内幂等，并直接返回
+已创建的 immutable session/lineage；不得写入可 claim 的 Hermes command/outbox，也不得调用
+provider。相同 ID + 相同 digest 返回同一 session；相同 ID + 不同 digest 返回 409。
+
 1. 校验 accepted Host、signed local session、same-origin、`Sec-Fetch-Site`、CSRF 和 actor ownership；
    loopback 本身不等于登录。
 2. 先验证 actor 对 Workspace 的 ownership，再在
@@ -290,9 +313,10 @@ interface。fake 不是临时产品路径，也不能通过 feature flag 面向�
    digest；只有授权后才可返回 cached receipt，同 ID 不同 digest 返回 409 且零新增写入。
 3. 校验 session 类型与 immutable provider policy；`observed_external_session` 拒绝写入，改变
    provider 或从 Discord/历史继续必须 fork 到新的 `web_managed_session`。
-4. 将 prompt 写入 intent payload authority；prompt 不进入 argv、stdout、日志或 PostgreSQL。
+4. 对包含正文的 dispatchable action，将 prompt 写入 intent payload authority；prompt 不进入
+   argv、stdout、日志或 PostgreSQL。
 5. 对 research action，由 HQA prepare/advance Task/Attempt；普通 turn 不伪造 Task。
-6. PostgreSQL 单事务写 exact command/binding、version-1 event、outbox 和 notify。
+6. PostgreSQL 单事务写 exact dispatchable command/binding、version-1 event、outbox 和 notify。
 7. HQA 观察 exact transport binding；第二权威观察失败则返回 `reconciling`，不让浏览器换 ID
    重提。
 8. HTTP 返回 durable `ActionReceipt`；请求线程内不调用 Hermes/provider。
