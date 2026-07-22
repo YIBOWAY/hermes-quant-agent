@@ -69,8 +69,10 @@ Rules for AI agents working in this repository.
   canvas + live `L3a-pong` bubbles). L3b-Transcript-Polish M1 ACCEPT
   (no-flicker refresh, soft stick scroll, optimistic user bubble, shared
   canvas). L4a-Task-Drawer M1 ACCEPT (read-only command Activity from
-  snapshot `commands[]`; Task/Attempt authority still empty). Plan-V6 full
-  UI/SSE/public V8 still open.
+  workspace `commands[]`; Task/Attempt authority still empty). L4b-SSE-Follow
+  M1 ACCEPT (shared follow spine: BFF SSE + FE EventSource/poll; Activity
+  consumes spine; no assistant bodies). Plan-V6 remainder (approvals/a11y/
+  richer Task·Attempt) + public V8 still open.
   Authoritative status: `docs/README.md` + active plan; L2a ADR
   `docs/design/2026-07-22-l2a-send-thin-write-rail-adr.md`.
 - Hermes updates are operator-controlled and periodic/manual. The no-agent

@@ -12,7 +12,7 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。V0–V5 DONE（V2 live durable 仍 OFF）；**V6 本地 dark enablement ACCEPT@2026-07-21**（真实 adapter + supervised dispatch + local mutation/composer flags）；**L2a-Send M1+M2 ACCEPT@2026-07-22**；**L2b-Observe M1+M2 ACCEPT@2026-07-22**；**L3a-Transcript M1 ACCEPT@2026-07-22**；**L3b-Transcript-Polish M1 ACCEPT@2026-07-22**；**L4a-Task-Drawer M1 ACCEPT@2026-07-22**（command Activity，非 HQA Task 权威）。Plan-V6 全 UI / SSE / public V8 仍未完成；public write 仍 OFF。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。V0–V5 DONE（V2 live durable 仍 OFF）；**V6 本地 dark enablement ACCEPT@2026-07-21**（真实 adapter + supervised dispatch + local mutation/composer flags）；**L2a-Send M1+M2 ACCEPT@2026-07-22**；**L2b-Observe M1+M2 ACCEPT@2026-07-22**；**L3a-Transcript M1 ACCEPT@2026-07-22**；**L3b-Transcript-Polish M1 ACCEPT@2026-07-22**；**L4a-Task-Drawer M1 ACCEPT@2026-07-22**（command Activity，非 HQA Task 权威）；**L4b-SSE-Follow M1 ACCEPT@2026-07-22**（共享 follow spine：BFF SSE + FE EventSource/poll；无 assistant body）。Plan-V6 剩余 UI（approvals/a11y/richer 投影）/ public V8 仍未完成；public write 仍 OFF。 |
 | V0 Workspace v1 candidate ADR | [`design/2026-07-16-agent-workspace-v1-adr.md`](design/2026-07-16-agent-workspace-v1-adr.md) | **SOURCE + FORMAL EVIDENCE + INDEPENDENT CLOSE-OUT DONE**；这只冻结 interface/cardinality/authority，不授权 runtime/live effect。 |
 | L2a-Send thin write rail ADR | [`design/2026-07-22-l2a-send-thin-write-rail-adr.md`](design/2026-07-22-l2a-send-thin-write-rail-adr.md) | Browser composite `submit-turn` → HQA Intent Payload Store → ledger `conversation_turn` → worker bind/resolve → Hermes；**M1+M2 ACCEPT@2026-07-22**。≠ Plan-V6 全 UI。 |
 | V0/V2 release closure | [`audits/2026-07-19-v0-v2-release-closure.md`](audits/2026-07-19-v0-v2-release-closure.md) | 三仓 source、live identity、validation binding 与 independent `CLEAR` 的事实源；verdict 明确 `release_authorized=false`。 |
@@ -48,11 +48,15 @@ M1+M2 ACCEPT@2026-07-22**（command-aware snapshot/follow + delivered 后 messag
 `L3a-pong` + FE marker；无 SSE）。
 **L3b-Transcript-Polish M1 ACCEPT@2026-07-22**（no-flicker refresh、soft stick scroll、
 optimistic user bubble、sessions detail 复用 `TranscriptCanvas`；仍无 SSE）。
-**L4a-Task-Drawer M1 ACCEPT@2026-07-22**（workbench 只读 Activity：snapshot
-`commands[]` lifecycle；Task/Attempt 权威投影仍空；≠ `/hermes/tasks` 研究任务页；无 SSE）。
-**Plan-V6 完整 Web Chat UI / SSE / launchd 常驻 daemon / public V8 仍未完成**；public
-write 仍 OFF。Discord 保持当前可用入口，但不是临时网页方案或 fallback；Discord/历史
-session 在 Web 只读，网页写入只能新建或显式 fork 到新的 managed Hermes Session。
+**L4a-Task-Drawer M1 ACCEPT@2026-07-22**（workbench 只读 Activity：workspace
+`commands[]` lifecycle；Task/Attempt 权威投影仍空；≠ `/hermes/tasks` 研究任务页）。
+**L4b-SSE-Follow M1 ACCEPT@2026-07-22**（BFF `GET …/follow/stream` + FE 共享 spine；
+SSE 优先 / poll 回退；Activity 消费 spine；delivered bind/bump；follow/SSE 无
+assistant body）。
+**Plan-V6 完整 Web Chat UI（approvals/a11y/richer Task·Attempt）/ launchd 常驻
+daemon / public V8 仍未完成**；public write 仍 OFF。Discord 保持当前可用入口，
+但不是临时网页方案或 fallback；Discord/历史 session 在 Web 只读，网页写入只能新建
+或显式 fork 到新的 managed Hermes Session。
 
 ## D-31 当前事实
 
@@ -230,9 +234,9 @@ periodic/manual update + no-agent watcher；watcher 只报告漂移，不得 ins
 7. **V6 本地 dark enablement + L2a/L2b/L3/L4 thin rail：ACCEPT（2026-07-21…22）。** 真实 adapter、
    local mutation/composer flags、composite `submit-turn`、command-aware snapshot/follow、
    delivered 后 Hermes messages 预览已通；L3a canvas + L3b polish + L4a command Activity
-   ACCEPT。**不等于** Plan-V6 完整 Web Chat UI / SSE / public cutover。下一施工：剩余
-   Plan-V6 UI（SSE/approvals/a11y/richer Task·Attempt 投影）、V7 两纵切、ops restart
-   纪律；public write 始终 OFF 直至 V8。
+   + L4b shared SSE/poll follow spine ACCEPT。**不等于** Plan-V6 完整 Web Chat UI /
+   public cutover。下一施工：剩余 Plan-V6 UI（approvals/a11y/richer Task·Attempt 投影）、
+   V7 两纵切、ops restart 纪律；public write 始终 OFF 直至 V8。
 8. **V8 adversarial acceptance/release。** 两轮冷启动、独立 security review、真实用户验收
    全绿后一次开放 Agent v0.2；legacy redirect 仍另行审批。
 

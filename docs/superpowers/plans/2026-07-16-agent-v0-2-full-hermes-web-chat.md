@@ -20,7 +20,7 @@
 > migration、browser mutation、worker claim/dispatch、provider、Gate、paper/live 与 public composer
 > 等所有 live gates 保持 OFF；本 addendum 不构成任何 live 授权。
 
-> **状态（2026-07-22）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a-Send M1+M2 ACCEPT@2026-07-22 / L2b-Observe M1+M2 ACCEPT@2026-07-22 / L3a-Transcript M1 ACCEPT@2026-07-22 / L3b-Transcript-Polish M1 ACCEPT@2026-07-22 / L4a-Task-Drawer M1 ACCEPT@2026-07-22 / Plan-V6 FULL UI PARTIAL / NEXT 剩余 Plan-V6 UI（SSE/approvals/a11y）+ V7（public write 仍 OFF）。** 本计划是 D-32 唯一 active
+> **状态（2026-07-22）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a-Send M1+M2 ACCEPT@2026-07-22 / L2b-Observe M1+M2 ACCEPT@2026-07-22 / L3a-Transcript M1 ACCEPT@2026-07-22 / L3b-Transcript-Polish M1 ACCEPT@2026-07-22 / L4a-Task-Drawer M1 ACCEPT@2026-07-22 / L4b-SSE-Follow M1 ACCEPT@2026-07-22 / Plan-V6 FULL UI PARTIAL / NEXT 剩余 Plan-V6 UI（approvals/a11y/richer 投影）+ V7（public write 仍 OFF）。** 本计划是 D-32 唯一 active
 > implementation plan。此前的 Wave 3 文档保留为已交付事实与问题输入，不再从其中的旧顺序、
 > unchecked checkbox 或“下一步”继续施工。
 >
@@ -28,8 +28,9 @@
 > + worker bind/resolve + live `L2a-pong`；L2b command-aware snapshot/follow + delivered 后
 > Hermes messages 预览；L3a workbench Conversation canvas（live `L3a-pong` bubbles）；L3b
 > polish（no-flicker / soft stick / optimistic user / shared canvas）；L4a command Activity
-> （snapshot `commands[]` lifecycle；Task/Attempt 权威仍空）。SSE / launchd 常驻 / public V8
-> 仍未做。
+> （workspace `commands[]` lifecycle；Task/Attempt 权威仍空）；L4b shared follow spine
+> （BFF SSE + FE EventSource/poll；Activity 消费 spine；follow 无 assistant body）。
+> approvals / a11y / richer Task·Attempt / launchd 常驻 / public V8 仍未做。
 >
 > **产品决策已冻结：** Discord 继续作为当前可用的 Hermes 原生自然语言入口，但不是网页端的
 > 临时方案、fallback 或验收替身。项目不再交付临时 chat、直连 Hermes 的简化 composer、旧
@@ -846,22 +847,23 @@ action 还有一个 exact Attempt；零盲重发、authority audit consistent。
 | L2b-Observe | **M1+M2 ACCEPT@2026-07-22** | snapshot `commands[]` public objects；follow 页 workspace-scoped events；cursor=`max(event_id)`；Composer poll lifecycle；delivered 后 same-origin Hermes messages 预览。**无 SSE、follow 无 assistant body** |
 | L3a-Transcript | **M1 ACCEPT@2026-07-22** | workbench Conversation 面板；deliver bind + snapshot bootstrap（onlyIfEmpty）；same-origin messages 气泡；拒 `web_`/`wm_`；live `L3a-pong` + FE marker。默认 owner `accepted_origin`=`http://127.0.0.1:3001` |
 | L3b-Transcript-Polish | **M1 ACCEPT@2026-07-22** | keep-last-ready no-flicker；soft stick-to-bottom；optimistic user bubble on accept；`aria-live`；session chip copy；sessions detail 复用 `TranscriptCanvas`。仍无 SSE |
-| L4a-Task-Drawer | **M1 ACCEPT@2026-07-22** | workbench 只读 **Activity**：snapshot `commands[]` newest-first lifecycle；markers `data-hermes-command-activity` + `data-hermes-task-drawer=l4a-m1`；~8s poll；Task/Attempt 权威仍空；≠ `/hermes/tasks` 研究任务页；无 SSE/mutation |
-| Plan-V6 完整 UI | **PARTIAL / NEXT** | SSE/live stream、approval surface、多断点 a11y、更厚 Task/Attempt/Run 投影等仍未做 |
+| L4a-Task-Drawer | **M1 ACCEPT@2026-07-22** | workbench 只读 **Activity**：workspace `commands[]` newest-first lifecycle；markers `data-hermes-command-activity` + `data-hermes-task-drawer=l4a-m1`；Task/Attempt 权威仍空；≠ `/hermes/tasks` 研究任务页；无 mutation。L4b 起由共享 spine 驱动（不再私有 8s snapshot poll） |
+| L4b-SSE-Follow | **M1 ACCEPT@2026-07-22** | 共享 durable follow spine：BFF `GET …/follow/stream` SSE（`ready`/`command`/`cursor`/`resync`/`heartbeat`/`reconnect`/`error`；scope=`command_lifecycle`）；FE EventSource 优先 + poll 回退 + snapshot bootstrap/reconcile；Activity + delivered bind/bump 共用；**follow/SSE 无 assistant body**；test knobs `max_ticks`/`poll_seconds` |
+| Plan-V6 完整 UI | **PARTIAL / NEXT** | approval surface、多断点 a11y、更厚 Task/Attempt/Run 投影、assistant token stream 等仍未做 |
 
-交付（完整 Plan-V6 目标，部分已由 L2a/L2b 覆盖）：
+交付（完整 Plan-V6 目标，部分已由 L2a/L2b/L4 覆盖）：
 
 - `WorkspaceSnapshot` 并列展示 command、Task、Attempt、Run、provider evidence、approval、
   result refs 和各 authority health；冲突派生为 `reconciling`，不覆盖 source facts。
   **已有：** sessions + command public objects + authority_health + mutation_enabled；Task/Attempt/Run/results 投影仍薄。
-- durable workspace observation cursor、snapshot → follow poll（**当前无 SSE**）；resync 当
+- durable workspace observation cursor、snapshot → follow poll **+ L4b SSE stream**；resync 当
   `after_cursor > head` → `resnapshot_workspace`。BFF 重启不依赖内存 buffer。
 - composer：owner gate + managed session + composite submit；发送状态
   submitting/accepted/outcome_unknown/conflict/unavailable + lifecycle Queued/Leased/Delivered
   + assistant 预览。external session fork UI 仍未做。
 - transcript + assistant stream、Task drawer、plan/step、typed result canvas、provider/usage、
-  source/freshness：**L3a-M1 气泡 + L3b polish（无 stream）+ L4a command Activity**；
-  stream / HQA Task·Attempt 权威 UI 仍未做。
+  source/freshness：**L3a-M1 气泡 + L3b polish + L4a command Activity + L4b shared follow spine**；
+  assistant token stream / HQA Task·Attempt 权威 UI 仍未做。
 - connection state 与 Run/Task state 正交；用户向上阅读时不抢滚动：**L3b soft stick 已做**。
 - 1440/1280/768/390、中文英文长文本、长 ID、键盘/focus/reduced-motion/WCAG AA：**未做**（L3b 仅 `aria-live` + scroll gate；L4a 仅 collapsible + labels）。
 
