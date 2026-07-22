@@ -1014,7 +1014,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
 | V4 PG schema/BFF saga/security | CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21） | live 006/007 applied；public write/composer/claim 仍 OFF；证据 platform `docs/audits/2026-07-21-v4-live-migrate-006-007.md` |
 | V5 supervised dispatch worker | DARK CODE + CRASH-MATRIX ACCEPT（2026-07-21） | dark claim/lease/`FakeHermesDispatchAdapter` + unit/PG crash matrix 全绿；CLI 默认仍 reconcile-only；provider smoke 另授权；public composer 仍 OFF |
-| V6 final workspace UI | **PARTIAL（2026-07-22）** | 本地 dark enablement + L2a-Send + L2b-Observe + L3a/L3b Transcript + L4a command Activity ACCEPT；SSE / approvals / a11y / richer Task·Attempt 投影仍 NEXT；public chat 仍 OFF |
+| V6 final workspace UI | **PARTIAL（2026-07-22）** | 本地 dark enablement + L2a–L5a thin rail ACCEPT（L4b SSE spine + L5a empty-honest Approvals observe + Composer on spine）；a11y / richer Task·Attempt 投影（L5b+）仍 NEXT；public chat 仍 OFF |
 | V7 decisions/results/vertical slices | NOT STARTED | 两纵切 + exact approvals + stop green |
 | V8 adversarial acceptance/release | NOT STARTED | independent CLEAR + user acceptance + one-time cutover |
 
