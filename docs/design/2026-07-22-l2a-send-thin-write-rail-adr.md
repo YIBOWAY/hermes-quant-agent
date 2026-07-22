@@ -9,7 +9,9 @@
 - **Follow-on:** L2b-Observe M1+M2 ACCEPT@2026-07-22 (lifecycle + messages preview);
   L3a-Transcript M1 ACCEPT@2026-07-22 (workbench Conversation canvas);
   L3b-Transcript-Polish M1 ACCEPT@2026-07-22 (no-flicker / stick / optimistic user /
-  shared canvas). Plan-V6 full UI / SSE / public V8 still open.
+  shared canvas); L4a-Task-Drawer M1 ACCEPT@2026-07-22 (command Activity from
+  snapshot `commands[]`; Task/Attempt authority still empty). Plan-V6 full UI /
+  SSE / public V8 still open.
 
 ## 1. Problem
 

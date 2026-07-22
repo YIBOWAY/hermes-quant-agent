@@ -20,15 +20,16 @@
 > migration、browser mutation、worker claim/dispatch、provider、Gate、paper/live 与 public composer
 > 等所有 live gates 保持 OFF；本 addendum 不构成任何 live 授权。
 
-> **状态（2026-07-22）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a-Send M1+M2 ACCEPT@2026-07-22 / L2b-Observe M1+M2 ACCEPT@2026-07-22 / L3a-Transcript M1 ACCEPT@2026-07-22 / L3b-Transcript-Polish M1 ACCEPT@2026-07-22 / Plan-V6 FULL UI PARTIAL / NEXT 剩余 Plan-V6 UI + V7（public write 仍 OFF）。** 本计划是 D-32 唯一 active
+> **状态（2026-07-22）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a-Send M1+M2 ACCEPT@2026-07-22 / L2b-Observe M1+M2 ACCEPT@2026-07-22 / L3a-Transcript M1 ACCEPT@2026-07-22 / L3b-Transcript-Polish M1 ACCEPT@2026-07-22 / L4a-Task-Drawer M1 ACCEPT@2026-07-22 / Plan-V6 FULL UI PARTIAL / NEXT 剩余 Plan-V6 UI（SSE/approvals/a11y）+ V7（public write 仍 OFF）。** 本计划是 D-32 唯一 active
 > implementation plan。此前的 Wave 3 文档保留为已交付事实与问题输入，不再从其中的旧顺序、
 > unchecked checkbox 或“下一步”继续施工。
 >
 > **本地 thin rail（≠ Plan-V6 全 UI 验收）：** L2a composite `submit-turn` + Intent Payload Store
 > + worker bind/resolve + live `L2a-pong`；L2b command-aware snapshot/follow + delivered 后
 > Hermes messages 预览；L3a workbench Conversation canvas（live `L3a-pong` bubbles）；L3b
-> polish（no-flicker / soft stick / optimistic user / shared canvas）。SSE /
-> Task drawer / launchd 常驻 / public V8 仍未做。
+> polish（no-flicker / soft stick / optimistic user / shared canvas）；L4a command Activity
+> （snapshot `commands[]` lifecycle；Task/Attempt 权威仍空）。SSE / launchd 常驻 / public V8
+> 仍未做。
 >
 > **产品决策已冻结：** Discord 继续作为当前可用的 Hermes 原生自然语言入口，但不是网页端的
 > 临时方案、fallback 或验收替身。项目不再交付临时 chat、直连 Hermes 的简化 composer、旧
@@ -845,7 +846,8 @@ action 还有一个 exact Attempt；零盲重发、authority audit consistent。
 | L2b-Observe | **M1+M2 ACCEPT@2026-07-22** | snapshot `commands[]` public objects；follow 页 workspace-scoped events；cursor=`max(event_id)`；Composer poll lifecycle；delivered 后 same-origin Hermes messages 预览。**无 SSE、follow 无 assistant body** |
 | L3a-Transcript | **M1 ACCEPT@2026-07-22** | workbench Conversation 面板；deliver bind + snapshot bootstrap（onlyIfEmpty）；same-origin messages 气泡；拒 `web_`/`wm_`；live `L3a-pong` + FE marker。默认 owner `accepted_origin`=`http://127.0.0.1:3001` |
 | L3b-Transcript-Polish | **M1 ACCEPT@2026-07-22** | keep-last-ready no-flicker；soft stick-to-bottom；optimistic user bubble on accept；`aria-live`；session chip copy；sessions detail 复用 `TranscriptCanvas`。仍无 SSE |
-| Plan-V6 完整 UI | **PARTIAL / NEXT** | Task drawer、SSE/live stream、approval surface、多断点 a11y 等仍未做 |
+| L4a-Task-Drawer | **M1 ACCEPT@2026-07-22** | workbench 只读 **Activity**：snapshot `commands[]` newest-first lifecycle；markers `data-hermes-command-activity` + `data-hermes-task-drawer=l4a-m1`；~8s poll；Task/Attempt 权威仍空；≠ `/hermes/tasks` 研究任务页；无 SSE/mutation |
+| Plan-V6 完整 UI | **PARTIAL / NEXT** | SSE/live stream、approval surface、多断点 a11y、更厚 Task/Attempt/Run 投影等仍未做 |
 
 交付（完整 Plan-V6 目标，部分已由 L2a/L2b 覆盖）：
 
@@ -858,9 +860,10 @@ action 还有一个 exact Attempt；零盲重发、authority audit consistent。
   submitting/accepted/outcome_unknown/conflict/unavailable + lifecycle Queued/Leased/Delivered
   + assistant 预览。external session fork UI 仍未做。
 - transcript + assistant stream、Task drawer、plan/step、typed result canvas、provider/usage、
-  source/freshness：**L3a-M1 气泡 + L3b polish（无 stream）**；stream/drawer 仍未做。
+  source/freshness：**L3a-M1 气泡 + L3b polish（无 stream）+ L4a command Activity**；
+  stream / HQA Task·Attempt 权威 UI 仍未做。
 - connection state 与 Run/Task state 正交；用户向上阅读时不抢滚动：**L3b soft stick 已做**。
-- 1440/1280/768/390、中文英文长文本、长 ID、键盘/focus/reduced-motion/WCAG AA：**未做**（L3b 仅 `aria-live` + scroll gate）。
+- 1440/1280/768/390、中文英文长文本、长 ID、键盘/focus/reduced-motion/WCAG AA：**未做**（L3b 仅 `aria-live` + scroll gate；L4a 仅 collapsible + labels）。
 
 验收（完整目标）：
 
@@ -1004,7 +1007,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
 | V4 PG schema/BFF saga/security | CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21） | live 006/007 applied；public write/composer/claim 仍 OFF；证据 platform `docs/audits/2026-07-21-v4-live-migrate-006-007.md` |
 | V5 supervised dispatch worker | DARK CODE + CRASH-MATRIX ACCEPT（2026-07-21） | dark claim/lease/`FakeHermesDispatchAdapter` + unit/PG crash matrix 全绿；CLI 默认仍 reconcile-only；provider smoke 另授权；public composer 仍 OFF |
-| V6 final workspace UI | **PARTIAL（2026-07-22）** | 本地 dark enablement + L2a-Send + L2b-Observe + L3a/L3b Transcript ACCEPT；SSE / Task drawer / approvals / a11y 仍 NEXT；public chat 仍 OFF |
+| V6 final workspace UI | **PARTIAL（2026-07-22）** | 本地 dark enablement + L2a-Send + L2b-Observe + L3a/L3b Transcript + L4a command Activity ACCEPT；SSE / approvals / a11y / richer Task·Attempt 投影仍 NEXT；public chat 仍 OFF |
 | V7 decisions/results/vertical slices | NOT STARTED | 两纵切 + exact approvals + stop green |
 | V8 adversarial acceptance/release | NOT STARTED | independent CLEAR + user acceptance + one-time cutover |
 
@@ -1033,11 +1036,12 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
    `FakeHermesDispatchAdapter` 覆盖 accept/recover/timeout/reject/accept_drop_ack；
    hermetic + `QS_TEST_DATABASE_URL` PG crash matrix 全绿；空队列零 Hermes/provider；
    production CLI 仍默认 reconcile-only（无 adapter 不 claim）。public composer 仍 OFF。
-8. **V6 本地 dark + L2a/L2b/L3 thin rail ACCEPT（2026-07-21…22）**：真实 HTTP adapter、
+8. **V6 本地 dark + L2a/L2b/L3/L4 thin rail ACCEPT（2026-07-21…22）**：真实 HTTP adapter、
    local mutation/composer flags、composite submit-turn、command-aware snapshot/follow、
-   delivered 后 messages 预览、L3a canvas + L3b polish。**Plan-V6 完整 UI / SSE 仍 PARTIAL。**
-   当前施工入口：剩余 Plan-V6 UI（Task drawer/SSE/approvals/a11y）与 V7 两纵切；public
-   chat 始终 OFF 直至 V8。V2 controlled install/canary 仍是另行授权的独立 live 轨道。
+   delivered 后 messages 预览、L3a canvas + L3b polish + L4a command Activity。
+   **Plan-V6 完整 UI / SSE 仍 PARTIAL。** 当前施工入口：剩余 Plan-V6 UI
+   （SSE/approvals/a11y/richer projections）与 V7 两纵切；public chat 始终 OFF 直至 V8。
+   V2 controlled install/canary 仍是另行授权的独立 live 轨道。
 9. V8 完成后一次开放 v0.2；legacy redirect 仍另开后续计划。
 
 这条顺序不再以“把九个 blocker 做完”为模糊任务，而是以最终用户路径、三入口 Interface、四份
