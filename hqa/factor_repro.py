@@ -268,7 +268,7 @@ def _read_canonical_json_record(path: Path, *, label: str) -> dict:
     return payload
 
 
-def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> None:
+def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> str:
     confirmation_id = binding.get("confirmation_id")
     source_digest = binding.get("source_digest")
     if not isinstance(confirmation_id, str) or _CONFIRMATION_ID_RE.fullmatch(
@@ -280,14 +280,11 @@ def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> None:
 
     confirmations_dir = gate_dir / "confirmations"
     sources_dir = gate_dir / "sources"
-    papers_dir = gate_dir / "papers"
     if (
         not confirmations_dir.is_dir()
         or confirmations_dir.is_symlink()
         or not sources_dir.is_dir()
         or sources_dir.is_symlink()
-        or not papers_dir.is_dir()
-        or papers_dir.is_symlink()
     ):
         raise ValueError("Gate 1 confirmation authority missing")
 
@@ -296,57 +293,71 @@ def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> None:
         confirmation_path,
         label="Gate 1 confirmation",
     )
-    confirmation_fields = {
+    common_fields = {
         "schema_version",
         "gate",
         "goal",
         "universe",
         "source_digest",
-        "paper_doi",
-        "paper_digest",
         "confirmation_note",
         "staged_source",
-        "staged_paper",
         "confirmation_id",
         "confirmed_at",
     }
+    schema_version = confirmation.get("schema_version")
+    if schema_version == "1.0":
+        confirmation_fields = common_fields
+    elif schema_version == "1.1":
+        confirmation_fields = {
+            *common_fields,
+            "paper_doi",
+            "paper_digest",
+            "staged_paper",
+        }
+    else:
+        raise ValueError(f"invalid Gate 1 confirmation schema: {confirmation_path}")
     if set(confirmation) != confirmation_fields:
         raise ValueError(f"invalid Gate 1 confirmation schema: {confirmation_path}")
     if (
-        confirmation.get("schema_version") != "1.1"
-        or confirmation.get("gate") != "formula_translation_confirmation"
+        confirmation.get("gate") != "formula_translation_confirmation"
         or confirmation.get("confirmation_id") != confirmation_id
         or confirmation.get("source_digest") != source_digest
-        or not isinstance(confirmation.get("paper_doi"), str)
-        or _canonical_paper_doi(confirmation["paper_doi"])
-        != confirmation["paper_doi"]
-        or not isinstance(confirmation.get("paper_digest"), str)
-        or _HEX64.fullmatch(confirmation["paper_digest"]) is None
         or not isinstance(confirmation.get("goal"), str)
         or not isinstance(confirmation.get("universe"), str)
         or not isinstance(confirmation.get("confirmation_note"), str)
         or not confirmation["confirmation_note"].strip()
         or not isinstance(confirmation.get("staged_source"), str)
-        or not isinstance(confirmation.get("staged_paper"), str)
         or not isinstance(confirmation.get("confirmed_at"), str)
     ):
         raise ValueError(f"invalid Gate 1 confirmation values: {confirmation_path}")
+    if schema_version == "1.1" and (
+        not isinstance(confirmation.get("paper_doi"), str)
+        or _canonical_paper_doi(confirmation["paper_doi"])
+        != confirmation["paper_doi"]
+        or not isinstance(confirmation.get("paper_digest"), str)
+        or _HEX64.fullmatch(confirmation["paper_digest"]) is None
+        or not isinstance(confirmation.get("staged_paper"), str)
+    ):
+        raise ValueError(f"invalid Gate 1 confirmation values: {confirmation_path}")
 
-    confirmed = {
-        key: confirmation[key]
-        for key in (
-            "schema_version",
-            "gate",
-            "goal",
-            "universe",
-            "source_digest",
-            "paper_doi",
-            "paper_digest",
-            "confirmation_note",
-            "staged_source",
-            "staged_paper",
+    confirmed_keys = [
+        "schema_version",
+        "gate",
+        "goal",
+        "universe",
+        "source_digest",
+        "confirmation_note",
+        "staged_source",
+    ]
+    if schema_version == "1.1":
+        confirmed_keys.extend(
+            [
+                "paper_doi",
+                "paper_digest",
+                "staged_paper",
+            ]
         )
-    }
+    confirmed = {key: confirmation[key] for key in confirmed_keys}
     expected_confirmation_hash = hashlib.sha256(_canonical_bytes(confirmed)).hexdigest()
     if confirmation_id != f"gate1-{expected_confirmation_hash[:32]}":
         raise ValueError(f"Gate 1 confirmation content address mismatch: {confirmation_path}")
@@ -362,17 +373,26 @@ def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> None:
             f"expected {source_digest}, got {observed_source_digest}"
         )
 
-    paper_digest = confirmation["paper_digest"]
-    expected_paper = papers_dir / f"{paper_digest}.pdf"
-    recorded_paper = Path(confirmation["staged_paper"])
-    if Path(os.path.abspath(recorded_paper)) != Path(os.path.abspath(expected_paper)):
-        raise ValueError(f"Gate 1 staged paper path mismatch: {confirmation_path}")
-    observed_paper_digest = hashlib.sha256(_read_gate1_paper(expected_paper)).hexdigest()
-    if observed_paper_digest != paper_digest:
-        raise ValueError(
-            "Gate 1 staged paper digest mismatch: "
-            f"expected {paper_digest}, got {observed_paper_digest}"
-        )
+    if schema_version == "1.1":
+        papers_dir = gate_dir / "papers"
+        if not papers_dir.is_dir() or papers_dir.is_symlink():
+            raise ValueError("Gate 1 paper authority missing")
+        paper_digest = confirmation["paper_digest"]
+        expected_paper = papers_dir / f"{paper_digest}.pdf"
+        recorded_paper = Path(confirmation["staged_paper"])
+        if Path(os.path.abspath(recorded_paper)) != Path(
+            os.path.abspath(expected_paper)
+        ):
+            raise ValueError(f"Gate 1 staged paper path mismatch: {confirmation_path}")
+        observed_paper_digest = hashlib.sha256(
+            _read_gate1_paper(expected_paper)
+        ).hexdigest()
+        if observed_paper_digest != paper_digest:
+            raise ValueError(
+                "Gate 1 staged paper digest mismatch: "
+                f"expected {paper_digest}, got {observed_paper_digest}"
+            )
+    return schema_version
 
 
 def prepare_gate1_confirmation(
@@ -483,7 +503,8 @@ def record_gate1_candidate_binding(
         "candidate_id": candidate_id,
         "manifest_digest": manifest_digest,
     }
-    _verify_gate1_confirmation(gate_dir=gate_dir, binding=payload)
+    if _verify_gate1_confirmation(gate_dir=gate_dir, binding=payload) != "1.1":
+        raise ValueError("Gate 1 paper-bound confirmation is required")
     binding_hash = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
     path = gate_dir / "bindings" / f"binding-{binding_hash[:32]}.json"
     _write_exclusive_or_verify(path, _canonical_bytes(payload))
@@ -538,9 +559,13 @@ def require_gate1_candidate_binding(
         binding_hash = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
         if path.name != f"binding-{binding_hash[:32]}.json":
             raise ValueError(f"Gate 1 binding content address mismatch: {path}")
-        _verify_gate1_confirmation(gate_dir=gate_dir, binding=payload)
+        confirmation_schema = _verify_gate1_confirmation(
+            gate_dir=gate_dir,
+            binding=payload,
+        )
         if (
-            payload.get("candidate_id") == candidate_id
+            confirmation_schema == "1.1"
+            and payload.get("candidate_id") == candidate_id
             and payload.get("manifest_digest") == manifest_digest
         ):
             found = True

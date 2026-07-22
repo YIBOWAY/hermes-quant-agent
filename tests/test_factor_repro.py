@@ -154,9 +154,71 @@ def _gate1_authority(tmp_path):
     return gate_dir, source_digest, manifest_digest, binding
 
 
+def _write_historical_gate1_authority(tmp_path: Path) -> tuple[Path, str]:
+    gate_dir = tmp_path / "gate1"
+    source = b"# historical reviewed factor\n"
+    source_digest = hashlib.sha256(source).hexdigest()
+    staged_source = gate_dir / "sources" / f"{source_digest}.py"
+    staged_source.parent.mkdir(parents=True)
+    staged_source.write_bytes(source)
+    confirmed = {
+        "schema_version": "1.0",
+        "gate": "formula_translation_confirmation",
+        "goal": "historical reviewed factor",
+        "universe": "SPY,QQQ",
+        "source_digest": source_digest,
+        "confirmation_note": "historical source-only confirmation",
+        "staged_source": str(staged_source),
+    }
+    confirmation_id = (
+        "gate1-" + hashlib.sha256(fr._canonical_bytes(confirmed)).hexdigest()[:32]
+    )
+    confirmation = {
+        **confirmed,
+        "confirmation_id": confirmation_id,
+        "confirmed_at": "2026-07-01T00:00:00+00:00",
+    }
+    confirmation_path = gate_dir / "confirmations" / f"{confirmation_id}.json"
+    confirmation_path.parent.mkdir(parents=True)
+    confirmation_path.write_bytes(fr._canonical_bytes(confirmation))
+    binding = {
+        "schema_version": "1.0",
+        "confirmation_id": confirmation_id,
+        "source_digest": source_digest,
+        "candidate_id": "factor-historical-1",
+        "manifest_digest": "b" * 64,
+    }
+    binding_hash = hashlib.sha256(fr._canonical_bytes(binding)).hexdigest()
+    binding_path = gate_dir / "bindings" / f"binding-{binding_hash[:32]}.json"
+    binding_path.parent.mkdir(parents=True)
+    binding_path.write_bytes(fr._canonical_bytes(binding))
+    return gate_dir, source_digest
+
+
 def test_gate1_authority_round_trip_verifies_confirmation_and_source(tmp_path) -> None:
     gate_dir, _, manifest_digest, _ = _gate1_authority(tmp_path)
 
+    fr.require_gate1_candidate_binding(
+        gate_dir=gate_dir,
+        candidate_id="factor-reviewed-1",
+        manifest_digest=manifest_digest,
+    )
+
+
+def test_historical_source_only_gate1_is_readable_but_cannot_authorize(
+    tmp_path,
+) -> None:
+    gate_dir, _ = _write_historical_gate1_authority(tmp_path)
+
+    with pytest.raises(ValueError, match="binding missing"):
+        fr.require_gate1_candidate_binding(
+            gate_dir=gate_dir,
+            candidate_id="factor-historical-1",
+            manifest_digest="b" * 64,
+        )
+
+    new_gate_dir, _, manifest_digest, _ = _gate1_authority(tmp_path)
+    assert new_gate_dir == gate_dir
     fr.require_gate1_candidate_binding(
         gate_dir=gate_dir,
         candidate_id="factor-reviewed-1",
