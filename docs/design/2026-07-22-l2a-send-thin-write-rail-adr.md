@@ -37,9 +37,11 @@ Deliver **L2a-Send** as one construction package with two milestones:
 | **M2** | Live local dark: real Keychain-backed store put, worker `bind`→`resolve`, Hermes delivered with user prompt marker. |
 
 **Critical path after L2a-Send:** L2b observe spine → L3 workbench UI → L4a Activity →
-L4b SSE follow spine → remaining Plan-V6 (approvals/a11y/richer projections) → V7
-verticals (after contract freeze) → V8 public cutover. Plan-V6 remains the
-official UI slice name; L2a-Send is **not** Plan-V6 acceptance.
+L4b SSE follow spine → L5a Hermes command-approval observe (Composer on spine;
+honest empty approvals; no decision write) → remaining Plan-V6 (a11y/richer
+Task·Attempt projections) → V7 verticals (after contract freeze) → V8 public
+cutover. Plan-V6 remains the official UI slice name; L2a-Send is **not**
+Plan-V6 acceptance.
 
 ## 3. Locked decisions
 
