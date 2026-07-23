@@ -857,7 +857,9 @@ class UrllibLoopbackHttpTransport:
 
     def __init__(self, *, base_url: str, api_key: Optional[str] = None, timeout_s: float = 10.0) -> None:
         parsed = self._validate_base_url(base_url)
-        self._base = f"http://{parsed.hostname}:{parsed.port}"
+        hostname = str(parsed.hostname)
+        authority = f"[{hostname}]" if ":" in hostname else hostname
+        self._base = f"http://{authority}:{parsed.port}"
         self._api_key = api_key
         self._timeout = timeout_s
 
@@ -876,6 +878,17 @@ class UrllibLoopbackHttpTransport:
             raise HermesRunError("non_loopback_endpoint", "base_url must be loopback")
         if port is None or not 1 <= port <= 65535:
             raise HermesRunError("non_loopback_endpoint", "base_url must carry an explicit port")
+        if (
+            parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+        ):
+            raise HermesRunError(
+                "non_loopback_endpoint",
+                "base_url must be a bare loopback origin",
+            )
         return parsed
 
     # -- low-level request helpers -------------------------------------------

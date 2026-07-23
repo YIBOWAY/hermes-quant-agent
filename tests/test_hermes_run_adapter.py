@@ -423,6 +423,24 @@ class TestHttpTransport:
         with pytest.raises(HermesRunError):
             UrllibLoopbackHttpTransport(base_url="http://127.0.0.1")
 
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "http://user:secret@127.0.0.1:9000",
+            "http://127.0.0.1:9000/v1",
+            "http://127.0.0.1:9000?token=secret",
+            "http://127.0.0.1:9000#fragment",
+        ],
+    )
+    def test_loopback_base_url_must_be_a_bare_origin(self, base_url: str) -> None:
+        with pytest.raises(HermesRunError) as exc:
+            UrllibLoopbackHttpTransport(base_url=base_url)
+        assert exc.value.code == "non_loopback_endpoint"
+
+    def test_ipv6_loopback_authority_is_bracketed(self) -> None:
+        transport = UrllibLoopbackHttpTransport(base_url="http://[::1]:9000")
+        assert transport._base == "http://[::1]:9000"  # noqa: SLF001
+
     def test_adapter_satisfies_port(self) -> None:
         server = _ScriptedUpstreamServer()
         server.start()
