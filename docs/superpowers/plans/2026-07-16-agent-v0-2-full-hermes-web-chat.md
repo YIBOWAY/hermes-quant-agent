@@ -20,7 +20,7 @@
 > migration、browser mutation、worker claim/dispatch、provider、Gate、paper/live 与 public composer
 > 等所有 live gates 保持 OFF；本 addendum 不构成任何 live 授权。
 
-> **状态（2026-07-23）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a–L5c thin rail ACCEPT@2026-07-22 / V7a–V7g-B-M3 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+live-RO Vertical A + hermetic Vertical B bind + plan-confirm + Gate1 seed cascade notch ACCEPT@2026-07-22…23 / Plan-V6 FULL UI PARTIAL / NEXT V7g-B-M4+ Gate1 decide→cascade（public write 仍 OFF）。** 本计划是 D-32 唯一 active
+> **状态（2026-07-23）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a–L5c thin rail ACCEPT@2026-07-22 / V7a–V7g-B-M4 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+live-RO Vertical A + hermetic Vertical B bind + plan-confirm + Gate1 seed + Gate1 confirm cascade ACCEPT@2026-07-22…23 / Plan-V6 FULL UI PARTIAL / NEXT V7g-B-M5+ Gate2 seed notch（public write 仍 OFF）。** 本计划是 D-32 唯一 active
 > implementation plan。此前的 Wave 3 文档保留为已交付事实与问题输入，不再从其中的旧顺序、
 > unchecked checkbox 或“下一步”继续施工。
 >
@@ -35,7 +35,7 @@
 > （诚实空 Task/Attempt/Run/result + health on spine；只读 Authority 面板；不从
 > conversation_turn 伪造 Attempt）；L5c workbench a11y（region landmark、responsive pad、
 > collapse/long-id contracts、composer focus-visible；无 mutation）。
-> token stream / launchd 常驻 / public V8 仍未做（V7a–V7g-B-M3 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+authorized-live-RO Vertical A + hermetic Vertical B bind+plan-confirm+Gate1 seed ACCEPT；V7g-B-M4+ Gate1 decide→cascade OPEN）。
+> token stream / launchd 常驻 / public V8 仍未做（V7a–V7g-B-M4 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+authorized-live-RO Vertical A + hermetic Vertical B bind+plan-confirm+Gate1 seed+Gate1 confirm ACCEPT；V7g-B-M5+ Gate2 seed OPEN）。
 >
 > **产品决策已冻结：** Discord 继续作为当前可用的 Hermes 原生自然语言入口，但不是网页端的
 > 临时方案、fallback 或验收替身。项目不再交付临时 chat、直连 Hermes 的简化 composer、旧
@@ -867,7 +867,8 @@ action 还有一个 exact Attempt；零盲重发、authority audit consistent。
 | V7g-B-M1 hermetic factor binding | **M1 ACCEPT@2026-07-23**（platform `0868c41`） | typed act `vertical.factor_b.bind` → Task/Attempt/Run `vertical=factor_b` + V7f typed `factor` result → `completed`\|`completed_degraded`；always sample；limitations lock cascade（`plan_confirm_required`/`gate_cascade_locked`/`not_live_backtest`/`zero_orders`/`not_git_commit`）；race-safe sole-owner；**Not** StartResearch/Confirm/Gate seed；reject auth_envelope/provider_mode smuggle；**无** live backtest/Git/public write/orders/`import hqa`；≠ full 纵切 B |
 | V7g-B-M2 hermetic plan-confirm cascade | **M2 ACCEPT@2026-07-23**（platform `18f06ad`） | typed act `vertical.factor_b.plan_confirm` CAS on bound factor_b Task（task_ref + expected_bind_digest + canonical plan_digest）→ `cascade_stage=plan_confirmed`；new attempt/run/result；lifts only `plan_confirm_required`；keeps `gate_cascade_locked`；always sample；**Not** StartResearch/global ConfirmResearchPlan/Gate seed/orders/Git/live；degraded bind blocked；race-safe sole-owner+cascade lock |
 | V7g-B-M3 hermetic Gate1 seed cascade | **M3 ACCEPT@2026-07-23**（platform `ae8e885`） | typed act `vertical.factor_b.gate1_seed` CAS on plan_confirmed factor_b Task（task_ref + expected_bind/plan digests + reviewed_source_sha256）→ `cascade_stage=gate1_seeded` + pending Gate1 on `gates[]`；new attempt/run/result；keeps `gate_cascade_locked`；always sample；**Not** Gate1 decide/StartResearch/auto-seed/orders/Git/live；V7e confirm may decide surface while cascade stays locked；race-safe sole-owner+cascade lock |
-| Plan-V6 完整 UI | **PARTIAL / NEXT** | assistant token stream 等仍未做；a11y M1 + V7a–V7g-B-M3 ACCEPT；V7g-B-M4+ Gate1 decide→cascade OPEN |
+| V7g-B-M4 hermetic Gate1 confirm cascade | **M4 ACCEPT@2026-07-23**（platform `1cdbed1`） | typed act `vertical.factor_b.gate1_confirm` dual-path CAS on gate1_seeded Task（task_ref + expected_bind/plan digests + expected_gate1_id + reviewed_source_sha256）→ pending Gate1 confirm+cascade **or** V7e-already-confirmed cascade-only → `cascade_stage=gate1_confirmed`；keeps `gate_cascade_locked`；always sample；**Not** auto Gate2/StartResearch/orders/Git/live；V7e surface stays independent；race-safe sole-owner+cascade lock |
+| Plan-V6 完整 UI | **PARTIAL / NEXT** | assistant token stream 等仍未做；a11y M1 + V7a–V7g-B-M4 ACCEPT；V7g-B-M5+ Gate2 seed OPEN |
 
 交付（完整 Plan-V6 目标，部分已由 L2a/L2b/L4 覆盖）：
 
@@ -883,7 +884,7 @@ action 还有一个 exact Attempt；零盲重发、authority audit consistent。
 - transcript + assistant stream、Task drawer、plan/step、typed result canvas、provider/usage、
   source/freshness：**L3a-M1 气泡 + L3b polish + L4a command Activity + L4b shared follow spine +
   L5a empty-honest Approvals observe**；assistant token stream / HQA Task·Attempt 权威 UI /
-  V7a–V7g-B-M3 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+authorized-live-RO Vertical A + hermetic Vertical B bind+plan-confirm+Gate1 seed ACCEPT；token stream / V7g-B-M4+ Gate1 decide→cascade 仍未做。
+  V7a–V7g-B-M4 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+authorized-live-RO Vertical A + hermetic Vertical B bind+plan-confirm+Gate1 seed+Gate1 confirm ACCEPT；token stream / V7g-B-M5+ Gate2 seed 仍未做。
 - connection state 与 Run/Task state 正交；用户向上阅读时不抢滚动：**L3b soft stick 已做**。
 - 1440/1280/768/390、中文英文长文本、长 ID、键盘/focus/reduced-motion/WCAG AA：**未做**（L3b 仅 `aria-live` + scroll gate；L4a/L5a 仅 collapsible + labels）。
 
@@ -900,7 +901,7 @@ Composer 可 poll lifecycle 并在 delivered 后拉 assistant 预览。本 Slice
 `chat_write_ready` 仍 false 直至 V8。
 ### Slice V7 — Decisions、typed results 与两条最终纵切（C4 + C5）
 
-**进度（2026-07-23）：** `V7a`–`V7g-B-M3` **ACCEPT** — command-approval decide/release/stop/projector + Domain Gate 1/2/3 surfaces + typed results on spine + **Vertical A bind**（hermetic + authorized live Futu RO）+ **Vertical B hermetic factor bind + plan-confirm + Gate1 seed**（`vertical.factor_b.bind` → `plan_confirm` → `gate1_seed` CAS → `cascade_stage=gate1_seeded` + pending Gate1；`gate_cascade_locked` stays；no decide coupling）。无 always-allow；无 public write；不发明 Task from conversation.turn。其余 V7（**V7g-B-M4+ Gate1 decide→cascade**）仍 OPEN。
+**进度（2026-07-23）：** `V7a`–`V7g-B-M4` **ACCEPT** — command-approval decide/release/stop/projector + Domain Gate 1/2/3 surfaces + typed results on spine + **Vertical A bind**（hermetic + authorized live Futu RO）+ **Vertical B hermetic factor bind + plan-confirm + Gate1 seed + Gate1 confirm**（`vertical.factor_b.bind` → `plan_confirm` → `gate1_seed` → `gate1_confirm` dual-path CAS → `cascade_stage=gate1_confirmed`；`gate_cascade_locked` stays；no auto Gate2）。无 always-allow；无 public write；不发明 Task from conversation.turn。其余 V7（**V7g-B-M5+ Gate2 seed**）仍 OPEN。
 
 **目标：** 补齐完整 Agent 所需的 command approval、Gate 1/2/3、stop 和可独立理解的量化结果。
 
@@ -1031,8 +1032,8 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
 | V4 PG schema/BFF saga/security | CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21） | live 006/007 applied；public write/composer/claim 仍 OFF；证据 platform `docs/audits/2026-07-21-v4-live-migrate-006-007.md` |
 | V5 supervised dispatch worker | DARK CODE + CRASH-MATRIX ACCEPT（2026-07-21） | dark claim/lease/`FakeHermesDispatchAdapter` + unit/PG crash matrix 全绿；CLI 默认仍 reconcile-only；provider smoke 另授权；public composer 仍 OFF |
-| V6 final workspace UI | **PARTIAL（2026-07-23）** | 本地 dark enablement + L2a–L5c thin rail ACCEPT（含 L5b/L5c）；V7a–V7g-B-M3 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+live-RO Vertical A + hermetic Vertical B bind+plan-confirm+Gate1 seed ACCEPT；token stream 仍 NEXT；public chat 仍 OFF |
-| V7 decisions/results/vertical slices | **PARTIAL（V7a–V7g-B-M3 ACCEPT@2026-07-22…23）** | command-approval decide/release/stop/projector + Gate surfaces + typed results + Vertical A hermetic+live RO + Vertical B hermetic bind+plan-confirm+Gate1 seed green；**V7g-B-M4+ Gate1 decide→cascade** 仍 OPEN |
+| V6 final workspace UI | **PARTIAL（2026-07-23）** | 本地 dark enablement + L2a–L5c thin rail ACCEPT（含 L5b/L5c）；V7a–V7g-B-M4 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+live-RO Vertical A + hermetic Vertical B bind+plan-confirm+Gate1 seed+Gate1 confirm ACCEPT；token stream 仍 NEXT；public chat 仍 OFF |
+| V7 decisions/results/vertical slices | **PARTIAL（V7a–V7g-B-M4 ACCEPT@2026-07-22…23）** | command-approval decide/release/stop/projector + Gate surfaces + typed results + Vertical A hermetic+live RO + Vertical B hermetic bind+plan-confirm+Gate1 seed+Gate1 confirm green；**V7g-B-M5+ Gate2 seed** 仍 OPEN |
 | V8 adversarial acceptance/release | NOT STARTED | independent CLEAR + user acceptance + one-time cutover |
 
 ## 9. 当前立即执行顺序
@@ -1063,7 +1064,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 8. **V6 本地 dark + L2a–L5c thin rail ACCEPT（2026-07-21…22）**：真实 HTTP adapter、
    settings-gated local mutation/composer、composite submit-turn、command-aware snapshot/follow、
    delivered 后 messages 预览、L3a–L5c（含 L5a Approvals observe + L5b Authority projection + L5c a11y）。
-   **Plan-V6 完整 UI 仍 PARTIAL；V7a–V7g-B-M3 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+authorized-live-RO Vertical A + hermetic Vertical B bind+plan-confirm+Gate1 seed ACCEPT。** 当前施工入口：**V7g-B-M4+ Gate1 decide→cascade coupling**（still zero orders；kill_switch true；public write OFF；StartResearch 仍 dark；不 auto Gate2）→ optional token stream → V8；public chat 始终 OFF 直至 V8。
+   **Plan-V6 完整 UI 仍 PARTIAL；V7a–V7g-B-M4 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+authorized-live-RO Vertical A + hermetic Vertical B bind+plan-confirm+Gate1 seed+Gate1 confirm ACCEPT。** 当前施工入口：**V7g-B-M5+ Gate2 seed notch**（still zero orders；kill_switch true；public write OFF；StartResearch 仍 dark；gate_cascade_locked stays until Gate2 couple）→ optional token stream → V8；public chat 始终 OFF 直至 V8。
 
 9. V8 完成后一次开放 v0.2；legacy redirect 仍另开后续计划。
 
