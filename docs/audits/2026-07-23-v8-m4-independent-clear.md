@@ -89,7 +89,7 @@ m6_gate2_decide_authorized      = false
 v2_durable_live_authorized      = false
 kill_switch_default             = true
 chat_write_hermetic             = false
-next_authorized_slice           = V8-M5 canary (USER AUTH REQUIRED)
+next_authorized_slice           = V8-M5 ACCEPT@bb67fa3 (see 2026-07-23-v8-m5-canary-grant.md); next open = V8-M6 public flag (careful gate)
 ```
 
 ## Relation to prior V0/V2 CLEAR

@@ -417,3 +417,13 @@ public write OFF；canary OFF；M6 Gate2 decide unauthorized；kill_switch true�
 **V8-M5 canary grant — REQUIRES fresh explicit user authorization.**  
 Do **not** auto-enter M5/M6. M4 CLEAR ≠ canary ≠ public ≠ release. Full V8 gates 1–8 still incomplete for release.
 
+
+
+## 17. V8-M5 stamp (2026-07-23)
+
+**Verdict:** ACCEPT @ platform `013a2dc` (parent freeze `b570f94`).  
+**Delivered:** hermetic `canary_grant_authority` + acts `canary.grant.issue|revoke` + `canary.dual_vertical.accept` + spine `canary_grants[]`.  
+**Evidence:** 17 unit + 196 regression cluster; audit `docs/audits/2026-07-23-v8-m5-canary-grant.md`; verdict JSON.  
+**GAP-16 COVERED** (hermetic G5/G6). **GAP-17 OPEN** (M6 public).  
+**Auth:** `release_authorized=false`; public_write/chat_write stay false; M5 ≠ M6; no kill_switch flip; no V2 durable live ON.  
+**NEXT:** V8-M6 public flag cutover only under standing safety rails.

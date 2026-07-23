@@ -1,0 +1,108 @@
+{
+  "slice": "V8-M5",
+  "title": "hermetic canary grant + dual-vertical owner-accept (G5/G6)",
+  "date": "2026-07-23",
+  "verdict": "ACCEPT",
+  "release_authorized": false,
+  "canary_public_write_authorized": false,
+  "chat_write_ready": false,
+  "public_write_authorized": false,
+  "m6_gate2_decide_authorized": false,
+  "v2_durable_live_on": false,
+  "kill_switch_default": true,
+  "platform_tip": "codex/agent-v0-2-platform-v1@bb67fa3",
+  "platform_parent_freeze": "codex/agent-v0-2-platform-v1@b570f94",
+  "hqa_docs_tip_pending": false,
+  "campaign": {
+    "m5_plus_regression": {
+      "passed": 196,
+      "skipped": 7,
+      "failed": 0,
+      "junit": "docs/audits/evidence/2026-07-23-v8-m5-canary-grant.junit.xml",
+      "cluster": [
+        "tests/test_v8_m5_canary_grant.py",
+        "tests/test_vertical_binding_v7g.py",
+        "tests/test_vertical_binding_v7g_b_m1.py",
+        "tests/test_vertical_binding_v7g_b_m2.py",
+        "tests/test_vertical_binding_v7g_b_m3.py",
+        "tests/test_vertical_binding_v7g_b_m4.py",
+        "tests/test_vertical_binding_v7g_b_m5.py",
+        "tests/test_agent_workspace.py",
+        "tests/test_gate_surfaces_v7e.py",
+        "tests/test_composer_readiness.py"
+      ]
+    },
+    "m5_unit": {
+      "passed": 17,
+      "failed": 0,
+      "file": "tests/test_v8_m5_canary_grant.py"
+    }
+  },
+  "delivered": {
+    "authority": "src/quant_system/hermes/canary_grant_authority.py",
+    "observe": "src/quant_system/hermes/canary_observe.py",
+    "actions": [
+      "canary.grant.issue",
+      "canary.grant.revoke",
+      "canary.dual_vertical.accept"
+    ],
+    "spine": "WorkspaceSnapshot.canary_grants + EventPage.canary_grants + authority_health.canary_grant=ready",
+    "receipt_fields": [
+      "grant_id",
+      "grant_digest",
+      "canary_ref",
+      "acceptance_id"
+    ],
+    "honesty": {
+      "public_write_authorized": false,
+      "chat_write_ready": false,
+      "release_authorized": false,
+      "route_locked": "/hermes",
+      "ttl_seconds_range": [
+        60,
+        3600
+      ],
+      "single_active_grant": true,
+      "consume_on_dual_accept": true
+    }
+  },
+  "non_goals_held": [
+    "no public chat_write_ready flip",
+    "no agentV02WebChat ON",
+    "no kill_switch false",
+    "no M6 Gate2 decide couple",
+    "no V2 durable live ON",
+    "no always-allow",
+    "zero orders",
+    "no StartResearch path open"
+  ],
+  "residuals_carry": {
+    "PARTIAL": [
+      "GAP-01",
+      "GAP-03",
+      "GAP-04",
+      "GAP-07",
+      "GAP-13"
+    ],
+    "OPEN": [
+      "GAP-10"
+    ],
+    "DEFERRED": [
+      "GAP-12"
+    ],
+    "COVERED_this_slice": [
+      "GAP-16"
+    ],
+    "OPEN_next": [
+      "GAP-17"
+    ]
+  },
+  "next": "V8-M6 public flag cutover still requires careful gating; standing goal continues under safety rails; release_authorized remains false until full V8 gates honest",
+  "platform_feat": "codex/agent-v0-2-platform-v1@013a2dc",
+  "reviewers": {
+    "code_reviewer": "APPROVE_WITH_NITS",
+    "reality_checker": "CERTIFIED_WITH_NITS_90",
+    "workflow_architect": "GO_WITH_NITS_ON_RAILS"
+  },
+  "nit_applied": "canary_honesty triad on all canary receipts @bb67fa3"
+}
