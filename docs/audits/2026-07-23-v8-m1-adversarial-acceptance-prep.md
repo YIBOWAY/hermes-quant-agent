@@ -82,9 +82,9 @@ Exec：`hermetic` / `live-dark` / `deferred`。
 
 | TC ID | Scenario (plan row) | Required evidence | Coverage | Exec | Existing pointer / GAP |
 |---|---|---|---|---|---|
-| TC-V8-M1-01 | Double-submit same action | Same `client_action_id`/digest → one command/Run | PARTIAL | hermetic | `test_vertical_binding_v7g.py` bind idempotent；`test_hermes_connector_dispatch.py` idempotent recover；**GAP-01** explicit double-click FE+BFF race |
-| TC-V8-M1-02 | Same ID, different content | 409；zero new command/Run | PARTIAL | hermetic | bind/stop digest conflict TCs；**GAP-02** submit-turn same-id different body 409 |
-| TC-V8-M1-03 | BFF ack lost | Retry same ID recovers original receipt | PARTIAL | hermetic | dispatch `accept_drop_ack_then_recover`；**GAP-03** BFF submit-turn ack-loss |
+| TC-V8-M1-01 | Double-submit same action | Same `client_action_id`/digest → one command/Run | PARTIAL | hermetic | M2@f5d41f4：payload binding composite+BFF COVERED；ledger command_id via PG mark（not re-run if no QS_TEST_DATABASE_URL）— **GAP-01 PARTIAL** |
+| TC-V8-M1-02 | Same ID, different content | 409；zero new command/Run | COVERED | hermetic | M2@f5d41f4 composite+BFF same-id different prompt 409 + turn.call_count==1 — **GAP-02 COVERED** |
+| TC-V8-M1-03 | BFF ack lost | Retry same ID recovers original receipt | PARTIAL | hermetic | dispatch ack-drop COVERED；M2 composite payload/outcome_unknown retry PARTIAL（command_id mocked）— **GAP-03 PARTIAL** |
 | TC-V8-M1-04 | Worker crash after commit | Restart resumes existing command；no second Run | COVERED | hermetic | crash-after-claim / crash-after-hermes / idempotent recover + PG crash matrix in connector dispatch tests |
 | TC-V8-M1-05 | Hermes accept then timeout | `outcome_unknown` → lookup；zero blind retry | COVERED | hermetic | `test_timeout_becomes_outcome_unknown_no_blind_retry_in_same_cycle`；PG timeout twin |
 | TC-V8-M1-06 | SSE disconnect / refresh | Snapshot/replay: messages+events no loss/dup | PARTIAL | hermetic | L4b spine + workspace_bff follow；transcript_observe_v6_m1；**GAP-04** full refresh+replay integration |
@@ -97,7 +97,7 @@ Exec：`hermetic` / `live-dark` / `deferred`。
 | TC-V8-M1-13 | Discord / historical session Web write | 409 zero mutation；fork → new managed Session | PARTIAL | hermetic / deferred | cross-origin/session fail-closed；**GAP-06** fork lineage product path DEFERRED |
 | TC-V8-M1-14 | HQA journal/PG unavailable | Mutation fail-closed；no bypass to Hermes | PARTIAL | hermetic | mutation-off matrices；**GAP-07** explicit PG-down + HQA-down chaos pair |
 | TC-V8-M1-15 | Cross-origin / no CSRF | Zero PG/HQA/Hermes mutation | COVERED | hermetic | workspace cross-origin fails；act with CSRF still mutation_disabled；`chat_write_ready is False` |
-| TC-V8-M1-16 | Provider evidence missing | Result unverified；Task not normal `completed` | PARTIAL | hermetic | V7f fail-closed sample/real；**GAP-08** Task status refusal on missing evidence |
+| TC-V8-M1-16 | Provider evidence missing | Result unverified；Task not normal `completed` | COVERED | hermetic | M2@f5d41f4 task `status==completed_degraded` — **GAP-08 COVERED** |
 | TC-V8-M1-17 | Sample result marking | Conspicuous synthetic；never confused with real | COVERED | hermetic | V7f sample_vs_real + coerce；FE typedResultsV7f |
 | TC-V8-M1-18 | Trading boundary | paper/live/kill_switch/Gates unchanged；real trade calls ≡ 0 | COVERED | hermetic | kill_switch default true；dispatch reject；vertical `zero_orders` / `not_tradeable` |
 
@@ -109,9 +109,9 @@ Exec：`hermetic` / `live-dark` / `deferred`。
 | TC-V8-M1-20 | Phase waiting → optional partial → final | BE `waiting\|final` only；FE `partial` from assistant length；UI **Updating…** not Streaming…；marker `data-hermes-token-stream=v6-m1` | COVERED | hermetic | transcriptHelpers TC-TS-07/08；spine tests；limitations honesty |
 | TC-V8-M1-21 | Spine-refetch is text path | Text from messages BFF only；transport `spine-refetch` | COVERED | hermetic | WorkbenchTranscriptPanel coalesced refetch + 1.5s poll；limitations `messages_bff_is_text_authority` |
 | TC-V8-M1-22 | Hint journal dedupe / stable revision | Same revision no re-bump dirty；reject `web_`/`wm_` | COVERED | hermetic | journal dedupe；spine reject web_/wm_ |
-| TC-V8-M1-23 | Dual messages-refetch ownership nit | Single owner for in-flight when dirty+interval fire | PARTIAL | hermetic | token-stream Reviewer deferred nit → **GAP-09** |
+| TC-V8-M1-23 | Dual messages-refetch ownership nit | Single owner for in-flight when dirty+interval fire | COVERED | hermetic | M2@f5d41f4 `createQuietRefetchScheduler` pending-bit + vitest — **GAP-09 COVERED**（AbortController nit residual） |
 | TC-V8-M1-24 | Disconnect mid-waiting then snapshot | Phase honest；resync restores；no dup user rows | PARTIAL | hermetic | L3b merge + L4b resync；**GAP-10** combined chaos |
-| TC-V8-M1-25 | Delivered without assistant growth | No fake typing；final only with terminal + honest body rules | PARTIAL | hermetic | seal non-goal；**GAP-11** explicit assert |
+| TC-V8-M1-25 | Delivered without assistant growth | No fake typing；final only with terminal + honest body rules | COVERED | hermetic | M2 characterization lock TC-V8-M2-11 — **GAP-11 COVERED** |
 
 ### 5.3 Vertical evidence map（prep only — no new couple）
 
@@ -252,8 +252,8 @@ V8-M1 prep (this doc) ACCEPT
 6. [x] Next slice = V8-M2 only  
 7. [x] Reality Checker（light）：key pointers resolve at platform `5788379`（transcript/stop/approval/gate/dispatch/vertical/Updating label）  
 8. [x] Neat-freak：plan banner / README / AGENTS / memory  
-9. [ ] HQA commit + push（docs only；no platform flag changes）  
-10. [ ] Enter V8-M2：close high GAPs + fresh suite green；still no flags  
+9. [x] HQA commit + push（docs only；no platform flag changes）— M1@f17c27b  
+10. [x] Enter V8-M2：high GAPs closed ACCEPT_WITH_NITS @f5d41f4；still no flags  
 
 ## 12. Explicit non-authorization stamp
 
@@ -266,7 +266,8 @@ v2_durable_live_released = false
 canary_grant_issued = false
 kill_switch = true   # expected default; re-verify live before any drill
 zero_orders_required = true
-next_authorized_slice = V8-M2  # hermetic adversarial suite close only
+next_authorized_slice = V8-M3  # cold-start / backup-restore drills only
+# (V8-M2 ACCEPT_WITH_NITS @f5d41f4; release_authorized still false)
 ```
 
 ## 13. Seal evidence（this session）
@@ -285,3 +286,46 @@ next_authorized_slice = V8-M2  # hermetic adversarial suite close only
 ---
 
 **END V8-M1 PREP ACCEPT** — next construction **V8-M2 hermetic adversarial suite close only**.
+
+## 14. V8-M2 close status（2026-07-23）— **ACCEPT_WITH_NITS**
+
+| Field | Value |
+|---|---|
+| Platform tip | `codex/agent-v0-2-platform-v1@f5d41f4`（code `71b6fb6` + residual honesty `f5d41f4`） |
+| HQA tip (M1 prep) | `codex/full-9h@f17c27b` |
+| Slice | V8-M2 hermetic adversarial suite close |
+| Seal grade | **ACCEPT_WITH_NITS**（not full CERTIFIED warehouse green；not release） |
+| Code Reviewer | **APPROVE_WITH_NITS**（71b6fb6）+ residual pending-bit accepted |
+| Reality (first pass) | **NEEDS WORK 71/100** on inflated COVERED → residual close @f5d41f4 |
+| Architect | prior SEAL GO_WITH_NITS；re-seal after residual |
+
+### GAP board after residual close @f5d41f4
+
+| GAP | Coverage | Evidence (honest) |
+|---|---|---|
+| GAP-01 double-submit same body | **PARTIAL** | Composite: `test_v8_m2_double_submit_same_body_stable_payload_binding` — FakeIntent single binding + stable payload_ref/digest（**not** unmocked ledger command_id）. BFF: `test_v8_m2_bff_double_post_same_body_stable_payload`. Ledger single command_id: existing PG `test_external_turn_conflicts_managed_turn_idempotent_and_conflict`（`pytest.mark.pg`；needs `QS_TEST_DATABASE_URL`；not re-run this session if URL unset）. |
+| GAP-02 same id different prompt 409 | **COVERED** | Composite `test_v8_m2_same_id_different_prompt_conflicts_zero_turn` + BFF `test_v8_m2_bff_same_id_different_prompt_409`（turn.call_count==1）. |
+| GAP-03 ack-loss / outcome_unknown retry | **PARTIAL** | `test_v8_m2_ack_loss_retry_recovers_same_payload_binding` + `test_v8_m2_outcome_unknown_then_retry_same_id` — payload binding + retry path real；command_id still under turn mock. Dispatch-layer ack-drop remains COVERED pre-M2. |
+| GAP-07 intent/HQA port down | **PARTIAL** | `test_v8_m2_port_unavailable_fail_closed_no_turn` — intent-port slice only. Full PG-down + HQA-down BFF pair still open. |
+| GAP-08 missing provider evidence | **COVERED** | `test_v8_m2_missing_provider_evidence_task_not_normal_completed` asserts public task `status=="completed_degraded"`（≠ `"completed"`）. |
+| GAP-09 dual messages-refetch | **COVERED**（with known non-blocking nits） | `createQuietRefetchScheduler` pending-bit sole owner（no recursive re-arm while hung）+ panel wire + sessionId drift guard；vitest 4 cases. Residual nit: quiet path still no AbortController（pre-existing soft-fail shape）. |
+| GAP-11 delivered without growth | **COVERED** | transcriptHelpers TC-V8-M2-11 characterization lock（behavior pre-existed；M2 pins it）. |
+| GAP-04 full refresh replay | **OPEN** → waive to M3 | written residual |
+| GAP-05 fallback chain | **DEFERRED** product | unchanged |
+| GAP-06 Discord/historical fork | **DEFERRED** | unchanged |
+| GAP-10 disconnect mid-waiting | **OPEN** → waive to M3 | written residual |
+| GAP-12 live Hermes restart | **DEFERRED V8-M3** | freeze ladder |
+| GAP-13 warehouse full-suite green | **PARTIAL** | Bound cluster green @f5d41f4：composite+submit_turn_bff+vertical_binding_v7g+transcript_observe_v6_m1+run_stop_v7c（`-m 'not pg'`）+ vitest transcriptHelpers 18. Full warehouse / PG matrix not claimed. |
+| GAP-14…17 | later Mn | freeze ladder |
+
+### Bound green evidence @f5d41f4
+- pytest：composite + submit_turn_bff + vertical GAP-08 + transcript_observe_v6_m1 + run_stop_v7c → all green（not pg）
+- vitest：`transcriptHelpers.test.ts` **18 passed**（incl. 4 GAP-09 scheduler）
+- Unrelated dirty（brief/paper/options）**not** in M2 commits
+
+### Non-goals held
+public write OFF；canary OFF；M6 Gate2 decide unauthorized；kill_switch true；`release_authorized=false`；no platform `import hqa`；no flag flips；zero orders.
+
+### NEXT after M2 ACCEPT_WITH_NITS
+**V8-M3 cold-start / backup-restore drills**（local dark；public OFF）。  
+Do **not** treat M2 as release/canary auth. Residual OPEN GAPs 04/10 waived into M3 polish only if they fit cold-start scope；else stay residual board.
