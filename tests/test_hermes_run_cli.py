@@ -188,6 +188,29 @@ def test_capabilities_requires_durable_and_managed_history_contract(
     assert code == 0
     assert response["ok"] is True
     assert response["capabilities"] == _grounded_capabilities()
+    assert response["cli_contract"] == {
+        "schema_version": 1,
+        "profile": "local_agent_v0_2",
+        "operations": [
+            "capabilities",
+            "submit",
+            "status",
+            "events",
+            "session-ensure",
+            "session-fork",
+        ],
+        "write_contract": {
+            "run_submit_fields": ["input", "session_id", "metadata"],
+            "platform_must_not_send": [
+                "conversation_history",
+                "previous_response_id",
+            ],
+            "fork_requires": {
+                "preserve_source": True,
+                "fork_point_format": "message:<positive-integer-id>",
+            },
+        },
+    }
     assert response["managed_session_ready"] is True
     assert stderr == ""
 

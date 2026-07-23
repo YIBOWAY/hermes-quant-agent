@@ -339,6 +339,19 @@ def _capabilities(
     return {
         "ok": True,
         "capabilities": dict(capabilities),
+        "cli_contract": {
+            "schema_version": 1,
+            "profile": "local_agent_v0_2",
+            "operations": list(HERMES_RUN_CLI_OPERATIONS),
+            "write_contract": {
+                "run_submit_fields": list(HERMES_RUN_SUBMIT_FIELDS),
+                "platform_must_not_send": list(HERMES_RUN_FORBIDDEN_FIELDS),
+                "fork_requires": {
+                    "preserve_source": HERMES_SESSION_FORK_PRESERVE_SOURCE,
+                    "fork_point_format": HERMES_SESSION_FORK_POINT_FORMAT,
+                },
+            },
+        },
         "durable_ready": True,
         "managed_session_ready": True,
     }
