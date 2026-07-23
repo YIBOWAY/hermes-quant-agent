@@ -20,7 +20,7 @@
 > migration、browser mutation、worker claim/dispatch、provider、Gate、paper/live 与 public composer
 > 等所有 live gates 保持 OFF；本 addendum 不构成任何 live 授权。
 
-> **状态（2026-07-23）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a–L5c thin rail ACCEPT@2026-07-22 / V7a–V7g-B-M5 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+live-RO Vertical A + hermetic Vertical B bind + plan-confirm + Gate1 seed + Gate1 confirm + Gate2 seed cascade ACCEPT@2026-07-22…23 / Plan-V6-Token-Stream-M1 ACCEPT@5788379 / V8-M1 prep ACCEPT + **V8-M2 hermetic suite close ACCEPT_WITH_NITS@f5d41f4**（`71b6fb6`+residual；audit §14 honest PARTIAL board）/ NEXT V8-M3 cold-start/backup-restore drills（public write 仍 OFF；M5 ≠ M6 auth；token-stream ≠ M6 auth；M1/M2 ≠ release/canary）。** 本计划是 D-32 唯一 active
+> **状态（2026-07-23）：CURRENT / PLAN ACCEPTED / V0–V5 DONE（V2 live durable OFF）/ V6 LOCAL DARK ENABLEMENT ACCEPT@2026-07-21 / L2a–L5c thin rail ACCEPT@2026-07-22 / V7a–V7g-B-M5 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+live-RO Vertical A + hermetic Vertical B bind + plan-confirm + Gate1 seed + Gate1 confirm + Gate2 seed cascade ACCEPT@2026-07-22…23 / Plan-V6-Token-Stream-M1 ACCEPT@5788379 / V8-M1 prep ACCEPT + V8-M2 ACCEPT_WITH_NITS@f5d41f4 + **V8-M3 cold-start/backup-restore ACCEPT@b570f94**（audit §15；GAP-14 COVERED；GAP-04 PARTIAL lite；GAP-12 DEFERRED no V2 durable live smuggle）/ NEXT V8-M4 CLEAR（public write 仍 OFF；M5 ≠ M6 auth；token-stream ≠ M6 auth；M1/M2/M3 ≠ release/canary）。** 本计划是 D-32 唯一 active
 > implementation plan。此前的 Wave 3 文档保留为已交付事实与问题输入，不再从其中的旧顺序、
 > unchecked checkbox 或“下一步”继续施工。
 >
@@ -871,7 +871,8 @@ action 还有一个 exact Attempt；零盲重发、authority audit consistent。
 | V7g-B-M5 hermetic Gate2 seed cascade | **M5 ACCEPT@2026-07-23**（platform `ecec75e`） | typed act `vertical.factor_b.gate2_seed` CAS on gate1_confirmed Task（task_ref + expected_bind/plan digests + expected_gate1_id + expected_gate1_confirm_digest + expected_candidate_digest）→ `cascade_stage=gate2_seeded` + pending Gate2 on `gates[]`；new attempt/run/result；keeps `gate_cascade_locked`；always sample；**Not** Gate2 decide/StartResearch/orders/Git/live；V7e review surface-only while cascade stays locked；race-safe sole-owner+cascade lock；M5 ≠ M6 auth |
 | Plan-V6-Token-Stream-M1 | **ACCEPT@2026-07-23**（platform `5788379`） | body-free SSE `event:transcript` hints + FE phase machine + spine-refetch messages BFF；markers `data-hermes-token-stream=v6-m1`；limitations honesty；**Not** provider-token passthrough / public write / M6 / Task invention |
 | V8-M1 Adversarial Acceptance Prep | **ACCEPT@2026-07-23**（docs-only `f17c27b`） | audit matrix TC-01…29 + G01…G08 + GAP-01…17 + suite inventory；Architect FREEZE GO；`release_authorized=false`；**Not** release/canary/public/M6 |
-| V8-M2 hermetic adversarial suite close | **ACCEPT_WITH_NITS@2026-07-23**（platform `f5d41f4` = `71b6fb6`+residual） | GAP-02/08/09/11 COVERED；GAP-01/03/07/13 PARTIAL（honest）；04/10 waived→M3；05/06 deferred；bound pytest+vitest green；pending-bit refetch；**Not** cold-start/canary/public/M6/release；NEXT **V8-M3 cold-start/backup-restore drills** |
+| V8-M2 hermetic adversarial suite close | **ACCEPT_WITH_NITS@2026-07-23**（platform `f5d41f4` = `71b6fb6`+residual） | GAP-02/08/09/11 COVERED；GAP-01/03/07/13 PARTIAL（honest）；04/10 waived→M3；05/06 deferred；bound pytest+vitest green；pending-bit refetch；**Not** cold-start/canary/public/M6/release |
+| V8-M3 cold-start / backup-restore drills | **ACCEPT@2026-07-23**（platform `b570f94`） | G3 dual cold-start + empty spine honesty；deep-link observe-only catalog；GAP-14 HQA backup≠TTL-revive binder 10 green；GAP-04 lite refresh-after-wipe；GAP-12 DEFERRED（no V2 durable live smuggle；ephemeral-allow binder）；**Not** canary/public/M6/release；NEXT **V8-M4 CLEAR** |
 
 交付（完整 Plan-V6 目标，部分已由 L2a/L2b/L4 覆盖）：
 
@@ -887,7 +888,7 @@ action 还有一个 exact Attempt；零盲重发、authority audit consistent。
 - transcript + assistant stream、Task drawer、plan/step、typed result canvas、provider/usage、
   source/freshness：**L3a-M1 气泡 + L3b polish + L4a command Activity + L4b shared follow spine +
   L5a empty-honest Approvals observe**；HQA Task·Attempt 权威 UI /
-  V7a–V7g-B-M5 ACCEPT；**Plan-V6-Token-Stream-M1 ACCEPT@5788379**；**V8-M1 prep ACCEPT**（adversarial matrix+GAPs）；M6 Gate2 decide 仍未做；**V8-M2 ACCEPT_WITH_NITS@f5d41f4**；NEXT V8-M3 cold-start/backup-restore。
+  V7a–V7g-B-M5 ACCEPT；**Plan-V6-Token-Stream-M1 ACCEPT@5788379**；**V8-M1 prep ACCEPT**；M6 Gate2 decide 仍未做；**V8-M2 ACCEPT_WITH_NITS@f5d41f4**；**V8-M3 ACCEPT@b570f94**；NEXT V8-M4 CLEAR。
 - connection state 与 Run/Task state 正交；用户向上阅读时不抢滚动：**L3b soft stick 已做**。
 - 1440/1280/768/390、中文英文长文本、长 ID、键盘/focus/reduced-motion/WCAG AA：**未做**（L3b 仅 `aria-live` + scroll gate；L4a/L5a 仅 collapsible + labels）。
 
@@ -904,7 +905,7 @@ Composer 可 poll lifecycle 并在 delivered 后拉 assistant 预览。本 Slice
 `chat_write_ready` 仍 false 直至 V8。
 ### Slice V7 — Decisions、typed results 与两条最终纵切（C4 + C5）
 
-**进度（2026-07-23）：** `V7a`–`V7g-B-M5` **ACCEPT** — command-approval decide/release/stop/projector + Domain Gate 1/2/3 surfaces + typed results on spine + **Vertical A bind**（hermetic + authorized live Futu RO）+ **Vertical B hermetic factor bind + plan-confirm + Gate1 seed + Gate1 confirm + Gate2 seed**（`vertical.factor_b.bind` → `plan_confirm` → `gate1_seed` → `gate1_confirm` → `gate2_seed` CAS → `cascade_stage=gate2_seeded` + pending Gate2；`gate_cascade_locked` stays；no auto Gate2 decide）。无 always-allow；无 public write；不发明 Task from conversation.turn。**Plan-V6-Token-Stream-M1 ACCEPT@5788379**（hints-only SSE + spine-refetch）。其余：**V8-M1 prep ACCEPT**；**V8-M2 ACCEPT_WITH_NITS@f5d41f4**；**NEXT V8-M3 cold-start/backup-restore drills**；**M6 Gate2 decide couple 未授权**；public write OFF；full V8 gates 1–8 NOT STARTED。
+**进度（2026-07-23）：** `V7a`–`V7g-B-M5` **ACCEPT** — command-approval decide/release/stop/projector + Domain Gate 1/2/3 surfaces + typed results on spine + **Vertical A bind**（hermetic + authorized live Futu RO）+ **Vertical B hermetic factor bind + plan-confirm + Gate1 seed + Gate1 confirm + Gate2 seed**（`vertical.factor_b.bind` → `plan_confirm` → `gate1_seed` → `gate1_confirm` → `gate2_seed` CAS → `cascade_stage=gate2_seeded` + pending Gate2；`gate_cascade_locked` stays；no auto Gate2 decide）。无 always-allow；无 public write；不发明 Task from conversation.turn。**Plan-V6-Token-Stream-M1 ACCEPT@5788379**（hints-only SSE + spine-refetch）。其余：**V8-M1 prep ACCEPT**；**V8-M2 ACCEPT_WITH_NITS@f5d41f4**；**V8-M3 cold-start/backup-restore ACCEPT@b570f94**；**NEXT V8-M4 CLEAR**；**M6 Gate2 decide couple 未授权**；public write OFF；full V8 gates 1–8 NOT STARTED。
 
 **目标：** 补齐完整 Agent 所需的 command approval、Gate 1/2/3、stop 和可独立理解的量化结果。
 
@@ -1035,8 +1036,8 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
 | V4 PG schema/BFF saga/security | CODE + ISOLATED + LIVE SCHEMA ACCEPT（2026-07-21） | live 006/007 applied；public write/composer/claim 仍 OFF；证据 platform `docs/audits/2026-07-21-v4-live-migrate-006-007.md` |
 | V5 supervised dispatch worker | DARK CODE + CRASH-MATRIX ACCEPT（2026-07-21） | dark claim/lease/`FakeHermesDispatchAdapter` + unit/PG crash matrix 全绿；CLI 默认仍 reconcile-only；provider smoke 另授权；public composer 仍 OFF |
-| V6 final workspace UI | **PARTIAL（token-stream M1 ACCEPT@5788379；V8-M1 prep ACCEPT）** | 本地 dark + L2a–L5c + V7a–V7g-B-M5 ACCEPT；**Plan-V6-Token-Stream-M1 ACCEPT**（hints + spine-refetch；≠ full Plan-V6 close）；public chat 仍 OFF；V8-M1 ACCEPT + V8-M2 ACCEPT_WITH_NITS@f5d41f4；NEXT V8-M3 cold-start |
-| V7 decisions/results/vertical slices | **PARTIAL（V7a–V7g-B-M5 ACCEPT@2026-07-22…23；token-stream M1 ACCEPT@5788379；V8-M1 prep ACCEPT）** | decide/release/stop/projector/Gate/typed-results/Vertical A+B M1–M5 + token-stream M1 green；**M6 Gate2 decide 未授权**；V8-M1 ACCEPT + V8-M2 ACCEPT_WITH_NITS；NEXT V8-M3 |
+| V6 final workspace UI | **PARTIAL（token-stream M1 ACCEPT@5788379；V8-M1–M3 ACCEPT）** | 本地 dark + L2a–L5c + V7a–V7g-B-M5 ACCEPT；**Plan-V6-Token-Stream-M1 ACCEPT**（hints + spine-refetch；≠ full Plan-V6 close）；public chat 仍 OFF；V8-M1 ACCEPT + V8-M2 ACCEPT_WITH_NITS@f5d41f4 + V8-M3 ACCEPT@b570f94；NEXT V8-M4 CLEAR |
+| V7 decisions/results/vertical slices | **PARTIAL（V7a–V7g-B-M5 ACCEPT@2026-07-22…23；token-stream M1 ACCEPT@5788379；V8-M1–M3 ACCEPT）** | decide/release/stop/projector/Gate/typed-results/Vertical A+B M1–M5 + token-stream M1 green；**M6 Gate2 decide 未授权**；V8-M1 ACCEPT + V8-M2 ACCEPT_WITH_NITS + V8-M3 ACCEPT@b570f94；NEXT V8-M4 CLEAR |
 | V8 adversarial acceptance/release | NOT STARTED | independent CLEAR + user acceptance + one-time cutover |
 
 ## 9. 当前立即执行顺序
@@ -1067,7 +1068,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 8. **V6 本地 dark + L2a–L5c thin rail ACCEPT（2026-07-21…22）**：真实 HTTP adapter、
    settings-gated local mutation/composer、composite submit-turn、command-aware snapshot/follow、
    delivered 后 messages 预览、L3a–L5c（含 L5a Approvals observe + L5b Authority projection + L5c a11y）。
-   **Plan-V6 完整 UI 仍 PARTIAL；V7a–V7g-B-M5 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+authorized-live-RO Vertical A + hermetic Vertical B bind+plan-confirm+Gate1 seed+Gate1 confirm+Gate2 seed ACCEPT。** 当前施工入口：**V8-M3 cold-start / backup-restore drills**（V8-M1 prep ACCEPT@f17c27b；V8-M2 ACCEPT_WITH_NITS@f5d41f4；Plan-V6-Token-Stream-M1 ACCEPT@5788379；still zero orders；kill_switch true；public write OFF；StartResearch 仍 dark；gate_cascade_locked stays；**M5 ≠ M6 auth；token-stream ≠ M6 auth；M1/M2 ≠ release/canary**）；public chat 始终 OFF 直至 full V8 gates。
+   **Plan-V6 完整 UI 仍 PARTIAL；V7a–V7g-B-M5 decide/release/stop/projector/Gate-surfaces/typed-results/hermetic+authorized-live-RO Vertical A + hermetic Vertical B bind+plan-confirm+Gate1 seed+Gate1 confirm+Gate2 seed ACCEPT。** 当前施工入口：**V8-M4 CLEAR**（V8-M1 prep ACCEPT@f17c27b；V8-M2 ACCEPT_WITH_NITS@f5d41f4；V8-M3 ACCEPT@b570f94；Plan-V6-Token-Stream-M1 ACCEPT@5788379；still zero orders；kill_switch true；public write OFF；StartResearch 仍 dark；gate_cascade_locked stays；**M5 ≠ M6 auth；token-stream ≠ M6 auth；M1/M2/M3 ≠ release/canary**）；public chat 始终 OFF 直至 full V8 gates。
 
 9. V8 完成后一次开放 v0.2；legacy redirect 仍另开后续计划。
 

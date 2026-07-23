@@ -127,8 +127,8 @@ Exec：`hermetic` / `live-dark` / `deferred`。
 | TC ID | Gate | M1 deliverable | Later close |
 |---|---|---|---|
 | TC-V8-M1-G01 | G1 suites+build | Command inventory + cluster→TC map（§7） | **V8-M2** |
-| TC-V8-M1-G02 | G2 backup/restore | Drill outline：PG / HQA authority / Hermes Run store；backup≠silent TTL revive | **V8-M3** |
-| TC-V8-M1-G03 | G3 dual cold-start | Boot script outline；deep-link list | **V8-M3** |
+| TC-V8-M1-G02 | G2 backup/restore | HQA intent+workflow backup≠TTL-revive binder 10 green + V3 runbook | **COVERED@b570f94 / HQA binder** |
+| TC-V8-M1-G03 | G3 dual cold-start | Platform cold-start 9 green + deep-link observe catalog | **COVERED@b570f94** |
 | TC-V8-M1-G04 | G4 security+code CLEAR | Surface checklist（CSRF/origin、intent crypto、approval/Gate digests、no always-allow、no web commit、provider evidence、kill_switch） | **V8-M4** |
 | TC-V8-M1-G05 | G5 canary grant | Grant shape：owner-only、short TTL、exact build digest、same `/hermes`；revoke-on-done/fail | **V8-M5**（separate user auth） |
 | TC-V8-M1-G06 | G6 dual vertical owner accept | Evidence template binding A+B receipts under canary | **V8-M5** |
@@ -266,8 +266,8 @@ v2_durable_live_released = false
 canary_grant_issued = false
 kill_switch = true   # expected default; re-verify live before any drill
 zero_orders_required = true
-next_authorized_slice = V8-M3  # cold-start / backup-restore drills only
-# (V8-M2 ACCEPT_WITH_NITS @f5d41f4; release_authorized still false)
+next_authorized_slice = V8-M4  # CLEAR only
+# (V8-M3 ACCEPT @b570f94; V8-M2 ACCEPT_WITH_NITS @f5d41f4; release_authorized still false)
 ```
 
 ## 13. Seal evidence（this session）
@@ -310,13 +310,14 @@ next_authorized_slice = V8-M3  # cold-start / backup-restore drills only
 | GAP-08 missing provider evidence | **COVERED** | `test_v8_m2_missing_provider_evidence_task_not_normal_completed` asserts public task `status=="completed_degraded"`（≠ `"completed"`）. |
 | GAP-09 dual messages-refetch | **COVERED**（with known non-blocking nits） | `createQuietRefetchScheduler` pending-bit sole owner（no recursive re-arm while hung）+ panel wire + sessionId drift guard；vitest 4 cases. Residual nit: quiet path still no AbortController（pre-existing soft-fail shape）. |
 | GAP-11 delivered without growth | **COVERED** | transcriptHelpers TC-V8-M2-11 characterization lock（behavior pre-existed；M2 pins it）. |
-| GAP-04 full refresh replay | **OPEN** → waive to M3 | written residual |
+| GAP-04 full refresh replay | **PARTIAL**（M3 lite） | `test_v8_m3_snapshot_refresh_after_wipe_no_dup_phantom` — post-wipe empty replay-safe；full FE refresh chaos residual |
 | GAP-05 fallback chain | **DEFERRED** product | unchanged |
 | GAP-06 Discord/historical fork | **DEFERRED** | unchanged |
 | GAP-10 disconnect mid-waiting | **OPEN** → waive to M3 | written residual |
-| GAP-12 live Hermes restart | **DEFERRED V8-M3** | freeze ladder |
+| GAP-12 live Hermes restart | **DEFERRED**（no V2 durable live smuggle） | M3 binds ephemeral-allow fail-closed only；live Hermes restart needs separate V2 install auth |
 | GAP-13 warehouse full-suite green | **PARTIAL** | Bound cluster green @f5d41f4：composite+submit_turn_bff+vertical_binding_v7g+transcript_observe_v6_m1+run_stop_v7c（`-m 'not pg'`）+ vitest transcriptHelpers 18. Full warehouse / PG matrix not claimed. |
-| GAP-14…17 | later Mn | freeze ladder |
+| GAP-14 backup≠TTL revive | **COVERED** | HQA `test_v8_m3_backup_restore_binder.py` 10 green（intent+workflow） |
+| GAP-15…17 | later Mn | freeze ladder |
 
 ### Bound green evidence @f5d41f4
 - pytest：composite + submit_turn_bff + vertical GAP-08 + transcript_observe_v6_m1 + run_stop_v7c → all green（not pg）
@@ -327,5 +328,56 @@ next_authorized_slice = V8-M3  # cold-start / backup-restore drills only
 public write OFF；canary OFF；M6 Gate2 decide unauthorized；kill_switch true；`release_authorized=false`；no platform `import hqa`；no flag flips；zero orders.
 
 ### NEXT after M2 ACCEPT_WITH_NITS
-**V8-M3 cold-start / backup-restore drills**（local dark；public OFF）。  
-Do **not** treat M2 as release/canary auth. Residual OPEN GAPs 04/10 waived into M3 polish only if they fit cold-start scope；else stay residual board.
+**V8-M3 cold-start / backup-restore drills** — **ACCEPT@b570f94**（see §15）。  
+Do **not** treat M2 as release/canary auth.
+
+## 15. V8-M3 close status（2026-07-23）— **ACCEPT**
+
+| Field | Value |
+|---|---|
+| Platform tip | `codex/agent-v0-2-platform-v1@b570f94` |
+| HQA tip | docs + binder this session（parent `9569c64`） |
+| Slice | V8-M3 cold-start / backup-restore drills |
+| Seal grade | **ACCEPT**（not canary；not public；not release；`release_authorized=false`） |
+
+### Delivered
+**Platform** `tests/test_v8_m3_cold_start.py` **9 green**:
+1. empty spine honest（tasks/attempts/runs/results/gates/approvals/commands=[]；health ready；mutation/composer disabled；gateway/provider dark）
+2. dual cold-start：bind → wipe in-memory authorities → empty；prior task_id gone
+3. successive empty cold-starts stay empty（no phantom revive）
+4. `chat_write_ready` / `composer_write_ready` stay false on cold-start
+5. BFF snapshot empty after authority reset（no silent rehydrate）
+6. deep-link catalog observe-only（routes/query keys ≠ write gates；catalog mutate ≠ open write）
+7. GAP-04 lite：refresh after wipe stays empty（no dup phantom）
+8. GAP-12 adjacent binder：durable-absent fails closed unless explicit ephemeral allow
+9. re-bind after wipe mints fresh task_id（no revive）
+
+**FE** `routes.test.ts` V8-M3 deep-link catalog（10 vitest total green）
+
+**HQA** `tests/test_v8_m3_backup_restore_binder.py` **10 green**（importlib re-exec of standing V3 proofs under V8-M3 node ids）:
+- intent：backup ciphertext-only + preserves expiry；expiry tombstone no silent revive；old backup after expiry cannot resurrect plaintext；expired backup restore never decrypts；restore requires same key + empty target；restore failure publishes nothing
+- workflow：backup/restore preserves digests；restore refuses nonempty/overwrite；tamper fails closed；partial restore idempotent
+
+### GAP board delta after M3
+| GAP | After M3 | Notes |
+|---|---|---|
+| GAP-04 | **PARTIAL** | wipe+refresh empty honest；full FE refresh chaos residual |
+| GAP-10 | **OPEN** residual | disconnect mid-waiting not cold-start-shaped；stays board |
+| GAP-12 | **DEFERRED** | no V2 durable live install；ephemeral-allow binder only |
+| GAP-14 | **COVERED** | HQA binder 10 + standing V3 suite green |
+| GAP-01/03/07/13 | **PARTIAL** carry | unchanged from M2 honesty |
+| GAP-02/08/09/11 | **COVERED** carry | unchanged |
+
+### Bound green evidence @b570f94
+- platform pytest：`test_v8_m3_cold_start` 9 + composite + submit_turn_bff + vertical_binding_v7g + transcript_observe_v6_m1 + workspace_bff + hermes_http_dispatch_adapter + composer_readiness → all green
+- HQA pytest：binder 10 + intent_payloads + workflow_authority_backup → all green
+- vitest：routes 10 + transcriptHelpers 18 = 28 green
+- Unrelated dirty（brief/paper/options）**not** in M3 commits
+
+### Non-goals held
+public write OFF；canary OFF；M6 Gate2 decide unauthorized；kill_switch true；`release_authorized=false`；no platform `import hqa`；no flag flips；zero orders；no V2 durable live ON；no lift `gate_cascade_locked`；no bodies on follow.
+
+### NEXT after M3 ACCEPT
+**V8-M4 CLEAR only**（freeze SHAs；checklist；still no canary/public without later user auth）。  
+Do **not** treat M3 as release/canary/public auth. GAP-10 residual may ride into M4 checklist as known open.
+
