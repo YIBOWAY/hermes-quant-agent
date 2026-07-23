@@ -23,33 +23,34 @@ Rules for AI agents working in this repository.
   remains OFF until the v0.2 plan's full release gate passes. Discord/historical
   sessions are Web read-only; Web writes use a new managed Hermes Session, and
   continuing external context requires an explicit fork with immutable lineage.
-  D-31 status (2026-07-16 evidence): the old TUI gateway contract has drifted and
-  is fail-closed; the official API Server session-read contract and platform
-  server-side GET-only BFF are delivered for real session list/detail/messages.
-  Candidate integrity is delivered, one authorized migration apply completed,
-  and Scene-B completed Gate 1, Gate 2, Futu final receipt, human Gate 3 commit
-  `524e791`, registry promotion, and cleanup. The professional frontend/read-only
-  shell is delivered. Browser Gate 2 mutation was rolled back because refetching
-  digest/status violated Gate 1 binding/no-refetch. Wave 3A and 3B are DONE;
-  3B's ledger has delivered claim/lease/heartbeat primitives; 3C's runnable worker
-  has delivered only notify/periodic-scan/expired-lease reconciliation and does not
-  claim queued commands, with zero Hermes mutation/provider use. 3C.1's HQA
-  Task/Attempt/payload authority, exact binding, and reverse audit are code-accepted,
-  but platform migration 006 is not live-applied. A 2026-07-16 review found its
-  `UNIQUE(task_id)` cardinality incompatible with multi-Attempt research; do
-  not authorize or apply the current 006. D-32 selects revising never-live 006
-  and redoing its full evidence; the current replay-all runner cannot safely use
-  a later 007 as a patch. First freeze the v0.2 cardinality, disable implicit startup
-  migration, and repeat isolated PostgreSQL/independent review. None of this may
-  enable claim or dispatch.
-- Slice V0 is source/formal DONE: the three-repo identity manifest, validation
-  binding and independent `CLEAR` verdict are closed in
-  `docs/audits/2026-07-19-v0-v2-release-closure.md`. The verdict explicitly has
-  `release_authorized=false`. V1 code remediation is accepted, but live V1.2
-  role/RLS remains PARTIAL: migration 006 is absent and `quant` is still
-  superuser/bypassrls. V2 `DurableRunAuthority` source is accepted and pushed at
-  Hermes integration `2eb5fa27790f`; it is not installed in the live upstream
-  Hermes runtime, so Durable Run and every write gate remain OFF.
+  The 2026-07-16 GET-only/reconcile-only/never-live-006 description is
+  **historical evidence**, not current instructions. Do not use it as NEXT.
+- **Agent v0.2 release-candidate status (2026-07-24):**
+  - Platform code baseline `2b2ad32` has since added sealed-artifact release
+    admission and authoritative external-session exact-message fork backend;
+    the release branch is still completing the frontend fork UI. Bind the final
+    clean Platform HEAD only after that work closes.
+  - HQA code baseline is `5370fd4`. Hermes managed-session baseline `ccd6eb0`
+    has since added the required capabilities endpoint contract. Final release
+    evidence must bind the actual clean three-repo HEADs, not these historical
+    code anchors.
+  - Revised migrations 006 through 015 are live. Migration 015 exact
+    provisioning-column grants, ACL-drift fail-closed checks and the constrained
+    runtime-role managed-session canary are accepted. Schema readiness never
+    implies public write authorization.
+  - The real paper-factor path completed exact Gate 1, Gate 2 CAS, Futu final
+    receipt `backtest-32a022e60947473be481a2404d85646d`, human Gate 3 commit
+    `7ad6a92`, registry promotion and cleanup. It is an operational US ETF proxy
+    for the paper, **not** a full country-level reproduction. This backend/CLI
+    evidence does not substitute for the final `/hermes` browser vertical.
+  - Public release stamp/cutover, connector daemon/liveness, `/hermes`
+    multi-turn/restart/exact-message-fork and both browser verticals remain
+    pending. Do not write `release_authorized=true`, `chat_write_ready=true` or
+    Agent v0.2 DONE before those facts exist.
+- Slice V0/V1/V2 close-out records under `docs/audits/` remain historical
+  provenance. Their old runtime commits, roles, PIDs, “candidate not installed”
+  and write-gate conclusions must not override the 2026-07-24 release-candidate
+  record above.
 - Slice V3 is source-accepted and installed locally in dark mode at HQA
   `121926388d86`; see `docs/audits/2026-07-19-agent-v0-2-v3-acceptance.md` and
   `docs/runbooks/agent-v0-2-v3-authorities.md`. `IntentPayloadStore` owns encrypted
@@ -60,25 +61,12 @@ Rules for AI agents working in this repository.
   `--no-agent` and must stay free of provider, HTTP, database and trading calls.
   V3 alone did not enable Web writes; later V6 local dark + L2a did under
   separate local authorization (public cutover still OFF).
-- **V4–V6 / L2a / L2b (2026-07-21…22) status for agents:** V4 live schema ACCEPT
-  (006/007). V5 dark claim/dispatch ACCEPT (CLI default still `reconcile_only`).
-  V6 local dark enablement ACCEPT (real HTTP adapter + local mutation flags).
-  L2a-Send M1+M2 ACCEPT (composite submit-turn → store → worker → Hermes
-  `L2a-pong`). L2b-Observe M1+M2 ACCEPT (command snapshot/follow + messages
-  preview after deliver). L3a-Transcript M1 ACCEPT (workbench Conversation
-  canvas + live `L3a-pong` bubbles). L3b-Transcript-Polish M1 ACCEPT
-  (no-flicker refresh, soft stick scroll, optimistic user bubble, shared
-  canvas). L4a-Task-Drawer M1 ACCEPT (read-only command Activity from
-  workspace `commands[]`; Task/Attempt authority still empty). L4b-SSE-Follow
-  M1 ACCEPT (shared follow spine: BFF SSE + FE EventSource/poll; Activity
-  consumes spine; no assistant bodies). L5a-Hermes-Approval-Observe M1 ACCEPT
-  (honest empty command-approval slot + Composer on shared spine; no
-  allow/deny write; ≠ Gate 1/2/3). L5b-Authority-Projection M1 ACCEPT
-  (honest empty Task/Attempt/Run/result slots + health on spine; no invented
-  HQA rows). L5c-Workbench-A11y M1 ACCEPT (FE-only shell a11y contracts (region landmark, not nested main);
-  marker `l5c-m1`). **V7a–V7g-B-M5 ACCEPT** (exact allow_once|deny CAS + hermetic respond_approval release/signal + hermetic Run-scoped stop with §5.5 layered receipt + durable approval projector + Domain Gate 1/2/3 surfaces + typed results on spine + Vertical A options bind hermetic fixture + authorized live Futu RO thin overlay + Vertical B hermetic factor bind + plan-confirm + Gate1 seed + Gate1 confirm dual-path + Gate2 seed cascade → cascade_stage=gate2_seeded + pending Gate2; gate_cascade_locked stays; sample/real fail-closed; no always-allow; Gates ≠ command-approval ≠ results; no Task invention from conversation.turn; no dual private poll; no catalog-on-spine; zero orders; kill_switch true; StartResearch/global ConfirmResearchPlan still dark; no auto Gate2 decide; Vertical-B M5 ≠ Gate2 decide auth). Plan-V6-Token-Stream-M1 ACCEPT@5788379 (SSE transcript hints-only + spine-refetch messages BFF; no bodies on follow; no provider-token passthrough). V8-M1 prep ACCEPT (docs/audits/2026-07-23-v8-m1-adversarial-acceptance-prep.md). V8-M2 hermetic suite close ACCEPT_WITH_NITS@f5d41f4 (GAP-02/08/09/11 COVERED; 01/03/07/13 PARTIAL). V8-M3 cold-start/backup-restore ACCEPT@b570f94 (GAP-14 COVERED; GAP-04 PARTIAL lite; GAP-12 DEFERRED). V8-M4 CLEAR_WITH_NITS (docs/audits/2026-07-23-v8-m4-independent-clear.md; G4 357p/5sk+271p+51; release_authorized=false). V8-M5 hermetic canary grant ACCEPT@bb67fa3 (G5/G6). V8-M6 hermetic public flag G7/G8 ACCEPT@a2953cb (public_cutovers on spine; open requires G6 acceptance; close retains facts; rails honesty; standing default OFF; GAP-17 COVERED hermetic). M6 Gate2 decide unauthorized; release_authorized=false; kill_switch true; M6 ≠ full V8 release. NEXT: operator V8 release stamp only when full gates honest under fresh user auth — not auto-started.
-  Authoritative status: `docs/README.md` + active plan; L2a ADR
-  `docs/design/2026-07-22-l2a-send-thin-write-rail-adr.md`.
+- V4–V8 M1–M6 details remain dated delivery evidence. The current order is:
+  finish the final UI/contract; refresh full/focused suites; seal exact test and
+  real-flow artifacts; open the final runtime-bound release stamp/cutover;
+  start and verify connector liveness; execute complete browser E2E; then
+  re-seal docs and runtime identity. Authoritative status is `docs/README.md`
+  plus the active plan.
 - Hermes updates are operator-controlled and periodic/manual. The no-agent
   compatibility watcher may report drift but must never pull, merge, install,
   restart or enable gates. The upstream Hermes 40k full suite is not an Agent
@@ -105,12 +93,13 @@ Rules for AI agents working in this repository.
   supervised dispatch under the trading kill switch — that is not public cutover
   and not Plan-V6 full-UI acceptance. A fake Hermes adapter is for hermetic
   tests only, never a temporary public user path.
-- Migration 006 was revised (Scheme A) and **live-applied 2026-07-21** with 007
-  on `quantplatform` after explicit authorization. Do not re-apply obsolete
-  `UNIQUE(task_id)`-only 006. Schema readiness is not write authorization.
-  Additive L2a migration `008_l2a_conversation_turn_claim.sql` enables
-  `conversation_turn` claim alongside research binding — apply only with
-  explicit live auth and evidence.
+- Migrations 006 through 015 have been applied to live `quantplatform` under
+  explicit authorization. Do not re-apply the obsolete `UNIQUE(task_id)`-only
+  006 or treat an old replay plan as current. Migration 015 narrows runtime
+  managed-session provisioning to exact columns and must fail closed on ACL
+  drift. Schema readiness and the constrained-role canary are not public write
+  authorization; every future migration still needs separate authorization and
+  evidence.
 - Treat the local `~/.hermes/hermes-agent` checkout as a third owned dependency
   for v0.2 Durable Run work. Pin source/install/runtime identity and develop in a
   controlled branch/worktree; do not patch an unidentified live checkout in
@@ -142,7 +131,8 @@ Rules for AI agents working in this repository.
     four-field `{promotion_id, worktree, patch, manifest}` payload only —
     never commits. Status/cleanup use `--promotion-id` only; abandon is
     explicit. HQA verifies the actual three-file dirty set/bytes/modes/patch and
-    requires platform status to return the same provenance. A timeout is an
+    requires platform status schema 1.1 to return the same final-receipt
+    provenance. A timeout is an
     unknown outcome and must use the printed recovery evidence. The human
     `git diff` review + commit IS Gate 3 completion. Direct
     platform `agent promote-candidate` is a generic primitive, not the supported
@@ -155,10 +145,11 @@ Rules for AI agents working in this repository.
   later migration/apply still requires separate authorization.
 - HQA may run one-shot research backtests through digest-reverified approved
   candidates, but resident paper/live paths must only use promoted, registered,
-  tested factors. The delivered Hermes workbench remains read-only. Official API
-  health/capability/session GETs do not call a provider. Chat/run and approval
-  mutation stay disabled until durable recovery/evidence contracts and a
-  separately approved slice land.
+  tested factors. The final Hermes workbench source includes managed write
+  paths, but public mutation remains fail-closed until the runtime-bound release
+  stamp/cutover, connector liveness and browser E2E pass. Official API
+  health/capability/session GETs do not call a provider. Do not downgrade to a
+  GET-only fallback or claim the release-candidate UI is already public.
 - Opportunity decisions never create or upgrade action eligibility. Link an
   action only by exact platform signal/execution IDs validated through the
   bounded observations seam; ticker/symbol similarity is never causal proof.
