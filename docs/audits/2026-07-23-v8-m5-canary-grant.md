@@ -73,7 +73,7 @@ Dual-vertical accept binds existing hermetic `options_a` + `factor_b` task/resul
 
 ## NEXT
 
-**V8-M6 public flag cutover** — still requires careful one-public-flag gating under standing goal safety rails.  
+**V8-M6 ACCEPT@a2953cb** — hermetic G7/G8 delivered; see `2026-07-23-v8-m6-public-cutover.md`. Standing default OFF; release_authorized still false.  
 `release_authorized` remains **false** until full V8 gates (G1–G8) are honest.  
 Do **not** treat M5 ACCEPT as M6 auth. Do **not** flip kill_switch. Do **not** open public write as standing default.
 

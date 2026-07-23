@@ -424,6 +424,6 @@ Do **not** auto-enter M5/M6. M4 CLEAR ≠ canary ≠ public ≠ release. Full V8
 **Verdict:** ACCEPT @ platform `013a2dc` (parent freeze `b570f94`).  
 **Delivered:** hermetic `canary_grant_authority` + acts `canary.grant.issue|revoke` + `canary.dual_vertical.accept` + spine `canary_grants[]`.  
 **Evidence:** 17 unit + 196 regression cluster; audit `docs/audits/2026-07-23-v8-m5-canary-grant.md`; verdict JSON.  
-**GAP-16 COVERED** (hermetic G5/G6). **GAP-17 OPEN** (M6 public).  
+**GAP-16 COVERED** (hermetic G5/G6). **GAP-17 COVERED** (hermetic G7/G8 @a2953cb).  
 **Auth:** `release_authorized=false`; public_write/chat_write stay false; M5 ≠ M6; no kill_switch flip; no V2 durable live ON.  
-**NEXT:** V8-M6 public flag cutover only under standing safety rails.
+**V8-M6 ACCEPT@a2953cb** (hermetic G7/G8; GAP-17 COVERED hermetic). **NEXT:** release_authorized stays false until full gates honest in operator env.

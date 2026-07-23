@@ -1,0 +1,72 @@
+{
+  "slice": "V8-M6",
+  "title": "hermetic public flag cutover G7 open + G8 rollback",
+  "date": "2026-07-23",
+  "verdict": "ACCEPT",
+  "platform_tip": "codex/agent-v0-2-platform-v1@a2953cb",
+  "platform_feat_parent": "codex/agent-v0-2-platform-v1@389efcb",
+  "platform_m5_parent": "codex/agent-v0-2-platform-v1@bb67fa3",
+  "platform_freeze_ancestor": "codex/agent-v0-2-platform-v1@b570f94",
+  "hqa_branch": "codex/full-9h",
+  "unit_tests": 17,
+  "regression_cluster": {
+    "passed": 82,
+    "skipped": 0,
+    "failed": 0
+  },
+  "junit": "docs/audits/evidence/2026-07-23-v8-m6-public-cutover.junit.xml",
+  "honesty_fix": {
+    "open_replay_after_close": "conflict public_cutover_already_closed; receipt uses cutover.public_flag_open",
+    "g6_build_digest_cas": "acceptance_build_digest_mismatch conflict when digests differ"
+  },
+  "delivered": {
+    "authority": "public_cutover_authority.py",
+    "observe": "public_cutover_observe.py",
+    "acts": [
+      "public.cutover.open",
+      "public.cutover.close"
+    ],
+    "spine": [
+      "public_cutovers[]",
+      "authority_health.public_cutover=ready"
+    ],
+    "receipts": [
+      "cutover_id",
+      "cutover_digest",
+      "cutover_ref",
+      "public_flag_open"
+    ]
+  },
+  "auth": {
+    "release_authorized": false,
+    "m6_gate2_decide_authorized": false,
+    "v2_durable_live": false,
+    "kill_switch_unchanged": true,
+    "standing_default_public_write": false,
+    "hermetic_open_under_mutation": true
+  },
+  "gaps": {
+    "GAP-17": "COVERED_hermetic_G7_G8",
+    "readiness_composition": "DEFERRED_to_release_stamp",
+    "full_v8_release_stamp": "OPEN"
+  },
+  "non_goals_held": [
+    "no kill_switch flip",
+    "no M6 Gate2 decide couple",
+    "no V2 durable live ON",
+    "no release_authorized=true",
+    "no platform import hqa",
+    "no lift gate_cascade_locked",
+    "unrelated dirty excluded",
+    "global composer_readiness not auto-composed"
+  ],
+  "reviewers": {
+    "code_reviewer": "APPROVE_WITH_NITS_after_honesty_fix",
+    "reality_checker": "CERTIFIED_WITH_NITS_91",
+    "workflow_architect": "GO_WITH_NITS_ON_RAILS"
+  },
+  "score_reality": 91,
+  "hermetic_ladder_complete": true,
+  "full_release_authorized": false,
+  "next": "V8 hermetic ladder M1–M6 complete; release_authorized stays false until full gates honest in operator env under fresh user auth; standing public write default OFF"
+}
