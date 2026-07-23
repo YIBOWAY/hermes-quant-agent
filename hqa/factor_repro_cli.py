@@ -234,7 +234,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     p_propose.add_argument("--universe", default="SPY,QQQ")
 
-    p_list = sub.add_parser("list", help="List non-authoritative candidate evidence")
+    sub.add_parser("list", help="List non-authoritative candidate evidence")
     p_detail = sub.add_parser("detail", help="Show one candidate from list output")
     p_detail.add_argument("--candidate-id", required=True)
 
@@ -543,6 +543,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             code, out = quant_cli.run_promote_candidate(
                 candidate_id=args.candidate_id,
                 expected_manifest_digest=args.expected_digest,
+                final_backtest_receipt=args.final_backtest_receipt,
                 base_commit=args.base_commit,
             )
         except subprocess.TimeoutExpired as exc:
