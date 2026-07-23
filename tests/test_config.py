@@ -8,7 +8,11 @@ import hqa.config as config
 
 
 def test_repo_and_platform_paths():
-    assert config.REPO_DIR.name == "Hermes-quant-agent"
+    # A controlled Git worktree has a different directory basename by design;
+    # bind the runtime root to the imported package instead of one checkout name.
+    assert config.REPO_DIR == Path(config.__file__).resolve().parent.parent
+    assert (config.REPO_DIR / "hqa").is_dir()
+    assert (config.REPO_DIR / "pyproject.toml").is_file()
     assert config.AIQP_DIR == Path("/Users/sunyibo/programs/ai-quant-platform")
     assert (
         config.QUANT_SYSTEM_BIN == config.AIQP_DIR / "ai-quant" / "bin" / "quant-system"
