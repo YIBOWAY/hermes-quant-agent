@@ -548,6 +548,9 @@ def test_hermes_compatibility_wrapper_is_a_fixed_no_argument_adapter() -> None:
     ).read_text(encoding="utf-8")
     assert "cd __HQA_REPO_DIR__" in body
     assert "exec python3 -m hqa.hermes_compatibility_cli check" in body
+    assert "--no-agent" in body
+    assert "--profile local_agent_v0_2" in body
+    assert "--platform-root __HQA_PLATFORM_DIR__" in body
     assert '"$@"' not in body
     assert '"$#" -ne 0' in body
 

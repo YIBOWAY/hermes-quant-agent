@@ -6,11 +6,13 @@ The public interface is deliberately small: callers provide a frozen
 loopback-only GET probes, strict response validation, canonical evidence,
 locking, and fail-closed baseline management.
 
-This module never imports Hermes, reads its API key, invokes a model/provider,
-or performs an HTTP mutation. A successful re-probe baseline suppresses all
-HTTP traffic until the Hermes checkout, watcher contract, or an HQA/platform
-re-probe trigger digest changes. Those file digests trigger observation; they
-are not source or runtime attestation.
+This module never imports Hermes, invokes a model/provider, or performs an HTTP
+mutation.  The stronger ``local_agent_v0_2`` profile may read one owner-only
+Hermes API-key file solely to authenticate ``GET /v1/capabilities``; the key is
+never persisted or printed. A successful re-probe baseline suppresses all HTTP
+traffic until the profile, Hermes checkout, shared Platform manifest, watcher
+contract, or an HQA/platform re-probe trigger digest changes. Those file
+digests trigger observation; they are not source or runtime attestation.
 """
 
 from __future__ import annotations
@@ -46,6 +48,8 @@ HQA_REPROBE_TRIGGER_FILES: Tuple[str, ...] = (
     "hqa/agent_workspace_security.py",
     "hqa/agent_workspace_states.py",
     "hqa/hermes_run_adapter.py",
+    "hqa/hermes_run_cli.py",
+    "hqa/hermes_managed_session.py",
 )
 
 PLATFORM_REPROBE_TRIGGER_FILES: Tuple[str, ...] = (
@@ -54,6 +58,9 @@ PLATFORM_REPROBE_TRIGGER_FILES: Tuple[str, ...] = (
     "src/quant_system/api/safety/middleware.py",
     "src/quant_system/api/schemas/hermes.py",
     "src/quant_system/hermes/gateway_client.py",
+)
+PLATFORM_LOCAL_AGENT_TRIGGER_FILES: Tuple[str, ...] = (
+    "contracts/agent_v02_hermes_compatibility.v1.json",
 )
 
 WATCHER_CONTRACT_FILES: Tuple[str, ...] = (
@@ -84,6 +91,56 @@ _EXPECTED_SAFETY = {
     "live_trading_enabled": False,
     "kill_switch": True,
 }
+_PROFILES = frozenset({"dark_readonly", "local_agent_v0_2"})
+_PLATFORM_CONTRACT_RELATIVE_PATH = (
+    "contracts/agent_v02_hermes_compatibility.v1.json"
+)
+_PLATFORM_CONTRACT_KEYS = {
+    "schema_version",
+    "profile",
+    "hermes_contract_version_min",
+    "required_bool_features",
+    "required_exact_features",
+    "required_durable",
+    "durable_evidence_template",
+    "hqa_cli_operations",
+    "http_endpoints",
+    "write_contract",
+}
+_LOCAL_REQUIRED_BOOL_FEATURES = (
+    "session_resources",
+    "run_submission",
+    "run_events_sse",
+    "run_status",
+    "run_approval_response",
+    "run_stop",
+    "managed_run_sessions",
+)
+_LOCAL_REQUIRED_EXACT_FEATURES = {
+    "managed_run_history_authority": "hermes_session_db",
+    "managed_session_fork_mode": "preserve_source_exact_message_cursor",
+}
+_LOCAL_REQUIRED_DURABLE = (
+    "idempotency",
+    "event_replay",
+    "approval_cas",
+    "idempotent_stop",
+    "restart_reconcile",
+    "run_evidence",
+)
+_LOCAL_DURABLE_EVIDENCE_TEMPLATE = "store.transactional_probe:{capability}"
+_LOCAL_HTTP_ENDPOINTS = (
+    ("GET", "/v1/capabilities"),
+    ("POST", "/v1/runs"),
+    ("GET", "/v1/runs/{run_id}"),
+    ("GET", "/v1/runs/{run_id}/events"),
+    ("POST", "/v1/runs/{run_id}/approval"),
+    ("POST", "/v1/runs/{run_id}/stop"),
+    ("POST", "/api/sessions"),
+    ("GET", "/api/sessions/{session_id}"),
+    ("GET", "/api/sessions/{session_id}/messages"),
+    ("POST", "/api/sessions/{session_id}/fork"),
+)
 
 
 class CompatibilityError(RuntimeError):
@@ -96,11 +153,13 @@ class CompatibilityConfig:
     platform_repo: Path
     hermes_repo: Path
     state_dir: Path
+    profile: str = "dark_readonly"
     hermes_base_url: str = "http://127.0.0.1:8642"
     platform_base_url: str = "http://127.0.0.1:8765"
     hermes_cli_path: Path = field(
         default_factory=lambda: Path.home() / ".local" / "bin" / "hermes"
     )
+    hermes_api_key_file: Optional[Path] = None
     timeout_seconds: float = 2.0
     max_response_bytes: int = 65_536
 
@@ -116,6 +175,16 @@ class CompatibilityConfig:
             if not isinstance(value, (str, Path)):
                 raise TypeError(f"{field_name} must be path-like")
             object.__setattr__(self, field_name, Path(value))
+        if self.hermes_api_key_file is not None:
+            if not isinstance(self.hermes_api_key_file, (str, Path)):
+                raise TypeError("hermes_api_key_file must be path-like")
+            object.__setattr__(
+                self,
+                "hermes_api_key_file",
+                Path(self.hermes_api_key_file),
+            )
+        if self.profile not in _PROFILES:
+            raise ValueError("profile must be dark_readonly or local_agent_v0_2")
         _validate_loopback_base_url(self.hermes_base_url, "hermes_base_url")
         _validate_loopback_base_url(self.platform_base_url, "platform_base_url")
         if not isinstance(self.timeout_seconds, (int, float)) or isinstance(
@@ -140,6 +209,13 @@ class CompatibilityResult:
     trigger_digest: Optional[str]
     report_digest: Optional[str]
     report_path: Optional[Path]
+
+
+@dataclass(frozen=True)
+class PlatformCompatibilityContract:
+    document: Mapping[str, Any]
+    digest: str
+    schema_version: int
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -234,6 +310,185 @@ def _read_json_file(path: Path, *, maximum: int = 1_048_576) -> Any:
         return json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise CompatibilityError("state file is not valid JSON") from exc
+
+
+def _unique_json_object(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    document: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in document:
+            raise CompatibilityError("platform_contract_manifest_schema")
+        document[key] = value
+    return document
+
+
+def _reject_json_constant(_value: str) -> None:
+    raise CompatibilityError("platform_contract_manifest_schema")
+
+
+def _load_platform_contract(
+    config: CompatibilityConfig,
+) -> PlatformCompatibilityContract:
+    path = config.platform_repo / _PLATFORM_CONTRACT_RELATIVE_PATH
+    try:
+        root = config.platform_repo.resolve(strict=True)
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root)
+        if path.is_symlink() or not resolved.is_file():
+            raise CompatibilityError("platform_contract_manifest_unavailable")
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(
+            os, "O_NOFOLLOW", 0
+        )
+        descriptor = os.open(resolved, flags)
+    except (OSError, ValueError) as exc:
+        raise CompatibilityError("platform_contract_manifest_unavailable") from exc
+    try:
+        try:
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_size < 1
+                or info.st_size > 65_536
+            ):
+                raise CompatibilityError("platform_contract_manifest_schema")
+            raw = os.read(descriptor, 65_537)
+        except OSError as exc:
+            raise CompatibilityError(
+                "platform_contract_manifest_unavailable"
+            ) from exc
+    finally:
+        os.close(descriptor)
+    if not raw or len(raw) > 65_536:
+        raise CompatibilityError("platform_contract_manifest_schema")
+    try:
+        document = json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except CompatibilityError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
+        raise CompatibilityError("platform_contract_manifest_schema") from exc
+    if type(document) is not dict or set(document) != _PLATFORM_CONTRACT_KEYS:
+        raise CompatibilityError("platform_contract_manifest_schema")
+
+    from hqa.hermes_run_cli import (
+        HERMES_RUN_CLI_OPERATIONS,
+        HERMES_RUN_FORBIDDEN_FIELDS,
+        HERMES_RUN_SUBMIT_FIELDS,
+        HERMES_SESSION_FORK_POINT_FORMAT,
+        HERMES_SESSION_FORK_PRESERVE_SOURCE,
+    )
+
+    endpoints = document.get("http_endpoints")
+    if type(endpoints) is not list:
+        raise CompatibilityError("platform_contract_manifest_schema")
+    endpoint_pairs: List[Tuple[str, str]] = []
+    for endpoint in endpoints:
+        if type(endpoint) is not dict or set(endpoint) != {"method", "path"}:
+            raise CompatibilityError("platform_contract_manifest_schema")
+        method = endpoint.get("method")
+        endpoint_path = endpoint.get("path")
+        if (
+            type(method) is not str
+            or type(endpoint_path) is not str
+            or method not in {"GET", "POST"}
+            or not endpoint_path.startswith("/")
+            or len(endpoint_path) > 256
+        ):
+            raise CompatibilityError("platform_contract_manifest_schema")
+        endpoint_pairs.append((method, endpoint_path))
+
+    write_contract = document.get("write_contract")
+    if type(write_contract) is not dict or set(write_contract) != {
+        "run_submit_fields",
+        "platform_must_not_send",
+        "fork_requires",
+    }:
+        raise CompatibilityError("platform_contract_manifest_schema")
+    fork_requires = write_contract.get("fork_requires")
+    if type(fork_requires) is not dict or set(fork_requires) != {
+        "preserve_source",
+        "fork_point_format",
+    }:
+        raise CompatibilityError("platform_contract_manifest_schema")
+
+    if (
+        type(document.get("schema_version")) is not int
+        or document.get("schema_version") != 1
+        or document.get("profile") != "local_agent_v0_2"
+        or type(document.get("hermes_contract_version_min")) is not int
+        or document.get("hermes_contract_version_min") != 1
+        or tuple(document.get("required_bool_features") or ())
+        != _LOCAL_REQUIRED_BOOL_FEATURES
+        or document.get("required_exact_features")
+        != _LOCAL_REQUIRED_EXACT_FEATURES
+        or tuple(document.get("required_durable") or ())
+        != _LOCAL_REQUIRED_DURABLE
+        or document.get("durable_evidence_template")
+        != _LOCAL_DURABLE_EVIDENCE_TEMPLATE
+        or tuple(document.get("hqa_cli_operations") or ())
+        != HERMES_RUN_CLI_OPERATIONS
+        or tuple(endpoint_pairs) != _LOCAL_HTTP_ENDPOINTS
+        or tuple(write_contract.get("run_submit_fields") or ())
+        != HERMES_RUN_SUBMIT_FIELDS
+        or tuple(write_contract.get("platform_must_not_send") or ())
+        != HERMES_RUN_FORBIDDEN_FIELDS
+        or fork_requires.get("preserve_source")
+        is not HERMES_SESSION_FORK_PRESERVE_SOURCE
+        or fork_requires.get("fork_point_format")
+        != HERMES_SESSION_FORK_POINT_FORMAT
+    ):
+        raise CompatibilityError("platform_contract_manifest_drift")
+    return PlatformCompatibilityContract(
+        document=document,
+        digest=_digest(document),
+        schema_version=1,
+    )
+
+
+def _read_owner_only_api_key(path: Optional[Path]) -> Optional[str]:
+    if path is None:
+        return None
+    if not path.is_absolute():
+        raise CompatibilityError("hermes_api_key_invalid")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(
+        os, "O_NOFOLLOW", 0
+    )
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise CompatibilityError("hermes_api_key_unavailable") from exc
+    try:
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) & 0o077
+            or (hasattr(os, "getuid") and info.st_uid != os.getuid())
+        ):
+            raise CompatibilityError("hermes_api_key_invalid")
+        raw = os.read(fd, 4097)
+    finally:
+        os.close(fd)
+    if not raw or len(raw) > 4096:
+        raise CompatibilityError("hermes_api_key_invalid")
+    try:
+        decoded = raw.decode("ascii", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise CompatibilityError("hermes_api_key_invalid") from exc
+    if decoded.endswith("\r\n"):
+        token = decoded[:-2]
+    elif decoded.endswith("\n"):
+        token = decoded[:-1]
+    else:
+        token = decoded
+    if (
+        not token
+        or len(token) > 4096
+        or any(not 0x21 <= ord(char) <= 0x7E for char in token)
+    ):
+        raise CompatibilityError("hermes_api_key_invalid")
+    return token
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:
@@ -332,8 +587,14 @@ def _collect_reprobe_identity(
         hqa_digest = "unavailable"
         blockers.append("hqa_reprobe_trigger_unavailable")
     try:
+        platform_trigger_files = PLATFORM_REPROBE_TRIGGER_FILES
+        if config.profile == "local_agent_v0_2":
+            platform_trigger_files = (
+                *platform_trigger_files,
+                *PLATFORM_LOCAL_AGENT_TRIGGER_FILES,
+            )
         platform_digest = _contract_digest(
-            config.platform_repo, PLATFORM_REPROBE_TRIGGER_FILES
+            config.platform_repo, platform_trigger_files
         )
     except CompatibilityError:
         platform_digest = "unavailable"
@@ -347,8 +608,9 @@ def _collect_reprobe_identity(
     if tracked_status:
         blockers.append("hermes_tracked_checkout_dirty")
 
-    reprobe_identity = {
+    reprobe_identity: Dict[str, Any] = {
         "schema_version": 1,
+        "profile": config.profile,
         "hermes": {
             "checkout_head": head,
             "checkout_tree": tree,
@@ -361,6 +623,22 @@ def _collect_reprobe_identity(
             "watcher_contract_digest": watcher_digest,
         },
     }
+    if config.profile == "local_agent_v0_2":
+        try:
+            contract = _load_platform_contract(config)
+            reprobe_identity["platform_contract"] = {
+                "schema_version": contract.schema_version,
+                "digest": contract.digest,
+            }
+        except CompatibilityError as exc:
+            code = str(exc)
+            if not re.fullmatch(r"[a-z0-9_]{1,64}", code):
+                code = "platform_contract_manifest_unavailable"
+            reprobe_identity["platform_contract"] = {
+                "schema_version": None,
+                "digest": "unavailable",
+            }
+            blockers.append(code)
     return reprobe_identity, sorted(set(blockers))
 
 
@@ -397,7 +675,7 @@ def _validate_hermes_health(value: Any) -> None:
         raise CompatibilityError("hermes_health_contract_drift")
 
 
-def _validate_platform_health(value: Any) -> None:
+def _validate_platform_health(value: Any, *, profile: str) -> None:
     health = _expect_exact_keys(
         value,
         (
@@ -438,34 +716,85 @@ def _validate_platform_health(value: Any) -> None:
     _validate_dependency_health(health["database"], "database")
 
     ledger = health["hermes_command_ledger"]
-    if set(ledger) != {
+    legacy_keys = {
         "database_configured",
         "schema_ready",
         "schema_version",
         "workflow_binding_schema_ready",
         "workflow_binding_schema_version",
         "mutation_enabled",
-    }:
+    }
+    local_keys = legacy_keys | {
+        "session_registry_schema_ready",
+        "session_registry_schema_version",
+        "agent_workspace_authorities_ready",
+        "research_binding_ready",
+        "composer_write_ready",
+        "chat_write_ready",
+    }
+    ledger_keys = frozenset(ledger)
+    expected_keys = local_keys if profile == "local_agent_v0_2" else set(ledger)
+    if (
+        set(ledger) != expected_keys
+        or (
+            profile == "dark_readonly"
+            and ledger_keys not in {frozenset(legacy_keys), frozenset(local_keys)}
+        )
+    ):
         raise CompatibilityError("platform_health_schema")
-    for key in (
+    bool_keys = [
         "database_configured",
         "schema_ready",
         "workflow_binding_schema_ready",
         "mutation_enabled",
-    ):
+    ]
+    if ledger_keys == frozenset(local_keys):
+        bool_keys.extend(
+            [
+                "session_registry_schema_ready",
+                "agent_workspace_authorities_ready",
+                "research_binding_ready",
+                "composer_write_ready",
+                "chat_write_ready",
+            ]
+        )
+    for key in bool_keys:
         if type(ledger[key]) is not bool:
             raise CompatibilityError("platform_health_schema")
-    for ready_key, version_key in (
+    version_pairs = [
         ("schema_ready", "schema_version"),
         ("workflow_binding_schema_ready", "workflow_binding_schema_version"),
-    ):
+    ]
+    if ledger_keys == frozenset(local_keys):
+        version_pairs.append(
+            ("session_registry_schema_ready", "session_registry_schema_version")
+        )
+    for ready_key, version_key in version_pairs:
         version = ledger[version_key]
         if ledger[ready_key] is not (
             type(version) is int and not isinstance(version, bool) and version >= 1
         ):
             raise CompatibilityError("platform_health_schema")
-    if ledger["mutation_enabled"] is not False:
+    if profile == "dark_readonly" and ledger["mutation_enabled"] is not False:
         raise CompatibilityError("platform_mutation_enabled_drift")
+    if ledger_keys == frozenset(local_keys):
+        if profile == "dark_readonly" and (
+            ledger["composer_write_ready"] is not False
+            or ledger["chat_write_ready"] is not False
+        ):
+            raise CompatibilityError("platform_mutation_enabled_drift")
+        if profile == "local_agent_v0_2" and not all(
+            ledger[key] is True
+            for key in (
+                "database_configured",
+                "schema_ready",
+                "workflow_binding_schema_ready",
+                "session_registry_schema_ready",
+                "agent_workspace_authorities_ready",
+                "research_binding_ready",
+            )
+        ):
+            raise CompatibilityError("platform_agent_authority_unready")
     _validate_safety(health["safety"])
 
 
@@ -503,7 +832,12 @@ def _strings(value: Any, maximum: int = 32) -> bool:
     )
 
 
-def _validate_gateway(value: Any) -> None:
+def _validate_gateway(
+    value: Any,
+    *,
+    profile: str,
+    contract: Optional[PlatformCompatibilityContract],
+) -> None:
     gateway = _expect_exact_keys(
         value,
         (
@@ -526,7 +860,7 @@ def _validate_gateway(value: Any) -> None:
         gateway["read_status"] != "available"
         or gateway["connected"] is not True
         or gateway["session_api_available"] is not True
-        or gateway["chat_write_ready"] is not False
+        or type(gateway["chat_write_ready"]) is not bool
         or type(features) is not dict
         or features.get("session_resources") is not True
         or not all(
@@ -540,6 +874,16 @@ def _validate_gateway(value: Any) -> None:
         or gateway["warnings"]
     ):
         raise CompatibilityError("platform_gateway_contract_drift")
+    if profile == "dark_readonly" and gateway["chat_write_ready"] is not False:
+        raise CompatibilityError("platform_gateway_contract_drift")
+    if profile == "local_agent_v0_2":
+        if contract is None:
+            raise CompatibilityError("platform_contract_manifest_unavailable")
+        required = contract.document["required_bool_features"]
+        if not isinstance(required, list) or any(
+            features.get(name) is not True for name in required
+        ):
+            raise CompatibilityError("platform_gateway_contract_drift")
     if gateway["model"] is not None and not isinstance(gateway["model"], str):
         raise CompatibilityError("platform_gateway_schema")
     _validate_safety(gateway["safety"])
@@ -610,20 +954,105 @@ def _validate_sessions(value: Any) -> None:
     _validate_safety(response["safety"])
 
 
-_VALIDATORS = {
-    "hermes_health": _validate_hermes_health,
-    "platform_health": _validate_platform_health,
-    "platform_gateway": _validate_gateway,
-    "platform_sessions": _validate_sessions,
-}
+def _validate_hermes_capabilities(
+    value: Any,
+    contract: PlatformCompatibilityContract,
+) -> None:
+    if type(value) is not dict:
+        raise CompatibilityError("capabilities_schema")
+    if (
+        value.get("object") != "hermes.api_server.capabilities"
+        or value.get("platform") != "hermes-agent"
+    ):
+        raise CompatibilityError("capabilities_envelope_drift")
+    minimum = contract.document["hermes_contract_version_min"]
+    version = value.get("contract_version")
+    if (
+        type(version) is not int
+        or isinstance(version, bool)
+        or type(minimum) is not int
+        or version < minimum
+    ):
+        raise CompatibilityError("contract_version_drift")
+
+    features = value.get("features")
+    if type(features) is not dict:
+        raise CompatibilityError("features_schema")
+    required_bool = contract.document["required_bool_features"]
+    if not isinstance(required_bool, list) or any(
+        features.get(name) is not True for name in required_bool
+    ):
+        raise CompatibilityError("bool_feature_drift")
+    required_exact = contract.document["required_exact_features"]
+    if not isinstance(required_exact, dict) or any(
+        features.get(name) != expected
+        for name, expected in required_exact.items()
+    ):
+        raise CompatibilityError("exact_feature_drift")
+
+    durable = value.get("durable")
+    required_durable = contract.document["required_durable"]
+    template = contract.document["durable_evidence_template"]
+    if (
+        type(durable) is not dict
+        or not isinstance(required_durable, list)
+        or type(template) is not str
+    ):
+        raise CompatibilityError("durable_schema")
+    for capability in required_durable:
+        fact = durable.get(capability)
+        expected_evidence = template.replace("{capability}", capability)
+        if (
+            type(fact) is not dict
+            or set(fact) != {"supported", "grounded", "evidence"}
+            or fact.get("supported") is not True
+            or fact.get("grounded") is not True
+            or fact.get("evidence") != expected_evidence
+        ):
+            raise CompatibilityError(f"durable_{capability}_drift")
+
+    endpoints = value.get("endpoints")
+    if type(endpoints) is not dict:
+        raise CompatibilityError("http_endpoint_drift")
+    advertised = set()
+    for endpoint in endpoints.values():
+        if (
+            type(endpoint) is not dict
+            or set(endpoint) != {"method", "path"}
+            or type(endpoint.get("method")) is not str
+            or type(endpoint.get("path")) is not str
+        ):
+            raise CompatibilityError("http_endpoint_drift")
+        advertised.add((endpoint["method"], endpoint["path"]))
+    required_endpoints = contract.document["http_endpoints"]
+    if not isinstance(required_endpoints, list):
+        raise CompatibilityError("http_endpoint_drift")
+    expected = {
+        (endpoint["method"], endpoint["path"])
+        for endpoint in required_endpoints
+        if isinstance(endpoint, dict)
+    }
+    if len(expected) != len(required_endpoints) or not expected.issubset(advertised):
+        raise CompatibilityError("http_endpoint_drift")
 
 
-def _request_json(url: str, config: CompatibilityConfig) -> Any:
+def _request_json(
+    url: str,
+    config: CompatibilityConfig,
+    *,
+    authorization_token: Optional[str] = None,
+) -> Any:
     opener = build_opener(ProxyHandler({}), _NoRedirect())
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "hqa-compatibility/1",
+    }
+    if authorization_token is not None:
+        headers["Authorization"] = f"Bearer {authorization_token}"
     request = Request(
         url,
         method="GET",
-        headers={"Accept": "application/json", "User-Agent": "hqa-compatibility/1"},
+        headers=headers,
     )
     try:
         with opener.open(request, timeout=float(config.timeout_seconds)) as response:
@@ -650,6 +1079,51 @@ def _request_json(url: str, config: CompatibilityConfig) -> Any:
 def _run_probes(config: CompatibilityConfig) -> Tuple[List[Dict[str, Any]], List[str]]:
     results: List[Dict[str, Any]] = []
     blockers: List[str] = []
+    contract: Optional[PlatformCompatibilityContract] = None
+    authorization_token: Optional[str] = None
+    if config.profile == "local_agent_v0_2":
+        try:
+            contract = _load_platform_contract(config)
+            results.append(
+                {
+                    "name": "platform_contract_manifest",
+                    "method": "LOCAL",
+                    "ok": True,
+                }
+            )
+        except CompatibilityError as exc:
+            code = _safe_error_code(
+                str(exc),
+                fallback="platform_contract_manifest_unavailable",
+            )
+            results.append(
+                {
+                    "name": "platform_contract_manifest",
+                    "method": "LOCAL",
+                    "ok": False,
+                    "error_code": code,
+                }
+            )
+            blockers.append(code)
+        try:
+            authorization_token = _read_owner_only_api_key(
+                config.hermes_api_key_file
+            )
+        except CompatibilityError as exc:
+            code = _safe_error_code(
+                str(exc),
+                fallback="hermes_api_key_unavailable",
+            )
+            results.append(
+                {
+                    "name": "hermes_capabilities_auth",
+                    "method": "LOCAL",
+                    "ok": False,
+                    "error_code": code,
+                }
+            )
+            blockers.append(code)
+
     service_result, service_blocker = _probe_gateway_service(config)
     results.append(service_result)
     if service_blocker is not None:
@@ -665,17 +1139,68 @@ def _run_probes(config: CompatibilityConfig) -> Tuple[List[Dict[str, Any]], List
     for name, target, path in _PROBES:
         try:
             payload = _request_json(bases[target] + path, config)
-            _VALIDATORS[name](payload)
+            if name == "hermes_health":
+                _validate_hermes_health(payload)
+            elif name == "platform_health":
+                _validate_platform_health(payload, profile=config.profile)
+            elif name == "platform_gateway":
+                _validate_gateway(
+                    payload,
+                    profile=config.profile,
+                    contract=contract,
+                )
+            else:
+                _validate_sessions(payload)
             results.append({"name": name, "method": "GET", "ok": True})
         except CompatibilityError as exc:
-            code = str(exc)
-            if not re.fullmatch(r"[a-z0-9_]{1,64}", code):
-                code = "probe_failed"
+            code = _safe_error_code(str(exc), fallback="probe_failed")
             results.append(
                 {"name": name, "method": "GET", "ok": False, "error_code": code}
             )
             blockers.append(f"{name}:{code}")
+        if name == "hermes_health" and config.profile == "local_agent_v0_2":
+            if contract is None:
+                code = "platform_contract_manifest_unavailable"
+                results.append(
+                    {
+                        "name": "hermes_capabilities",
+                        "method": "GET",
+                        "ok": False,
+                        "error_code": code,
+                    }
+                )
+                blockers.append(f"hermes_capabilities:{code}")
+                continue
+            try:
+                capabilities = _request_json(
+                    bases["hermes"] + "/v1/capabilities",
+                    config,
+                    authorization_token=authorization_token,
+                )
+                _validate_hermes_capabilities(capabilities, contract)
+                results.append(
+                    {
+                        "name": "hermes_capabilities",
+                        "method": "GET",
+                        "ok": True,
+                    }
+                )
+            except CompatibilityError as exc:
+                code = _safe_error_code(str(exc), fallback="probe_failed")
+                results.append(
+                    {
+                        "name": "hermes_capabilities",
+                        "method": "GET",
+                        "ok": False,
+                        "error_code": code,
+                    }
+                )
+                blockers.append(f"hermes_capabilities:{code}")
     return results, blockers
+
+
+def _safe_error_code(value: str, *, fallback: str) -> str:
+    return value if re.fullmatch(r"[a-z0-9_]{1,64}", value) else fallback
 
 
 def _probe_gateway_service(
@@ -899,12 +1424,13 @@ def _prune_reports(reports_dir: Path, *, protected_digests: Iterable[str]) -> No
 
 
 def check_compatibility(config: CompatibilityConfig) -> CompatibilityResult:
-    """Check local Hermes/platform read compatibility and preserve the last good baseline.
+    """Check one local compatibility profile and preserve its last good baseline.
 
     A matching successful trigger identity returns without any HTTP request.
-    Changed or previously failed trigger identities execute four bounded,
-    loopback-only GET
-    probes.  Failed checks write evidence but never replace ``baseline.json``.
+    Changed or previously failed identities execute four bounded loopback GETs;
+    ``local_agent_v0_2`` adds the authenticated capabilities GET and shared
+    Platform manifest validation. Failed checks write evidence but never
+    replace ``baseline.json``.
     """
 
     if not isinstance(config, CompatibilityConfig):
@@ -990,6 +1516,7 @@ __all__ = [
     "CompatibilityResult",
     "HQA_REPROBE_TRIGGER_FILES",
     "PLATFORM_REPROBE_TRIGGER_FILES",
+    "PLATFORM_LOCAL_AGENT_TRIGGER_FILES",
     "WATCHER_CONTRACT_FILES",
     "check_compatibility",
 ]

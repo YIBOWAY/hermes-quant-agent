@@ -60,6 +60,18 @@ class _ProbeHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self) -> None:  # noqa: N802 - must prove watcher never mutates
+        type(self).requests.append(
+            (
+                self.command,
+                self.path,
+                {key.lower(): value for key, value in self.headers.items()},
+            )
+        )
+        self.send_response(405)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def log_message(self, format: str, *args: object) -> None:
         return
 
@@ -73,6 +85,7 @@ def _probe_server():
             "platform": "hermes-agent",
             "version": "0.18.2",
         },
+        "/v1/capabilities": _local_agent_capabilities(),
         "/api/health": {
             "status": "ok",
             "app_name": "quant-system",
@@ -206,6 +219,339 @@ def _config(tmp_path: Path, base_url: str):
         hermes_cli_path=fake_hermes,
         timeout_seconds=1.0,
     )
+
+
+def _platform_contract() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "profile": "local_agent_v0_2",
+        "hermes_contract_version_min": 1,
+        "required_bool_features": [
+            "session_resources",
+            "run_submission",
+            "run_events_sse",
+            "run_status",
+            "run_approval_response",
+            "run_stop",
+            "managed_run_sessions",
+        ],
+        "required_exact_features": {
+            "managed_run_history_authority": "hermes_session_db",
+            "managed_session_fork_mode": (
+                "preserve_source_exact_message_cursor"
+            ),
+        },
+        "required_durable": [
+            "idempotency",
+            "event_replay",
+            "approval_cas",
+            "idempotent_stop",
+            "restart_reconcile",
+            "run_evidence",
+        ],
+        "durable_evidence_template": "store.transactional_probe:{capability}",
+        "hqa_cli_operations": [
+            "capabilities",
+            "submit",
+            "status",
+            "events",
+            "session-ensure",
+            "session-fork",
+        ],
+        "http_endpoints": [
+            {"method": "GET", "path": "/v1/capabilities"},
+            {"method": "POST", "path": "/v1/runs"},
+            {"method": "GET", "path": "/v1/runs/{run_id}"},
+            {"method": "GET", "path": "/v1/runs/{run_id}/events"},
+            {"method": "POST", "path": "/v1/runs/{run_id}/approval"},
+            {"method": "POST", "path": "/v1/runs/{run_id}/stop"},
+            {"method": "POST", "path": "/api/sessions"},
+            {"method": "GET", "path": "/api/sessions/{session_id}"},
+            {
+                "method": "GET",
+                "path": "/api/sessions/{session_id}/messages",
+            },
+            {
+                "method": "POST",
+                "path": "/api/sessions/{session_id}/fork",
+            },
+        ],
+        "write_contract": {
+            "run_submit_fields": ["input", "session_id", "metadata"],
+            "platform_must_not_send": [
+                "conversation_history",
+                "previous_response_id",
+            ],
+            "fork_requires": {
+                "preserve_source": True,
+                "fork_point_format": "message:<positive-integer-id>",
+            },
+        },
+    }
+
+
+def _local_agent_capabilities() -> dict[str, object]:
+    contract = _platform_contract()
+    required_bool = contract["required_bool_features"]
+    assert isinstance(required_bool, list)
+    required_exact = contract["required_exact_features"]
+    assert isinstance(required_exact, dict)
+    required_durable = contract["required_durable"]
+    assert isinstance(required_durable, list)
+    endpoints = {
+        "capabilities": {"method": "GET", "path": "/v1/capabilities"},
+        "runs": {"method": "POST", "path": "/v1/runs"},
+        "run_status": {"method": "GET", "path": "/v1/runs/{run_id}"},
+        "run_events": {
+            "method": "GET",
+            "path": "/v1/runs/{run_id}/events",
+        },
+        "run_approval": {
+            "method": "POST",
+            "path": "/v1/runs/{run_id}/approval",
+        },
+        "run_stop": {
+            "method": "POST",
+            "path": "/v1/runs/{run_id}/stop",
+        },
+        "session_create": {"method": "POST", "path": "/api/sessions"},
+        "session": {
+            "method": "GET",
+            "path": "/api/sessions/{session_id}",
+        },
+        "session_messages": {
+            "method": "GET",
+            "path": "/api/sessions/{session_id}/messages",
+        },
+        "session_fork": {
+            "method": "POST",
+            "path": "/api/sessions/{session_id}/fork",
+        },
+    }
+    return {
+        "object": "hermes.api_server.capabilities",
+        "platform": "hermes-agent",
+        "contract_version": 1,
+        "features": {
+            **{str(name): True for name in required_bool},
+            **required_exact,
+        },
+        "durable": {
+            str(name): {
+                "supported": True,
+                "grounded": True,
+                "evidence": f"store.transactional_probe:{name}",
+            }
+            for name in required_durable
+        },
+        "endpoints": endpoints,
+    }
+
+
+def _local_agent_config(tmp_path: Path, base_url: str):
+    from hqa.hermes_compatibility import CompatibilityConfig
+
+    base = _config(tmp_path, base_url)
+    contract_path = (
+        base.platform_repo
+        / "contracts"
+        / "agent_v02_hermes_compatibility.v1.json"
+    )
+    contract_path.parent.mkdir(parents=True, exist_ok=True)
+    contract_path.write_text(
+        json.dumps(_platform_contract()),
+        encoding="utf-8",
+    )
+    health = dict(_ProbeHandler.responses["/api/health"])
+    health["hermes_command_ledger"] = {
+        "database_configured": True,
+        "schema_ready": True,
+        "schema_version": 5,
+        "workflow_binding_schema_ready": True,
+        "workflow_binding_schema_version": 2,
+        "session_registry_schema_ready": True,
+        "session_registry_schema_version": 2,
+        "agent_workspace_authorities_ready": True,
+        "research_binding_ready": True,
+        "mutation_enabled": True,
+        "composer_write_ready": True,
+        "chat_write_ready": True,
+    }
+    _ProbeHandler.responses["/api/health"] = health
+    gateway = dict(_ProbeHandler.responses["/api/hermes/gateway"])
+    gateway["chat_write_ready"] = True
+    gateway["features"] = {
+        name: True
+        for name in _platform_contract()["required_bool_features"]  # type: ignore[index]
+    }
+    _ProbeHandler.responses["/api/hermes/gateway"] = gateway
+    return CompatibilityConfig(
+        hqa_repo=base.hqa_repo,
+        platform_repo=base.platform_repo,
+        hermes_repo=base.hermes_repo,
+        state_dir=base.state_dir,
+        profile="local_agent_v0_2",
+        hermes_base_url=base_url,
+        platform_base_url=base_url,
+        hermes_cli_path=base.hermes_cli_path,
+        timeout_seconds=1.0,
+    )
+
+
+def test_local_agent_profile_validates_manifest_and_native_capability_surface(
+    tmp_path: Path,
+) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        result = check_compatibility(config)
+
+    assert result.status == "compatible"
+    assert result.probed is True
+    assert [(method, path) for method, path, _headers in _ProbeHandler.requests] == [
+        ("GET", "/health"),
+        ("GET", "/v1/capabilities"),
+        ("GET", "/api/health"),
+        ("GET", "/api/hermes/gateway"),
+        ("GET", "/api/hermes/sessions?limit=1&offset=0"),
+    ]
+    assert all(method == "GET" for method, _path, _headers in _ProbeHandler.requests)
+    assert result.report_path is not None
+    report = json.loads(result.report_path.read_text(encoding="utf-8"))
+    assert report["reprobe_identity"]["profile"] == "local_agent_v0_2"
+    platform_contract = report["reprobe_identity"]["platform_contract"]
+    assert platform_contract["schema_version"] == 1
+    assert re.fullmatch(r"[0-9a-f]{64}", platform_contract["digest"])
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_code"),
+    [
+        (
+            lambda payload: payload.update(contract_version=0),
+            "contract_version_drift",
+        ),
+        (
+            lambda payload: payload["features"].update(
+                managed_run_history_authority="platform_shadow_history"
+            ),
+            "exact_feature_drift",
+        ),
+        (
+            lambda payload: payload["durable"]["event_replay"].update(
+                grounded=False
+            ),
+            "durable_event_replay_drift",
+        ),
+        (
+            lambda payload: payload["durable"]["run_evidence"].update(
+                evidence="flag_only"
+            ),
+            "durable_run_evidence_drift",
+        ),
+        (
+            lambda payload: payload["endpoints"].pop("session_fork"),
+            "http_endpoint_drift",
+        ),
+    ],
+)
+def test_local_agent_profile_reports_capability_drift_without_mutation(
+    tmp_path: Path,
+    mutate,
+    expected_code: str,
+) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        capabilities = json.loads(
+            json.dumps(_ProbeHandler.responses["/v1/capabilities"])
+        )
+        mutate(capabilities)
+        _ProbeHandler.responses["/v1/capabilities"] = capabilities
+        result = check_compatibility(config)
+
+    assert result.status == "incompatible"
+    assert result.report_path is not None
+    report = result.report_path.read_text(encoding="utf-8")
+    assert f"hermes_capabilities:{expected_code}" in report
+    assert all(method == "GET" for method, _path, _headers in _ProbeHandler.requests)
+
+
+@pytest.mark.parametrize(
+    "manifest_change",
+    [
+        "missing",
+        "unknown_version",
+        "boolean_version",
+        "extra",
+        "duplicate",
+        "oversized",
+    ],
+)
+def test_local_agent_profile_fails_closed_on_platform_manifest_drift(
+    tmp_path: Path,
+    manifest_change: str,
+) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        path = (
+            config.platform_repo
+            / "contracts"
+            / "agent_v02_hermes_compatibility.v1.json"
+        )
+        if manifest_change == "missing":
+            path.unlink()
+        elif manifest_change == "duplicate":
+            path.write_text(
+                '{"schema_version":1,"schema_version":1}',
+                encoding="utf-8",
+            )
+        elif manifest_change == "oversized":
+            path.write_bytes(b" " * 65_537)
+        else:
+            document = json.loads(path.read_text(encoding="utf-8"))
+            if manifest_change == "unknown_version":
+                document["schema_version"] = 2
+            elif manifest_change == "boolean_version":
+                document["schema_version"] = True
+            else:
+                document["secret_provider_token"] = "must-not-leak"
+            path.write_text(json.dumps(document), encoding="utf-8")
+        result = check_compatibility(config)
+
+    assert result.status == "incompatible"
+    assert result.report_path is not None
+    report = result.report_path.read_text(encoding="utf-8")
+    assert "platform_contract_manifest" in report
+    assert "must-not-leak" not in report
+
+
+def test_profile_is_part_of_baseline_identity_and_forces_local_reprobe(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        dark = _config(tmp_path, base_url)
+        dark_result = check_compatibility(dark)
+        requests_before = len(_ProbeHandler.requests)
+        local = _local_agent_config(tmp_path / "local", base_url)
+        # Keep the same state directory deliberately: a dark baseline must not
+        # suppress the stronger local Agent v0.2 probe.
+        local = replace(local, state_dir=dark.state_dir)
+        local_result = check_compatibility(local)
+
+    assert dark_result.status == "compatible"
+    assert local_result.status == "compatible"
+    assert local_result.probed is True
+    assert local_result.trigger_digest != dark_result.trigger_digest
+    assert len(_ProbeHandler.requests) == requests_before + 5
 
 
 def test_first_check_runs_only_fixed_get_probes_and_establishes_baseline(
@@ -584,6 +930,134 @@ def test_cli_rejects_unknown_arguments_without_echoing_them(capsys) -> None:
     assert secret_argument not in captured.err
 
 
+def test_local_agent_capability_probe_uses_owner_only_api_key_without_leaking_it(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        key = tmp_path / "hermes-api.key"
+        key.write_text("local-test-secret\n", encoding="utf-8")
+        key.chmod(0o600)
+        config = replace(config, hermes_api_key_file=key)
+        result = check_compatibility(config)
+
+    assert result.status == "compatible"
+    capability_requests = [
+        headers
+        for method, path, headers in _ProbeHandler.requests
+        if method == "GET" and path == "/v1/capabilities"
+    ]
+    assert len(capability_requests) == 1
+    assert capability_requests[0]["authorization"] == "Bearer local-test-secret"
+    assert result.report_path is not None
+    assert "local-test-secret" not in result.report_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "unsafe_key",
+    ["relative", "group_readable", "symlink", "control_character"],
+)
+def test_local_agent_profile_refuses_unsafe_api_key_files(
+    tmp_path: Path,
+    unsafe_key: str,
+) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        physical_key = tmp_path / "physical-hermes-api.key"
+        physical_key.write_text("must-never-appear-in-evidence\n", encoding="utf-8")
+        physical_key.chmod(0o600)
+        if unsafe_key == "relative":
+            configured_key = Path("physical-hermes-api.key")
+        elif unsafe_key == "group_readable":
+            physical_key.chmod(0o640)
+            configured_key = physical_key
+        elif unsafe_key == "symlink":
+            configured_key = tmp_path / "linked-hermes-api.key"
+            configured_key.symlink_to(physical_key)
+        else:
+            physical_key.write_text(
+                "must-never-appear\tin-evidence\n",
+                encoding="utf-8",
+            )
+            configured_key = physical_key
+        result = check_compatibility(
+            replace(config, hermes_api_key_file=configured_key)
+        )
+
+    assert result.status == "incompatible"
+    assert result.report_path is not None
+    report = result.report_path.read_text(encoding="utf-8")
+    assert "hermes_api_key_" in report
+    assert "must-never-appear" not in report
+
+
+def test_no_agent_cli_profiles_and_exit_codes_are_explicit(tmp_path: Path) -> None:
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        env = dict(
+            os.environ,
+            HQA_HERMES_COMPAT_HQA_REPO=str(config.hqa_repo),
+            HQA_HERMES_COMPAT_HERMES_REPO=str(config.hermes_repo),
+            HQA_HERMES_COMPAT_STATE_DIR=str(config.state_dir),
+            HQA_HERMES_COMPAT_HERMES_URL=base_url,
+            HQA_HERMES_COMPAT_PLATFORM_URL=base_url,
+            HQA_HERMES_COMPAT_HERMES_CLI=str(config.hermes_cli_path),
+        )
+        command = [
+            str(Path(os.sys.executable)),
+            "-m",
+            "hqa.hermes_compatibility_cli",
+            "check",
+            "--no-agent",
+            "--profile",
+            "local_agent_v0_2",
+            "--platform-root",
+            str(config.platform_repo),
+        ]
+        compatible = subprocess.run(
+            command,
+            cwd=Path(__file__).resolve().parent.parent,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        drift_state = tmp_path / "drift-state"
+        env["HQA_HERMES_COMPAT_STATE_DIR"] = str(drift_state)
+        capabilities = json.loads(
+            json.dumps(_ProbeHandler.responses["/v1/capabilities"])
+        )
+        capabilities["durable"]["approval_cas"]["grounded"] = False
+        _ProbeHandler.responses["/v1/capabilities"] = capabilities
+        drifted = subprocess.run(
+            command,
+            cwd=Path(__file__).resolve().parent.parent,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        usage = subprocess.run(
+            command[:-2],
+            cwd=Path(__file__).resolve().parent.parent,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    assert compatible.returncode == 0
+    assert json.loads(compatible.stdout)["status"] == "compatible"
+    assert drifted.returncode == 3
+    assert json.loads(drifted.stdout)["status"] == "incompatible"
+    assert usage.returncode == 2
+    assert "usage" in usage.stderr.lower()
+
+
 def test_process_lock_makes_overlapping_cron_check_a_silent_noop(
     tmp_path: Path,
 ) -> None:
@@ -714,9 +1188,11 @@ def test_watcher_contract_change_is_a_reprobe_trigger_not_runtime_attestation(
 
     assert set(first_report["reprobe_identity"]) == {
         "schema_version",
+        "profile",
         "hermes",
         "reprobe_triggers",
     }
+    assert first_report["reprobe_identity"]["profile"] == "dark_readonly"
     assert set(first_report["reprobe_identity"]["reprobe_triggers"]) == {
         "hqa_trigger_digest",
         "platform_trigger_digest",

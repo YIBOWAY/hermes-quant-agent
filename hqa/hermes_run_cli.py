@@ -31,16 +31,22 @@ _STDOUT_LIMIT = 4_194_304
 _PROMPT_LIMIT = 16_384
 _IDENTIFIER_MAX = 512
 _API_KEY_MAX = 4096
-_COMMANDS = frozenset(
-    {
-        "capabilities",
-        "submit",
-        "status",
-        "events",
-        "session-ensure",
-        "session-fork",
-    }
+HERMES_RUN_CLI_OPERATIONS = (
+    "capabilities",
+    "submit",
+    "status",
+    "events",
+    "session-ensure",
+    "session-fork",
 )
+HERMES_RUN_SUBMIT_FIELDS = ("input", "session_id", "metadata")
+HERMES_RUN_FORBIDDEN_FIELDS = (
+    "conversation_history",
+    "previous_response_id",
+)
+HERMES_SESSION_FORK_PRESERVE_SOURCE = True
+HERMES_SESSION_FORK_POINT_FORMAT = "message:<positive-integer-id>"
+_COMMANDS = frozenset(HERMES_RUN_CLI_OPERATIONS)
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _RETRYABLE_CODES = frozenset(
@@ -355,7 +361,7 @@ def _submit(
         raise _InputError("run_invalid_request", "request_body must be an object")
     _require_exact_fields(
         raw_body,
-        required={"input", "session_id", "metadata"},
+        required=set(HERMES_RUN_SUBMIT_FIELDS),
     )
     prompt = raw_body.get("input")
     session_id = _require_session_id(raw_body.get("session_id"))
@@ -599,6 +605,17 @@ def main(
 
     _emit(response)
     return 0
+
+
+__all__ = [
+    "HERMES_RUN_CLI_OPERATIONS",
+    "HERMES_RUN_FORBIDDEN_FIELDS",
+    "HERMES_RUN_SUBMIT_FIELDS",
+    "HERMES_SESSION_FORK_POINT_FORMAT",
+    "HERMES_SESSION_FORK_PRESERVE_SOURCE",
+    "HermesEndpoint",
+    "main",
+]
 
 
 if __name__ == "__main__":

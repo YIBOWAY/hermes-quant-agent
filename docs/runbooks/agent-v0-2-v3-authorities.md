@@ -140,8 +140,10 @@ Hermes 由操作者定期手工更新。更新后可立即运行：
 ~/.hermes/scripts/hqa-hermes-compatibility-watch.sh
 ```
 
-同一检查也由 Hermes `--no-agent` cron 每 15 分钟轮询 source/contract trigger。它只执行一个本地
-service-status 检查和四个 loopback GET；不会 pull、merge、install、restart、调用模型或打开 gate。
+同一检查也由 Hermes `--no-agent` cron 每 15 分钟轮询 profile/source/shared-manifest/contract
+trigger。当前 wrapper 使用 `local_agent_v0_2`：只执行一个本地 service-status、五个
+loopback GET（额外读取 `/v1/capabilities`）及 Platform 版本化 manifest 校验；不会
+pull、merge、install、restart、调用模型、provider、交易路径或打开 gate。
 若 Hermes 本身无法启动，其 cron 也不能运行，因此手工执行仍是更新后的最终保险。
 
 ## 8. 回滚边界
