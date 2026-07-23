@@ -384,10 +384,12 @@ def _gate3_receipt(tmp_path):
         *scoped_paths,
     )
     patch_sha = hashlib.sha256(patch_bytes).hexdigest()
+    final_backtest_receipt_id = "backtest-" + "c" * 32
     identity = {
         "base_commit": base_commit,
         "candidate_digest": "a" * 64,
         "candidate_id": "factor-reviewed-1",
+        "final_backtest_receipt_id": final_backtest_receipt_id,
         "files": files,
         "patch_sha256": patch_sha,
         "scoped_paths": scoped_paths,
@@ -409,11 +411,12 @@ def _gate3_receipt(tmp_path):
     patch.write_bytes(patch_bytes)
     manifest = promotion_dir / "manifest.v1.json"
     payload = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "promotion_id": promotion_id,
         "base_commit": base_commit,
         "candidate_id": "factor-reviewed-1",
         "candidate_digest": "a" * 64,
+        "final_backtest_receipt_id": final_backtest_receipt_id,
         "scoped_paths": scoped_paths,
         "files": files,
         "patch_sha256": patch_sha,
@@ -437,6 +440,7 @@ def test_gate3_receipt_binds_candidate_digest_and_base_commit(tmp_path) -> None:
         receipt,
         candidate_id="factor-reviewed-1",
         manifest_digest="a" * 64,
+        final_backtest_receipt_id=payload["final_backtest_receipt_id"],
         factor_id="factor",
         base_commit=payload["base_commit"],
         promotion_root=tmp_path / "promotions",
@@ -448,6 +452,28 @@ def test_gate3_receipt_binds_candidate_digest_and_base_commit(tmp_path) -> None:
     assert evidence["patch_sha256"] == payload["patch_sha256"]
 
 
+def test_gate3_receipt_rejects_final_backtest_binding_drift(tmp_path) -> None:
+    receipt, payload = _gate3_receipt(tmp_path)
+    manifest = Path(receipt["manifest"])
+    payload["final_backtest_receipt_id"] = "backtest-" + "d" * 32
+    manifest.write_text(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="binding"):
+        fr.verify_gate3_receipt(
+            receipt,
+            candidate_id="factor-reviewed-1",
+            manifest_digest="a" * 64,
+            final_backtest_receipt_id="backtest-" + "c" * 32,
+            factor_id="factor",
+            base_commit=payload["base_commit"],
+            promotion_root=tmp_path / "promotions",
+            worktree_root=tmp_path / "worktrees",
+        )
+
+
 def test_gate3_receipt_rejects_managed_root_escape(tmp_path) -> None:
     receipt, payload = _gate3_receipt(tmp_path)
     receipt["worktree"] = str(tmp_path / "outside" / receipt["promotion_id"])
@@ -457,6 +483,7 @@ def test_gate3_receipt_rejects_managed_root_escape(tmp_path) -> None:
             receipt,
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
+            final_backtest_receipt_id=payload["final_backtest_receipt_id"],
             factor_id="factor",
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
@@ -473,6 +500,7 @@ def test_gate3_receipt_accepts_platform_resolved_worktree_root_alias(tmp_path) -
         receipt,
         candidate_id="factor-reviewed-1",
         manifest_digest="a" * 64,
+        final_backtest_receipt_id=payload["final_backtest_receipt_id"],
         factor_id="factor",
         base_commit=payload["base_commit"],
         promotion_root=tmp_path / "promotions",
@@ -493,6 +521,7 @@ def test_gate3_receipt_rejects_worktree_file_drift(tmp_path) -> None:
             receipt,
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
+            final_backtest_receipt_id=payload["final_backtest_receipt_id"],
             factor_id="factor",
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
@@ -520,6 +549,7 @@ def test_gate3_rejects_nested_file_entry_before_identity_serialization(
             receipt,
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
+            final_backtest_receipt_id=payload["final_backtest_receipt_id"],
             factor_id="factor",
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
@@ -538,6 +568,7 @@ def test_gate3_receipt_rejects_extra_dirty_path(tmp_path) -> None:
             receipt,
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
+            final_backtest_receipt_id=payload["final_backtest_receipt_id"],
             factor_id="factor",
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
@@ -556,6 +587,7 @@ def test_gate3_receipt_rejects_executable_file_but_allows_restrictive_umask(
         receipt,
         candidate_id="factor-reviewed-1",
         manifest_digest="a" * 64,
+        final_backtest_receipt_id=payload["final_backtest_receipt_id"],
         factor_id="factor",
         base_commit=payload["base_commit"],
         promotion_root=tmp_path / "promotions",
@@ -568,6 +600,7 @@ def test_gate3_receipt_rejects_executable_file_but_allows_restrictive_umask(
             receipt,
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
+            final_backtest_receipt_id=payload["final_backtest_receipt_id"],
             factor_id="factor",
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
@@ -1115,6 +1148,7 @@ def test_gate3_receipt_rejects_manifest_binding_or_patch_drift(tmp_path) -> None
             receipt,
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
+            final_backtest_receipt_id=payload["final_backtest_receipt_id"],
             factor_id="factor",
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",
@@ -1134,6 +1168,7 @@ def test_gate3_receipt_rejects_manifest_binding_or_patch_drift(tmp_path) -> None
             receipt,
             candidate_id="factor-reviewed-1",
             manifest_digest="a" * 64,
+            final_backtest_receipt_id=payload["final_backtest_receipt_id"],
             factor_id="factor",
             base_commit=payload["base_commit"],
             promotion_root=tmp_path / "promotions",

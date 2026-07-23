@@ -979,6 +979,7 @@ def test_promote_passes_exact_binding_and_requires_four_field_receipt(
             "receipt": receipt,
             "candidate_id": "factor-x-1",
             "manifest_digest": "a" * 64,
+            "final_backtest_receipt_id": "backtest-" + "c" * 32,
             "factor_id": "reviewed_factor",
             "base_commit": "b" * 40,
             "promotion_root": Path("/tmp/promotions"),

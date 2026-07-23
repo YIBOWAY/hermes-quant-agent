@@ -598,6 +598,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 receipt,
                 candidate_id=args.candidate_id,
                 manifest_digest=args.expected_digest,
+                final_backtest_receipt_id=args.final_backtest_receipt,
                 factor_id=factor_id,
                 base_commit=args.base_commit,
                 promotion_root=promotion_root,

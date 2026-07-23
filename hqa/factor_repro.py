@@ -1084,6 +1084,7 @@ def verify_gate3_receipt(
     *,
     candidate_id: str,
     manifest_digest: str,
+    final_backtest_receipt_id: str,
     factor_id: str,
     base_commit: str,
     promotion_root: Path,
@@ -1097,6 +1098,7 @@ def verify_gate3_receipt(
         _CANDIDATE_ID_RE.fullmatch(candidate_id) is None
         or _CANDIDATE_ID_RE.fullmatch(factor_id) is None
         or _HEX64.fullmatch(manifest_digest) is None
+        or _BACKTEST_RECEIPT_ID_RE.fullmatch(final_backtest_receipt_id) is None
         or _GIT_COMMIT_RE.fullmatch(base_commit) is None
     ):
         raise ValueError("invalid Gate 3 expected binding")
@@ -1184,6 +1186,7 @@ def verify_gate3_receipt(
         "base_commit",
         "candidate_id",
         "candidate_digest",
+        "final_backtest_receipt_id",
         "scoped_paths",
         "files",
         "patch_sha256",
@@ -1191,11 +1194,13 @@ def verify_gate3_receipt(
     if not isinstance(manifest, dict) or set(manifest) != manifest_fields:
         raise ValueError("invalid Gate 3 manifest schema")
     if (
-        manifest.get("schema_version") != "1.0"
+        manifest.get("schema_version") != "1.1"
         or manifest.get("promotion_id") != promotion_id
         or manifest.get("base_commit") != base_commit
         or manifest.get("candidate_id") != candidate_id
         or manifest.get("candidate_digest") != manifest_digest
+        or manifest.get("final_backtest_receipt_id")
+        != final_backtest_receipt_id
         or not isinstance(manifest.get("scoped_paths"), list)
         or not manifest["scoped_paths"]
         or not all(isinstance(path, str) and path for path in manifest["scoped_paths"])
@@ -1294,6 +1299,7 @@ def verify_gate3_receipt(
         "base_commit": base_commit,
         "candidate_digest": manifest_digest,
         "candidate_id": candidate_id,
+        "final_backtest_receipt_id": final_backtest_receipt_id,
         "files": manifest["files"],
         "patch_sha256": manifest["patch_sha256"],
         "scoped_paths": manifest["scoped_paths"],
