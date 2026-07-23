@@ -266,8 +266,8 @@ v2_durable_live_released = false
 canary_grant_issued = false
 kill_switch = true   # expected default; re-verify live before any drill
 zero_orders_required = true
-next_authorized_slice = V8-M4  # CLEAR only
-# (V8-M3 ACCEPT @b570f94; V8-M2 ACCEPT_WITH_NITS @f5d41f4; release_authorized still false)
+next_authorized_slice = V8-M5  # canary ONLY with fresh user auth; M4 CLEAR ≠ M5
+# (V8-M4 CLEAR_WITH_NITS @b570f94 freeze; V8-M3 ACCEPT @b570f94; V8-M2 ACCEPT_WITH_NITS @f5d41f4; release_authorized still false)
 ```
 
 ## 13. Seal evidence（this session）
@@ -378,6 +378,42 @@ Do **not** treat M2 as release/canary auth.
 public write OFF；canary OFF；M6 Gate2 decide unauthorized；kill_switch true；`release_authorized=false`；no platform `import hqa`；no flag flips；zero orders；no V2 durable live ON；no lift `gate_cascade_locked`；no bodies on follow.
 
 ### NEXT after M3 ACCEPT
-**V8-M4 CLEAR only**（freeze SHAs；checklist；still no canary/public without later user auth）。  
-Do **not** treat M3 as release/canary/public auth. GAP-10 residual may ride into M4 checklist as known open.
+**V8-M4 CLEAR_WITH_NITS** — **done**（see §16 + `docs/audits/2026-07-23-v8-m4-independent-clear.md`）。  
+Do **not** treat M3 as release/canary/public auth.
+
+## 16. V8-M4 independent CLEAR status（2026-07-23）— **CLEAR_WITH_NITS**
+
+| Field | Value |
+|---|---|
+| Platform tip（frozen） | `codex/agent-v0-2-platform-v1@b570f94`（no M4 product code） |
+| HQA tip（campaign） | `codex/full-9h@c86fdb9`（M3 seal；M4 = docs+evidence supersede） |
+| Slice | V8-M4 independent security + code CLEAR（G4） |
+| Seal grade | **CLEAR_WITH_NITS**（not canary；not public；not release；`release_authorized=false`） |
+| Standalone audit | `docs/audits/2026-07-23-v8-m4-independent-clear.md` |
+| Verdict JSON | `docs/audits/evidence/2026-07-23-v8-m4-independent-clear-verdict.json` |
+
+### G4 surface checklist
+CSRF/origin owner session；intent crypto fail-closed；approval digest/TTL/single-use + **no always-allow**；Gate 1/2/3 + Gate3 `human_git_commit_required`（no web commit）；provider evidence honesty；`kill_switch` default **true**；hermetic `chat_write_ready=false`；process boundary（no platform `import hqa`）；zero_orders vertical；`gate_cascade_locked` stays — **all PASS** under hermetic pin.
+
+### Bound campaign @ freeze tips
+| Campaign | Result |
+|---|---|
+| Platform G4 bound cluster（24 files） | **357 passed, 5 skipped, 0 failed** |
+| HQA G4 bound cluster（8 files） | **271 passed, 0 failed** |
+| FE vitest（routes+transcriptHelpers+workspaceFollowSpine） | **51 passed** |
+
+JUnit: `evidence/2026-07-23-v8-m4-platform-g4.junit.xml` + `…-hqa-g4.junit.xml`（SHA-256 in verdict JSON）。
+
+### Residuals（honest — do not silent COVERED）
+GAP-01/03/04/07 PARTIAL；GAP-10 OPEN；GAP-12 DEFERRED（V2 durable live install auth）；GAP-13 PARTIAL warehouse；COVERED carry 02/08/09/11/14。
+
+### Operator-env honesty
+Local machine may have `QS_LOCAL_MUTATION_*` ON for dark enablement. CLEAR hermetic pin forces mutation/composer OFF. Operator env ≠ release evidence.
+
+### Non-goals held
+public write OFF；canary OFF；M6 Gate2 decide unauthorized；kill_switch true；`release_authorized=false`；no platform `import hqa`；no flag flips；zero orders；no V2 durable live ON；no lift `gate_cascade_locked`；no bodies on follow；unrelated dirty excluded。
+
+### NEXT after M4 CLEAR_WITH_NITS
+**V8-M5 canary grant — REQUIRES fresh explicit user authorization.**  
+Do **not** auto-enter M5/M6. M4 CLEAR ≠ canary ≠ public ≠ release. Full V8 gates 1–8 still incomplete for release.
 

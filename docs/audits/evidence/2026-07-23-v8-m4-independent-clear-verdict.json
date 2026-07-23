@@ -1,0 +1,132 @@
+{
+  "campaigns": {
+    "fe_vitest": {
+      "failed": 0,
+      "files": [
+        "src/frontend/lib/hermes/routes.test.ts",
+        "src/frontend/lib/hermes/transcriptHelpers.test.ts",
+        "src/frontend/lib/hermes/workspaceFollowSpine.test.ts"
+      ],
+      "passed": 51
+    },
+    "hqa_g4_bound_cluster": {
+      "failed": 0,
+      "files": [
+        "tests/test_agent_workspace_security.py",
+        "tests/test_intent_payload_crypto.py",
+        "tests/test_intent_payloads.py",
+        "tests/test_workflow_authority.py",
+        "tests/test_workflow_authority_backup.py",
+        "tests/test_v8_m3_backup_restore_binder.py",
+        "tests/test_research_workflows.py",
+        "tests/test_workflow_contract.py"
+      ],
+      "junit_path": "docs/audits/evidence/2026-07-23-v8-m4-hqa-g4.junit.xml",
+      "junit_sha256": "15b054099a2a64ebaddfe26c76e88f0ab8ec140aa25bc28c9bc31232b70c46d8",
+      "passed": 271,
+      "skipped": 0
+    },
+    "platform_g4_bound_cluster": {
+      "failed": 0,
+      "files": [
+        "tests/test_local_session_security.py",
+        "tests/test_workspace_bff.py",
+        "tests/test_composer_readiness.py",
+        "tests/test_command_approval_decide.py",
+        "tests/test_approval_release_v7b.py",
+        "tests/test_approval_observe_v7d.py",
+        "tests/test_run_stop_v7c.py",
+        "tests/test_gate_surfaces_v7e.py",
+        "tests/test_typed_results_v7f.py",
+        "tests/test_vertical_binding_v7g.py",
+        "tests/test_vertical_binding_v7g_m2.py",
+        "tests/test_vertical_binding_v7g_b_m1.py",
+        "tests/test_vertical_binding_v7g_b_m2.py",
+        "tests/test_vertical_binding_v7g_b_m3.py",
+        "tests/test_vertical_binding_v7g_b_m4.py",
+        "tests/test_vertical_binding_v7g_b_m5.py",
+        "tests/test_hermes_connector_dispatch.py",
+        "tests/test_hermes_http_dispatch_adapter.py",
+        "tests/test_settings.py",
+        "tests/test_transcript_observe_v6_m1.py",
+        "tests/test_composite_turn_submit.py",
+        "tests/test_submit_turn_bff.py",
+        "tests/test_v8_m3_cold_start.py",
+        "tests/test_api_hermes_gateway.py"
+      ],
+      "junit_path": "docs/audits/evidence/2026-07-23-v8-m4-platform-g4.junit.xml",
+      "junit_sha256": "2418d431a0c0d370551ac29bd31cce0bd51890b98b6ad417e3660e9af0092eec",
+      "passed": 357,
+      "skipped": 5
+    }
+  },
+  "canary_authorized": false,
+  "date": "2026-07-23",
+  "exclusions": [
+    "not_canary",
+    "not_public_write",
+    "not_m6_gate2_decide",
+    "not_v2_durable_live_on",
+    "not_kill_switch_false",
+    "not_full_warehouse_green_claim",
+    "not_live_hermes_restart_drill",
+    "unrelated_platform_dirty_brief_paper_options_excluded"
+  ],
+  "frozen_tips": {
+    "hermes_integration": {
+      "branch": "codex/v2-live-integration",
+      "head": "2eb5fa27790fb7af73fababa21d43b3996fe2d99",
+      "note": "SOURCE only; live durable OFF; not re-installed this slice",
+      "repo": "https://github.com/YIBOWAY/hermes-agent.git"
+    },
+    "hqa": {
+      "branch": "codex/full-9h",
+      "head_at_campaign": "c86fdb9a108ee6280f01268f873577eea3f4220d",
+      "note": "M3 seal tip; M4 docs+evidence commit supersedes after this file lands",
+      "repo": "https://github.com/YIBOWAY/hermes-quant-agent.git",
+      "short_at_campaign": "c86fdb9"
+    },
+    "platform": {
+      "branch": "codex/agent-v0-2-platform-v1",
+      "head": "b570f94bf99723c5f0b824342ebaa5696778a6a4",
+      "note": "V8-M3 tip; no M4 product code change",
+      "repo": "https://github.com/YIBOWAY/ai-quant-platform.git",
+      "short": "b570f94"
+    }
+  },
+  "g4_checklist": {
+    "approval_digest_ttl_single_use_no_always_allow": "PASS",
+    "chat_write_hermetic_pin_false": "PASS",
+    "csrf_origin_owner_session": "PASS",
+    "gate_cascade_locked_stays": "PASS",
+    "gate_surfaces_no_web_commit": "PASS",
+    "intent_crypto_fail_closed": "PASS",
+    "kill_switch_default_true": "PASS",
+    "process_boundary_no_platform_import_hqa": "PASS",
+    "provider_evidence_degraded_honesty": "PASS",
+    "zero_orders_vertical_limitations": "PASS"
+  },
+  "kind": "agent_v0_2_v8_m4_independent_clear_verdict",
+  "m6_gate2_decide_authorized": false,
+  "next_authorized_slice": "V8-M5 canary grant \u2014 REQUIRES fresh explicit user authorization; M4 CLEAR does not imply M5",
+  "operator_env_honesty": {
+    "hermetic_chat_write_ready": false,
+    "hermetic_mutation_enabled": false,
+    "kill_switch_default": true,
+    "note": "Operator machine may have QS_LOCAL_MUTATION_* ON for local-dark enablement. CLEAR hermetic pin forces mutation/composer OFF. Live operator env is NOT release evidence."
+  },
+  "public_write_authorized": false,
+  "release_authorized": false,
+  "residuals_known_open": {
+    "GAP-01": "PARTIAL \u2014 payload binding covered; ledger command_id PG-mark",
+    "GAP-03": "PARTIAL \u2014 outcome_unknown retry; command_id mocked slice",
+    "GAP-04": "PARTIAL \u2014 wipe refresh lite; full FE refresh chaos residual",
+    "GAP-07": "PARTIAL \u2014 intent-port only; full PG-down+HQA-down pair open",
+    "GAP-10": "OPEN \u2014 disconnect mid-waiting chaos",
+    "GAP-12": "DEFERRED \u2014 live Hermes restart needs separate V2 durable install auth",
+    "GAP-13": "PARTIAL \u2014 bound cluster green \u2260 full warehouse/PG matrix"
+  },
+  "schema_version": 1,
+  "v2_durable_live_authorized": false,
+  "verdict": "CLEAR_WITH_NITS"
+}
