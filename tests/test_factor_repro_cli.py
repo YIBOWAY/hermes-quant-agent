@@ -879,6 +879,7 @@ def test_promote_passes_exact_binding_and_requires_four_field_receipt(
         "patch_sha256": "2" * 64,
         "candidate_id": "factor-x-1",
         "candidate_digest": "a" * 64,
+        "final_backtest_receipt_id": "backtest-" + "c" * 32,
         "base_commit": "b" * 40,
         "scoped_paths": [
             "src/quant_system/factors/library/promoted/reviewed_factor.py",

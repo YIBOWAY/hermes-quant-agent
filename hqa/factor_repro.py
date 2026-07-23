@@ -1380,6 +1380,7 @@ def verify_gate3_receipt(
         "patch_sha256": manifest["patch_sha256"],
         "candidate_id": candidate_id,
         "candidate_digest": manifest_digest,
+        "final_backtest_receipt_id": final_backtest_receipt_id,
         "base_commit": base_commit,
         "scoped_paths": manifest["scoped_paths"],
     }

@@ -635,6 +635,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "patch_sha256",
                     "candidate_id",
                     "candidate_digest",
+                    "final_backtest_receipt_id",
                     "base_commit",
                     "scoped_paths",
                 }
@@ -650,6 +651,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                         "patch_sha256",
                         "candidate_id",
                         "candidate_digest",
+                        "final_backtest_receipt_id",
                         "base_commit",
                         "scoped_paths",
                     )
