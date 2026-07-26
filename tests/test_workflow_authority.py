@@ -627,10 +627,21 @@ def test_operation_id_digest_is_recoverable_after_ack_loss_and_conflicts_fail_cl
     assert store.reverse_audit()["event_count"] == 1
 
 
-def test_shallow_binding_and_operation_lookup_are_not_public_surfaces() -> None:
+def test_only_exact_read_only_operation_receipt_is_exposed(tmp_path) -> None:
     assert not hasattr(WorkflowAuthority, "attempt_binding")
     assert not hasattr(WorkflowAuthority, "payload_binding")
-    assert not hasattr(WorkflowAuthority, "operation_receipt")
+    store = _store(tmp_path)
+    applied = _start(store)
+    before = store.reverse_audit()
+
+    observed = store.operation_receipt("op-start")
+
+    assert observed is not None
+    assert observed.replayed is True
+    assert observed.event_id == applied.event_id
+    assert observed.attempt_ref == applied.attempt_ref
+    assert store.operation_receipt("op-not-recorded") is None
+    assert store.reverse_audit() == before
 
 
 @pytest.mark.parametrize(

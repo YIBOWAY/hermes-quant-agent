@@ -359,6 +359,25 @@ class WorkflowAuthority:
                 _error("workflow_task_not_found")
             return self._snapshot_from_task(task)
 
+    def operation_receipt(self, operation_id: str) -> Optional[WorkflowReceipt]:
+        """Read one exact idempotency receipt without creating workflow state."""
+
+        if (
+            type(operation_id) is not str
+            or _IDENTIFIER_RE.fullmatch(operation_id) is None
+        ):
+            _error("workflow_invalid_operation")
+        with self._locked(create=False) as root_fd:
+            projection = self._replay(self._load_records(root_fd))
+            self._repair_disposable_projection(root_fd, projection)
+            operation = projection["operations"].get(operation_id)
+            if operation is None:
+                return None
+            return self._receipt_from_document(
+                operation["receipt"],
+                replayed=True,
+            )
+
     def consume_expiry_tombstones(
         self,
         evidences: Tuple[ExpiryTombstoneEvidence, ...],

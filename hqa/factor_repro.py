@@ -24,6 +24,7 @@ _BACKTEST_RECEIPT_ID_RE = re.compile(r"^backtest-[0-9a-f]{32}$")
 _MAX_GATE1_SOURCE_BYTES = 1_048_576
 _MAX_GATE3_PATCH_BYTES = 8_388_608
 _MAX_BACKTEST_ARTIFACT_BYTES = 8_388_608
+_MAX_PROMOTION_SCAN_ENTRIES = 1_000
 
 
 def _canonical_bytes(payload: dict) -> bytes:
@@ -420,7 +421,12 @@ def record_gate1_candidate_binding(
 
 
 def require_gate1_candidate_binding(
-    *, gate_dir: Path, candidate_id: str, manifest_digest: str
+    *,
+    gate_dir: Path,
+    candidate_id: str,
+    manifest_digest: str,
+    confirmation_id: str | None = None,
+    source_digest: str | None = None,
 ) -> None:
     """Fail closed unless Gate 2 inputs match one durable Gate 1 binding."""
     gate_dir = _canonical_authority_dir(gate_dir)
@@ -428,6 +434,16 @@ def require_gate1_candidate_binding(
         raise ValueError("Gate 1 binding lookup requires a lowercase SHA-256")
     if _CANDIDATE_ID_RE.fullmatch(candidate_id) is None:
         raise ValueError("Gate 1 binding lookup requires a valid candidate ID")
+    if (confirmation_id is None) != (source_digest is None):
+        raise ValueError(
+            "exact Gate 1 binding requires confirmation and source together"
+        )
+    if confirmation_id is not None and (
+        _CONFIRMATION_ID_RE.fullmatch(confirmation_id) is None
+        or source_digest is None
+        or _HEX64.fullmatch(source_digest) is None
+    ):
+        raise ValueError("exact Gate 1 binding identity is invalid")
     if gate_dir.is_symlink() or not gate_dir.is_dir():
         raise ValueError("Gate 1 authority directory missing")
     bindings_dir = gate_dir / "bindings"
@@ -466,10 +482,71 @@ def require_gate1_candidate_binding(
         if (
             payload.get("candidate_id") == candidate_id
             and payload.get("manifest_digest") == manifest_digest
+            and (
+                confirmation_id is None
+                or (
+                    payload.get("confirmation_id") == confirmation_id
+                    and payload.get("source_digest") == source_digest
+                )
+            )
         ):
             found = True
     if not found:
         raise ValueError("Gate 1 binding missing for exact candidate and manifest digest")
+
+
+def require_exact_candidate_approval_lock(
+    *,
+    candidates_root: Path,
+    source_path: str,
+    candidate_id: str,
+    manifest_digest: str,
+    note: str,
+) -> str:
+    """Verify the immutable Platform approval lock for receipt-loss recovery."""
+    if (
+        _CANDIDATE_ID_RE.fullmatch(candidate_id) is None
+        or _HEX64.fullmatch(manifest_digest) is None
+        or not isinstance(note, str)
+        or not note.strip()
+    ):
+        raise ValueError("invalid candidate approval recovery binding")
+    root = Path(os.path.abspath(candidates_root))
+    expected_candidate = root / candidate_id
+    source = Path(os.path.abspath(source_path))
+    if (
+        source.name != "factor.py.candidate"
+        or source.parent != expected_candidate
+        or Path(os.path.realpath(source.parent))
+        != Path(os.path.realpath(expected_candidate))
+    ):
+        raise ValueError("candidate approval recovery escaped canonical root")
+    lock = _read_canonical_json_record(
+        expected_candidate / "approved.lock",
+        label="candidate approval",
+    )
+    if (
+        set(lock)
+        != {
+            "schema_version",
+            "candidate_id",
+            "decision",
+            "manifest_digest",
+            "note",
+            "reviewer",
+            "created_at",
+        }
+        or lock.get("schema_version") != "1.0"
+        or lock.get("candidate_id") != candidate_id
+        or lock.get("decision") != "approve"
+        or lock.get("manifest_digest") != manifest_digest
+        or lock.get("note") != note
+        or lock.get("reviewer") != "manual"
+        or not isinstance(lock.get("created_at"), str)
+        or not lock["created_at"]
+    ):
+        raise ValueError("candidate approval recovery binding mismatch")
+    return hashlib.sha256(note.encode("utf-8")).hexdigest()
 
 
 def verify_experiment_receipt(
@@ -1384,6 +1461,94 @@ def verify_gate3_receipt(
         "base_commit": base_commit,
         "scoped_paths": manifest["scoped_paths"],
     }
+
+
+def find_exact_gate3_receipt(
+    *,
+    gate_dir: Path,
+    experiment_output_dir: Path,
+    candidate_id: str,
+    manifest_digest: str,
+    final_backtest_receipt_id: str,
+    base_commit: str,
+    promotion_root: Path,
+    worktree_root: Path,
+) -> Optional[dict[str, str]]:
+    """Read-only recovery for one lost Gate 3 prepare receipt."""
+    final_backtest = require_final_backtest_receipt(
+        gate_dir=gate_dir,
+        experiment_output_dir=experiment_output_dir,
+        receipt_id=final_backtest_receipt_id,
+        candidate_id=candidate_id,
+        manifest_digest=manifest_digest,
+    )
+    factor_id = final_backtest.get("factor_id")
+    if (
+        not isinstance(factor_id, str)
+        or _CANDIDATE_ID_RE.fullmatch(factor_id) is None
+        or _GIT_COMMIT_RE.fullmatch(base_commit) is None
+    ):
+        raise ValueError("invalid Gate 3 recovery binding")
+
+    root = Path(os.path.abspath(promotion_root))
+    try:
+        root_stat = root.lstat()
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(root_stat.st_mode):
+        raise ValueError("Gate 3 promotion root is unsafe")
+    entries = sorted(root.iterdir(), key=lambda item: item.name)
+    if len(entries) > _MAX_PROMOTION_SCAN_ENTRIES:
+        raise ValueError("Gate 3 promotion recovery scan exceeds quota")
+
+    matches: list[dict[str, str]] = []
+    for entry in entries:
+        if _PROMOTION_ID_RE.fullmatch(entry.name) is None:
+            continue
+        entry_stat = entry.lstat()
+        if stat.S_ISLNK(entry_stat.st_mode) or not stat.S_ISDIR(entry_stat.st_mode):
+            raise ValueError("Gate 3 promotion record is unsafe")
+        manifest_path = entry / "manifest.v1.json"
+        try:
+            manifest = json.loads(
+                _read_regular_file(
+                    manifest_path,
+                    label="Gate 3 recovery manifest",
+                    max_bytes=_MAX_GATE1_SOURCE_BYTES,
+                ).decode("utf-8")
+            )
+        except FileNotFoundError:
+            continue
+        if not isinstance(manifest, dict):
+            raise ValueError("invalid Gate 3 recovery manifest")
+        if (
+            manifest.get("candidate_id") != candidate_id
+            or manifest.get("candidate_digest") != manifest_digest
+            or manifest.get("final_backtest_receipt_id")
+            != final_backtest_receipt_id
+            or manifest.get("base_commit") != base_commit
+        ):
+            continue
+        receipt = {
+            "promotion_id": entry.name,
+            "worktree": str(Path(os.path.abspath(worktree_root)) / entry.name),
+            "patch": str(entry / "scoped.patch"),
+            "manifest": str(manifest_path),
+        }
+        verify_gate3_receipt(
+            receipt,
+            candidate_id=candidate_id,
+            manifest_digest=manifest_digest,
+            final_backtest_receipt_id=final_backtest_receipt_id,
+            factor_id=factor_id,
+            base_commit=base_commit,
+            promotion_root=root,
+            worktree_root=worktree_root,
+        )
+        matches.append(receipt)
+    if len(matches) > 1:
+        raise ValueError("multiple exact Gate 3 recovery receipts found")
+    return matches[0] if matches else None
 
 
 def parse_json_payload(output: str) -> Optional[dict]:

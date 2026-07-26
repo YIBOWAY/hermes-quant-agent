@@ -25,31 +25,33 @@ Rules for AI agents working in this repository.
   continuing external context requires an explicit fork with immutable lineage.
   The 2026-07-16 GET-only/reconcile-only/never-live-006 description is
   **historical evidence**, not current instructions. Do not use it as NEXT.
-- **Agent v0.2 release-candidate status (2026-07-24):**
-  - Platform code baseline `2b2ad32` has since added sealed-artifact release
-    admission and authoritative external-session exact-message fork backend;
-    the release branch is still completing the frontend fork UI. Bind the final
-    clean Platform HEAD only after that work closes.
-  - HQA code baseline is `5370fd4`. Hermes managed-session baseline `ccd6eb0`
-    has since added the required capabilities endpoint contract. Final release
-    evidence must bind the actual clean three-repo HEADs, not these historical
-    code anchors.
-  - Revised migrations 006 through 015 are live. Migration 015 exact
-    provisioning-column grants, ACL-drift fail-closed checks and the constrained
-    runtime-role managed-session canary are accepted. Schema readiness never
-    implies public write authorization.
+- **Agent v0.2 release-candidate status (2026-07-26 source freeze):**
+  - The release branches now contain the complete final-path source: managed
+    Web sessions and exact-message fork UI, exact selected plus Hermes-resolved
+    fork lineage, natural-language paper-research intent entry, browser
+    Gate 1 exact-source review, sealed candidate evidence, and PostgreSQL-only
+    release/cutover authority. Bind evidence to the actual clean three-repo
+    HEADs; dated commit anchors below are historical only.
+  - Migrations 016 through 024 are the additive release-candidate ladder after
+    the live 006–015 baseline. Never infer their live state from source or this
+    file: inspect PostgreSQL migration metadata, schema readiness, role grants,
+    and the runtime health projection in the current operator window. Schema
+    readiness never implies public write authorization. Migration 023 preserves
+    one stable conversation root while binding every Run to its resolved
+    compression tip; migration 024 makes approval/stop external outcomes
+    durable and replay-safe.
   - The real paper-factor path completed exact Gate 1, Gate 2 CAS, Futu final
     receipt `backtest-32a022e60947473be481a2404d85646d`, human Gate 3 commit
     `7ad6a92`, registry promotion and cleanup. It is an operational US ETF proxy
     for the paper, **not** a full country-level reproduction. This backend/CLI
     evidence does not substitute for the final `/hermes` browser vertical.
-  - Public release stamp/cutover, connector daemon/liveness, `/hermes`
-    multi-turn/restart/exact-message-fork and both browser verticals remain
-    pending. Do not write `release_authorized=true`, `chat_write_ready=true` or
-    Agent v0.2 DONE before those facts exist.
+  - Release status is a durable runtime fact, not a documentation flag. Inspect
+    the current candidate, connector generation, release stamp, public cutover,
+    runtime identities, schema fingerprint and evidence digest before claiming
+    `release_authorized=true`, `chat_write_ready=true` or Agent v0.2 DONE.
 - Slice V0/V1/V2 close-out records under `docs/audits/` remain historical
   provenance. Their old runtime commits, roles, PIDs, “candidate not installed”
-  and write-gate conclusions must not override the 2026-07-24 release-candidate
+    and write-gate conclusions must not override the 2026-07-26 final-source
   record above.
 - Slice V3 is source-accepted and installed locally in dark mode at HQA
   `121926388d86`; see `docs/audits/2026-07-19-agent-v0-2-v3-acceptance.md` and
@@ -62,11 +64,14 @@ Rules for AI agents working in this repository.
   V3 alone did not enable Web writes; later V6 local dark + L2a did under
   separate local authorization (public cutover still OFF).
 - V4–V8 M1–M6 details remain dated delivery evidence. The current order is:
-  finish the final UI/contract; refresh full/focused suites; seal exact test and
-  real-flow artifacts; open the final runtime-bound release stamp/cutover;
-  start and verify connector liveness; execute complete browser E2E; then
-  re-seal docs and runtime identity. Authoritative status is `docs/README.md`
-  plus the active plan.
+  finish the final UI/contract; refresh full/focused suites and explicitly
+  migrate the live schema; seal the exact test-only preflight; open a bounded
+  **private candidate admission**; start and verify connector liveness; execute
+  complete candidate browser E2E and seal its real-flow facts; accept the exact
+  candidate; only then open the final runtime-bound release stamp/public
+  cutover, exercise rollback, and run a final public smoke. Authoritative status
+  is `docs/README.md` plus the active plan. A public cutover is never a
+  prerequisite for candidate evidence.
 - Hermes updates are operator-controlled and periodic/manual. The no-agent
   compatibility watcher may report drift but must never pull, merge, install,
   restart or enable gates. The upstream Hermes 40k full suite is not an Agent
@@ -93,13 +98,18 @@ Rules for AI agents working in this repository.
   supervised dispatch under the trading kill switch — that is not public cutover
   and not Plan-V6 full-UI acceptance. A fake Hermes adapter is for hermetic
   tests only, never a temporary public user path.
-- Migrations 006 through 015 have been applied to live `quantplatform` under
-  explicit authorization. Do not re-apply the obsolete `UNIQUE(task_id)`-only
-  006 or treat an old replay plan as current. Migration 015 narrows runtime
-  managed-session provisioning to exact columns and must fail closed on ACL
-  drift. Schema readiness and the constrained-role canary are not public write
-  authorization; every future migration still needs separate authorization and
-  evidence.
+- Migrations 006 through 015 were applied to live `quantplatform` under
+  explicit authorization. Migrations 016 through 024 form one ordered additive
+  release-candidate upgrade and must be applied only by the explicit migration
+  command after backup, isolated replay and current live inspection. Do not
+  re-apply the obsolete `UNIQUE(task_id)`-only 006 or treat an old replay plan
+  as current. Migration 015 narrows runtime managed-session provisioning to
+  exact columns and must fail closed on ACL drift. Migration 022 makes both
+  selected source/fork point and Hermes-canonical resolved parent mandatory;
+  023 separates the durable conversation root from the resolved Run tip; 024
+  records approval/stop outcome CAS and consumes the exact control outbox.
+  Schema readiness and the constrained-role canary are not public write
+  authorization.
 - Treat the local `~/.hermes/hermes-agent` checkout as a third owned dependency
   for v0.2 Durable Run work. Pin source/install/runtime identity and develop in a
   controlled branch/worktree; do not patch an unidentified live checkout in

@@ -798,6 +798,43 @@ class TestPortDurableAvailabilityGate:
         assert handle.run_id == "run_legacy"
         assert handle.created is expected_created
 
+    def test_http_adapter_preserves_conversation_root_and_resolved_run_tip(
+        self,
+    ) -> None:
+        """A compressed managed Run carries both stable and execution identity."""
+
+        class _CompressedSubmitTransport:
+            def get_json(self, path: str, *, headers=None):
+                assert path == "/v1/capabilities"
+                return {
+                    "object": "hermes.api_server.capabilities",
+                    "contract_version": 1,
+                    "durable": _full_grounded_durable(),
+                }
+
+            def post_json(self, path: str, body, *, headers=None):
+                assert path == "/v1/runs"
+                assert body["session_id"] == "web_root"
+                return 202, {
+                    "run_id": "run_compressed",
+                    "status": "queued",
+                    "conversation_session_id": "web_root",
+                    "resolved_session_id": "web_tip",
+                    "session_id": "web_tip",
+                }
+
+        adapter = OfficialHermesHttpAdapter(  # type: ignore[arg-type]
+            transport=_CompressedSubmitTransport()
+        )
+
+        handle = adapter.submit_or_get(
+            idempotency_key="compressed-key",
+            request_body={"input": "continue", "session_id": "web_root"},
+        )
+
+        assert handle.conversation_session_id == "web_root"
+        assert handle.resolved_session_id == "web_tip"
+
     def test_http_adapter_submit_structurally_gated_when_dormant(self) -> None:
         """Mutating entrypoints must not POST when durable is unavailable.
 

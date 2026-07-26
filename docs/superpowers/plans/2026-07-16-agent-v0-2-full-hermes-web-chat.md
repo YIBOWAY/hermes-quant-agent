@@ -1,11 +1,12 @@
 # Agent v0.2 — 完整 `/hermes` Web Chat 实施计划
 
-> **RELEASE-CANDIDATE ADDENDUM（2026-07-24，当前事实源）：** Agent v0.2 已进入最终
-> operator release window，但**尚未 DONE**。Platform code baseline `2b2ad32` 后已加入
-> sealed-artifact admission 与 authoritative external-session exact-message fork backend，
-> frontend fork UI 正在 release branch 收口；HQA code baseline `5370fd4`；Hermes
-> managed-session baseline `ccd6eb0` 后补 capabilities endpoint contract。三仓 final clean
-> runtime identity 必须在上述收口后重新读取，不能把这些 code anchor 当最终 stamp identity。
+> **FINAL-SOURCE ADDENDUM（2026-07-26，当前事实源）：** Agent v0.2 三仓 release branch
+> 已包含最终路径所需 source：managed Web session、exact-message fork UI、selected source /
+> fork point 与 Hermes-canonical resolved parent 双重 lineage、自然语言 paper intent 入口、
+> Gate 1 exact-source browser review、sealed candidate evidence 与 PostgreSQL-only
+> release/cutover authority、conversation-root/resolved-run-tip identity 与 durable
+> approval/stop outcome。任何 release evidence 必须绑定提交后的 clean 三仓 HEAD，不能把
+> 下方 dated code anchor 当最终 runtime identity。
 >
 > live PostgreSQL migrations 006–015 已应用；015 exact provisioning-column grants、
 > ACL-drift fail-closed 和 constrained runtime-role managed-session canary 已通过。真实论文路径
@@ -14,11 +15,11 @@
 > registry promotion 和 cleanup；它是论文的 **US ETF operational proxy**，不是全球国家样本
 > 完整复现。该 backend/CLI 事实不替代 `/hermes` browser vertical。
 >
-> **仍 pending：** final frontend fork UI/contract、final clean identities、sealed test/real-flow
-> artifacts、public release stamp/cutover、connector daemon/liveness，以及 `/hermes`
-> multi-turn、restart recovery、exact-message fork、Vertical A 和论文 Gate 1/2/3 browser E2E。
-> 所以本 addendum 不声明 `release_authorized=true`、`chat_write_ready=true`、public write 或
-> Agent v0.2 DONE。Hermes upstream 40k full suite 不是本计划 release gate；Hermes 使用
+> 016–024 是 live 006–015 baseline 之后的有序 additive migration ladder。migration、
+> connector、candidate、release stamp/cutover 与 E2E 结果都是当前 PostgreSQL/health/evidence
+> 中的动态事实，不写死在本计划。只有 exact runtime/schema/evidence-bound authority 同时成立
+> 才可声明 `release_authorized=true`、`chat_write_ready=true` 或 Agent v0.2 DONE。Hermes
+> upstream 40k full suite 不是本计划 release gate；Hermes 使用
 > focused contract suite，Platform/HQA 使用 full suites，并配合 frontend build/tests 与真实
 > 本地 E2E。下方所有 2026-07-19…23 的 `CURRENT/latest/NEXT` 均按日期视为历史切片记录，
 > 若与本 addendum 冲突，以本 addendum 为准。
@@ -1086,14 +1087,18 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 1. 完成 Platform external exact-message fork UI/contract；保持三个 release worktree clean。
 2. 读取 final Platform/HQA/Hermes HEAD，刷新 Platform/HQA full、Hermes focused、
    frontend test/typecheck/lint/build；不运行 Hermes 40k suite。
-3. 只读复核已完成的 live migration 015、schema fingerprint、exact grants 和 constrained-role
-   provisioning canary；不重复 apply。
-4. 封存可重算测试 artifacts 与真实 `/hermes` multi-turn/restart/fork/Vertical A/paper Gate
-   receipts，确认 zero orders、kill switch true、live trading false。
-5. 以 final clean identities + schema + evidence 打开 release stamp 和 public cutover。
-6. 启动 connector，验证 fresh heartbeat/liveness、空队列零 provider 和 rollback。
-7. 在 `/hermes` 完成完整 browser E2E 与独立 Code/Security/Workflow/Reality reviews。
-8. 只有全绿后才同步 DONE docs；docs commit 改变 runtime identity 时，关闭旧 stamp/cutover，
+3. 备份、隔离恢复演练并按顺序 apply live migrations 016–024；复核 schema fingerprint、
+   exact grants、constrained-role provisioning canary、root/tip 与 run-control outcome readiness。
+4. 封存可重算 test-only preflight，打开短时、exact-runtime/schema 绑定的私有 candidate
+   admission；public release 与 public cutover 仍保持关闭。
+5. 在 candidate admission 下启动 connector，验证 fresh heartbeat/liveness、空队列零
+   provider；在 `/hermes` 完成 multi-turn/restart/fork/Vertical A/paper Gate browser E2E。
+6. 校验五条 canonical flow 与 zero-orders snapshot，封存 final evidence 并接受同一 exact
+   candidate；任何失败都 revoke candidate，不能转去 public release 绕过。
+7. 只在 accepted candidate + final evidence 全部匹配后打开 release stamp 与 public cutover；
+   完成 public smoke、close cutover/stamp 回滚演练和最终恢复。
+8. 在冻结事实上完成独立 Code/Security/Workflow/Reality reviews。
+9. 只有全绿后才同步 DONE docs；docs commit 改变 runtime identity 时，关闭旧 stamp/cutover，
    重新 seal/open 并做 final smoke。legacy redirect 仍另开后续计划。
 
 这条顺序不再以“把九个 blocker 做完”为模糊任务，而是以最终用户路径、三入口 Interface、四份

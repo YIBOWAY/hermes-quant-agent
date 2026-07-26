@@ -404,10 +404,22 @@ def _submit(
         request_body=body,
     )
     run_id = _require_identifier(handle.run_id, "run_id")
+    conversation_session_id = _require_session_id(
+        handle.conversation_session_id or session_id
+    )
+    resolved_session_id = _require_session_id(
+        handle.resolved_session_id or session_id
+    )
     return {
         "ok": True,
         "run_id": run_id,
-        "session_id": session_id,
+        # ``session_id`` remains the exact Session bound to the Run for
+        # compatibility with the official Hermes response.  The other two
+        # fields make the stable conversation lineage explicit.
+        "session_id": resolved_session_id,
+        "requested_session_id": session_id,
+        "conversation_session_id": conversation_session_id,
+        "resolved_session_id": resolved_session_id,
         "created": bool(handle.created),
         "idempotency_key": idempotency_key,
     }

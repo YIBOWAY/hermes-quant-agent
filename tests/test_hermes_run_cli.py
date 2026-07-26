@@ -45,8 +45,16 @@ def _grounded_capabilities() -> dict[str, object]:
 
 
 class _FakeRunAdapter:
-    def __init__(self, *, created: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        created: bool = True,
+        conversation_session_id: str | None = None,
+        resolved_session_id: str | None = None,
+    ) -> None:
         self.created = created
+        self.conversation_session_id = conversation_session_id
+        self.resolved_session_id = resolved_session_id
         self.calls: list[tuple[str, object]] = []
 
     def capabilities(self) -> Mapping[str, Any]:
@@ -72,6 +80,14 @@ class _FakeRunAdapter:
             run_id="run_cli_1",
             created=self.created,
             idempotency_key=idempotency_key,
+            conversation_session_id=(
+                self.conversation_session_id
+                or str(request_body["session_id"])
+            ),
+            resolved_session_id=(
+                self.resolved_session_id
+                or str(request_body["session_id"])
+            ),
         )
 
     def get_status(self, run_id: str) -> RunStatusSnapshot:
@@ -239,6 +255,9 @@ def test_submit_passes_only_strict_native_session_body_and_replay_bit(
         "ok": True,
         "run_id": "run_cli_1",
         "session_id": "web_managed_1",
+        "requested_session_id": "web_managed_1",
+        "conversation_session_id": "web_managed_1",
+        "resolved_session_id": "web_managed_1",
         "created": False,
         "idempotency_key": "platform-command:cmd-2",
     }
@@ -251,6 +270,37 @@ def test_submit_passes_only_strict_native_session_body_and_replay_bit(
             },
         )
     ]
+
+
+def test_submit_receipt_keeps_root_and_resolved_tip_distinct(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _FakeRunAdapter(
+        created=False,
+        conversation_session_id="web_root",
+        resolved_session_id="web_tip",
+    )
+
+    code, response, _ = _run(
+        monkeypatch,
+        "submit",
+        _body(
+            idempotency_key="platform-command:compressed",
+            request_body={
+                "input": "continue",
+                "session_id": "web_root",
+                "metadata": {"command_id": "compressed"},
+            },
+        ),
+        adapter=adapter,
+    )
+
+    assert code == 0
+    assert response["requested_session_id"] == "web_root"
+    assert response["conversation_session_id"] == "web_root"
+    assert response["resolved_session_id"] == "web_tip"
+    # Compatibility field remains the actual Session bound to the Run.
+    assert response["session_id"] == "web_tip"
 
 
 @pytest.mark.parametrize(

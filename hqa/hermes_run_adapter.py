@@ -178,6 +178,15 @@ def _as_optional_int(value: Any) -> Optional[int]:
     return None
 
 
+def _is_public_identity(value: Any) -> bool:
+    return (
+        type(value) is str
+        and 1 <= len(value) <= 512
+        and value.isprintable()
+        and not any(char in value for char in ("\r", "\n", "\x00"))
+    )
+
+
 # ---------------------------------------------------------------------------
 # Value objects (the reviewed contract's shapes)
 # ---------------------------------------------------------------------------
@@ -188,6 +197,12 @@ class RunHandle:
     run_id: str
     created: bool
     idempotency_key: Optional[str] = None
+    # Stable identity of the whole compression lineage.  This remains the
+    # platform conversation identity even when Hermes rotates the live
+    # Session during context compression.
+    conversation_session_id: Optional[str] = None
+    # Exact Hermes Session tip to which this immutable Run is bound.
+    resolved_session_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -195,6 +210,8 @@ class RunStatusSnapshot:
     run_id: str
     status: str
     session_id: Optional[str] = None
+    conversation_session_id: Optional[str] = None
+    resolved_session_id: Optional[str] = None
     requested_policy: Optional[Mapping[str, Any]] = None
     actual_policy: Optional[Mapping[str, Any]] = None
     fallback_reason: Optional[str] = None
@@ -1074,7 +1091,39 @@ class OfficialHermesHttpAdapter(HermesRunPort):
             or payload.get("status") == "recovered"
         )
         created = not replayed
-        return RunHandle(run_id=run_id, created=created, idempotency_key=idempotency_key)
+        requested_session_id = request_body.get("session_id")
+        conversation_session_id = payload.get(
+            "conversation_session_id",
+            requested_session_id,
+        )
+        resolved_session_id = payload.get(
+            "resolved_session_id",
+            payload.get("session_id", requested_session_id),
+        )
+        if requested_session_id is not None and (
+            not _is_public_identity(conversation_session_id)
+            or not _is_public_identity(resolved_session_id)
+        ):
+            raise HermesRunError(
+                "run_identity_mismatch",
+                "Hermes Run submit returned invalid managed Session identity",
+                http_status=409,
+            )
+        return RunHandle(
+            run_id=run_id,
+            created=created,
+            idempotency_key=idempotency_key,
+            conversation_session_id=(
+                str(conversation_session_id)
+                if conversation_session_id is not None
+                else None
+            ),
+            resolved_session_id=(
+                str(resolved_session_id)
+                if resolved_session_id is not None
+                else None
+            ),
+        )
 
     def get_status(self, run_id: str) -> RunStatusSnapshot:
         payload = self._transport.get_json(f"/v1/runs/{run_id}")
@@ -1082,6 +1131,11 @@ class OfficialHermesHttpAdapter(HermesRunPort):
             run_id=str(payload.get("run_id", run_id)),
             status=str(payload.get("status")),
             session_id=payload.get("session_id"),
+            conversation_session_id=payload.get("conversation_session_id"),
+            resolved_session_id=payload.get(
+                "resolved_session_id",
+                payload.get("session_id"),
+            ),
             requested_policy=payload.get("requested_policy"),
             actual_policy=payload.get("actual_policy"),
             fallback_reason=payload.get("fallback_reason"),

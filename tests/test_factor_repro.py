@@ -143,13 +143,29 @@ def _gate1_authority(tmp_path):
 
 
 def test_gate1_authority_round_trip_verifies_confirmation_and_source(tmp_path) -> None:
-    gate_dir, _, manifest_digest, _ = _gate1_authority(tmp_path)
+    gate_dir, source_digest, manifest_digest, binding = _gate1_authority(tmp_path)
+    binding_record = json.loads(binding.read_text(encoding="utf-8"))
 
     fr.require_gate1_candidate_binding(
         gate_dir=gate_dir,
         candidate_id="factor-reviewed-1",
         manifest_digest=manifest_digest,
+        confirmation_id=binding_record["confirmation_id"],
+        source_digest=source_digest,
     )
+
+
+def test_gate1_exact_binding_rejects_a_different_confirmation(tmp_path) -> None:
+    gate_dir, source_digest, manifest_digest, _ = _gate1_authority(tmp_path)
+
+    with pytest.raises(ValueError, match="missing"):
+        fr.require_gate1_candidate_binding(
+            gate_dir=gate_dir,
+            candidate_id="factor-reviewed-1",
+            manifest_digest=manifest_digest,
+            confirmation_id="gate1-" + "0" * 32,
+            source_digest=source_digest,
+        )
 
 
 def test_gate1_rejects_forged_binding_without_confirmation(tmp_path) -> None:
@@ -325,6 +341,45 @@ def test_external_gate1_source_allows_parent_alias_but_not_final_symlink(tmp_pat
         )
 
 
+def test_candidate_approval_recovery_binds_exact_human_note(tmp_path) -> None:
+    candidates = tmp_path / "agent" / "candidates"
+    candidate = candidates / "factor-paper-1"
+    candidate.mkdir(parents=True)
+    source = candidate / "factor.py.candidate"
+    source.write_text("class Factor:\n    pass\n", encoding="utf-8")
+    note = "Reviewed exact candidate source."
+    (candidate / "approved.lock").write_bytes(
+        fr._canonical_bytes(
+            {
+                "schema_version": "1.0",
+                "candidate_id": "factor-paper-1",
+                "decision": "approve",
+                "manifest_digest": "a" * 64,
+                "note": note,
+                "reviewer": "manual",
+                "created_at": "2026-07-24T00:00:00Z",
+            }
+        )
+    )
+
+    digest = fr.require_exact_candidate_approval_lock(
+        candidates_root=candidates,
+        source_path=str(source),
+        candidate_id="factor-paper-1",
+        manifest_digest="a" * 64,
+        note=note,
+    )
+    assert digest == hashlib.sha256(note.encode("utf-8")).hexdigest()
+    with pytest.raises(ValueError, match="binding mismatch"):
+        fr.require_exact_candidate_approval_lock(
+            candidates_root=candidates,
+            source_path=str(source),
+            candidate_id="factor-paper-1",
+            manifest_digest="a" * 64,
+            note="Different note must not inherit the old approval.",
+        )
+
+
 def _gate3_receipt(tmp_path):
     worktree_root = tmp_path / "worktrees"
     promotion_root = tmp_path / "promotions"
@@ -450,6 +505,31 @@ def test_gate3_receipt_binds_candidate_digest_and_base_commit(tmp_path) -> None:
         Path(receipt["manifest"]).read_bytes()
     ).hexdigest()
     assert evidence["patch_sha256"] == payload["patch_sha256"]
+
+
+def test_gate3_receipt_loss_recovery_finds_one_exact_preparation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    receipt, payload = _gate3_receipt(tmp_path)
+    monkeypatch.setattr(
+        fr,
+        "require_final_backtest_receipt",
+        lambda **_kwargs: {"factor_id": "factor"},
+    )
+
+    recovered = fr.find_exact_gate3_receipt(
+        gate_dir=tmp_path / "gate",
+        experiment_output_dir=tmp_path / "experiments",
+        candidate_id="factor-reviewed-1",
+        manifest_digest="a" * 64,
+        final_backtest_receipt_id=payload["final_backtest_receipt_id"],
+        base_commit=payload["base_commit"],
+        promotion_root=tmp_path / "promotions",
+        worktree_root=tmp_path / "worktrees",
+    )
+
+    assert recovered == receipt
 
 
 def test_gate3_receipt_rejects_final_backtest_binding_drift(tmp_path) -> None:
