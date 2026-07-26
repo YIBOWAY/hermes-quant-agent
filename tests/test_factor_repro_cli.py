@@ -263,6 +263,172 @@ def test_propose_requires_and_persists_exact_source_gate_before_candidate(
     assert json.loads(bindings[0].read_text(encoding="utf-8"))["candidate_id"] == "factor-x-1"
 
 
+def test_propose_reuses_exact_browser_gate1_without_recreating_human_decision(
+    monkeypatch,
+    capsys,
+    tmp_path,
+) -> None:
+    source = tmp_path / "factor.py"
+    source.write_text("# browser-reviewed source\n", encoding="utf-8")
+    source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    gate_dir = tmp_path / "gate1"
+    monkeypatch.setattr(cli.config, "FACTOR_GATE1_DIR", gate_dir)
+    confirmation_id, _, staged_source = cli.factor_repro.prepare_gate1_confirmation(
+        goal="task:paper-research-1",
+        universe="SPY,QQQ,IWM",
+        source_file=str(source),
+        expected_source_digest=source_digest,
+        confirmation_note="private human note from Browser Gate 1",
+        gate_dir=gate_dir,
+    )
+    seen: dict[str, str] = {}
+
+    def propose(goal, staged, universe):
+        seen.update(goal=goal, staged=staged, universe=universe)
+        return (
+            0,
+            json.dumps(
+                {
+                    "candidate_id": "factor-browser-gate1",
+                    "status": "pending",
+                    "manifest_digest": "a" * 64,
+                    "source_sha256": source_digest,
+                }
+            ),
+        )
+
+    monkeypatch.setattr(cli.quant_cli, "run_propose_factor", propose)
+
+    rc = cli.main(
+        [
+            "propose",
+            "--gate1-confirmation-id",
+            confirmation_id,
+            "--task-ref",
+            "task:paper-research-1",
+            "--source-file",
+            str(source),
+            "--expected-source-digest",
+            source_digest,
+        ]
+    )
+
+    assert rc == 0
+    assert seen == {
+        "goal": "task:paper-research-1",
+        "staged": staged_source,
+        "universe": "SPY,QQQ,IWM",
+    }
+    assert f"gate1_confirmation_id={confirmation_id}" in capsys.readouterr().out
+    confirmations = list((gate_dir / "confirmations").glob("*.json"))
+    assert len(confirmations) == 1
+
+
+def test_propose_reuse_rejects_goal_or_note_substitution_before_platform(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_propose_factor",
+        lambda *_args, **_kwargs: pytest.fail(
+            "mixed Gate 1 authority must fail before Platform"
+        ),
+    )
+
+    rc = cli.main(
+        [
+            "propose",
+            "--gate1-confirmation-id",
+            "gate1-" + "a" * 32,
+            "--task-ref",
+            "task:paper-research-1",
+            "--goal",
+            "substituted hypothesis",
+            "--source-file",
+            "/tmp/factor.py",
+            "--expected-source-digest",
+            "b" * 64,
+        ]
+    )
+
+    assert rc == 2
+    assert "cannot be mixed" in capsys.readouterr().err
+
+
+def test_propose_reuse_requires_public_task_ref_before_platform(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_propose_factor",
+        lambda *_args, **_kwargs: pytest.fail(
+            "missing Task binding must fail before Platform"
+        ),
+    )
+
+    rc = cli.main(
+        [
+            "propose",
+            "--gate1-confirmation-id",
+            "gate1-" + "a" * 32,
+            "--source-file",
+            "/tmp/factor.py",
+            "--expected-source-digest",
+            "b" * 64,
+        ]
+    )
+
+    assert rc == 2
+    assert "requires --task-ref" in capsys.readouterr().err
+
+
+def test_propose_reuse_rejects_confirmation_from_another_task_before_platform(
+    monkeypatch,
+    capsys,
+    tmp_path,
+) -> None:
+    source = tmp_path / "factor.py"
+    source.write_text("# browser-reviewed source\n", encoding="utf-8")
+    source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    gate_dir = tmp_path / "gate1"
+    monkeypatch.setattr(cli.config, "FACTOR_GATE1_DIR", gate_dir)
+    confirmation_id, _, _ = cli.factor_repro.prepare_gate1_confirmation(
+        goal="task:paper-research-1",
+        universe="SPY,QQQ",
+        source_file=str(source),
+        expected_source_digest=source_digest,
+        confirmation_note="private human note from Browser Gate 1",
+        gate_dir=gate_dir,
+    )
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_propose_factor",
+        lambda *_args, **_kwargs: pytest.fail(
+            "cross-Task confirmation must fail before Platform"
+        ),
+    )
+
+    rc = cli.main(
+        [
+            "propose",
+            "--gate1-confirmation-id",
+            confirmation_id,
+            "--task-ref",
+            "task:paper-research-2",
+            "--source-file",
+            str(source),
+            "--expected-source-digest",
+            source_digest,
+        ]
+    )
+
+    assert rc == 2
+    assert "task binding mismatch" in capsys.readouterr().err
+    assert not (gate_dir / "bindings").exists()
+
+
 def test_propose_revalidates_gate1_after_platform_returns(
     monkeypatch,
     capsys,

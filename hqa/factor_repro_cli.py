@@ -213,7 +213,23 @@ def main(argv: Optional[list[str]] = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_propose = sub.add_parser("propose")
-    p_propose.add_argument("--goal", required=True)
+    p_propose.add_argument("--goal")
+    p_propose.add_argument(
+        "--gate1-confirmation-id",
+        dest="gate1_confirmation_id",
+        help=(
+            "Reuse one exact Browser-created Gate 1 confirmation; its goal, "
+            "universe, and staged source remain authoritative"
+        ),
+    )
+    p_propose.add_argument(
+        "--task-ref",
+        dest="task_ref",
+        help=(
+            "Public task:<id> from the same Browser Gate receipt; required "
+            "with --gate1-confirmation-id"
+        ),
+    )
     p_propose.add_argument(
         "--source-file",
         required=True,
@@ -228,11 +244,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     p_propose.add_argument(
         "--confirmation-note",
-        required=True,
         dest="confirmation_note",
         help="Non-empty human formula/translation review note (Gate 1)",
     )
-    p_propose.add_argument("--universe", default="SPY,QQQ")
+    p_propose.add_argument("--universe")
 
     sub.add_parser("list", help="List non-authoritative candidate evidence")
     p_detail = sub.add_parser("detail", help="Show one candidate from list output")
@@ -300,17 +315,69 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "propose":
+        reuse_confirmation = args.gate1_confirmation_id is not None
+        if reuse_confirmation and any(
+            value is not None
+            for value in (args.goal, args.confirmation_note, args.universe)
+        ):
+            print(
+                "ERROR: --gate1-confirmation-id cannot be mixed with "
+                "--goal, --confirmation-note, or --universe",
+                file=sys.stderr,
+            )
+            return 2
+        if reuse_confirmation and not args.task_ref:
+            print(
+                "ERROR: --gate1-confirmation-id requires --task-ref from the "
+                "same Browser Gate receipt",
+                file=sys.stderr,
+            )
+            return 2
+        if not reuse_confirmation and args.task_ref is not None:
+            print(
+                "ERROR: --task-ref requires --gate1-confirmation-id",
+                file=sys.stderr,
+            )
+            return 2
+        if not reuse_confirmation and (
+            not args.goal
+            or not args.confirmation_note
+            or not str(args.confirmation_note).strip()
+        ):
+            print(
+                "ERROR: fresh Gate 1 proposal requires --goal and "
+                "--confirmation-note",
+                file=sys.stderr,
+            )
+            return 2
         try:
-            confirmation_id, source_digest, staged_source = (
-                factor_repro.prepare_gate1_confirmation(
-                    goal=args.goal,
-                    universe=args.universe,
+            if reuse_confirmation:
+                (
+                    proposal_goal,
+                    proposal_universe,
+                    source_digest,
+                    staged_source,
+                ) = factor_repro.reuse_gate1_confirmation(
+                    gate_dir=config.FACTOR_GATE1_DIR,
+                    confirmation_id=args.gate1_confirmation_id,
+                    task_ref=args.task_ref,
                     source_file=args.source_file,
                     expected_source_digest=args.expected_source_digest,
-                    confirmation_note=args.confirmation_note,
-                    gate_dir=config.FACTOR_GATE1_DIR,
                 )
-            )
+                confirmation_id = args.gate1_confirmation_id
+            else:
+                proposal_goal = args.goal
+                proposal_universe = args.universe or "SPY,QQQ"
+                confirmation_id, source_digest, staged_source = (
+                    factor_repro.prepare_gate1_confirmation(
+                        goal=proposal_goal,
+                        universe=proposal_universe,
+                        source_file=args.source_file,
+                        expected_source_digest=args.expected_source_digest,
+                        confirmation_note=args.confirmation_note,
+                        gate_dir=config.FACTOR_GATE1_DIR,
+                    )
+                )
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
@@ -318,7 +385,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"gate1_source_digest={source_digest}")
         try:
             code, out = quant_cli.run_propose_factor(
-                args.goal, staged_source, args.universe
+                proposal_goal, staged_source, proposal_universe
             )
         except (OSError, subprocess.SubprocessError) as exc:
             partial = factor_repro.parse_json_payload(_exception_output(exc)) or {}

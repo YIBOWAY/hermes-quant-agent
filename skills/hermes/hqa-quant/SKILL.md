@@ -257,6 +257,25 @@ In particular:
 - `workspace_id` and `platform_session_id` come from the active ready
   `web_managed_session`; the HQA task binds them as
   `workspace:<workspace_id>` and `session:<platform_session_id>`.
+- After a browser Gate action, resolve only that exact parent Gate through the
+  fixed read-only continuation port:
+  `__HERMES_SCRIPTS_DIR__/hqa-quant-readonly.sh hermes paper-gate show --gate-id <exact-parent-gate-id> --workspace-id <exact-workspace-id> --platform-session-id <exact-platform-session-id>`.
+  The wrapper requires exactly those nine argv, validates all three selectors,
+  and encodes the strict
+  `{"gate_id":"...","platform_session_id":"...","workspace_id":"..."}`
+  JSON stdin internally. It loads only the database connection required for
+  this exact read from the fixed Platform backend runtime env, without sourcing
+  or evaluating that file, and always forces startup migration OFF.
+  The `gate_id` must come from the current workspace turn or its immediately
+  preceding exact receipt; the workspace and Platform Session selectors must
+  be the current managed-session values already bound into the HQA Task. Never
+  use `paper-gate list`, `register`, or another operation as a substitute.
+  Require `ok=true`, `operation=show`, the same
+  `gate_id`, `workspace_id`, `platform_session_id`, `task_ref`, and the expected
+  post-action status. Preserve only the returned post-action `task_version` and
+  `gate1_confirmation_id` needed by the next step. If either is missing, the
+  Session binding differs, or the status is `outcome_unknown`, stop and
+  reconcile the same action identity; never guess or silently refresh.
 - The first operation for each natural-language research body is
   `prepare-intent`. Send exactly
   `{workspace_id, kind, prompt}` on stdin, where `prompt` is the verbatim
@@ -352,9 +371,22 @@ The only legal sequence is:
    what calls the existing `paper_gate_cli confirm-formula`; never click or
    imply that action automatically.
 
-5. **Candidate proposal, then Gate 2.** After Gate 1 is confirmed, run the
-   existing exact-source `factor_repro_cli propose` path to create the bound
-   candidate. Show its exact source and manifest. Invoke `open-gate2` with
+5. **Candidate proposal, then Gate 2.** After Gate 1 is confirmed, use the
+   fixed `hermes paper-gate show` command above for that exact parent Gate and
+   preserve its `gate1_confirmation_id` plus post-action `task_version`; do not
+   ask the human to copy either value and do not recreate their confirmation
+   from a remembered note. Reuse that content-addressed decision with:
+   `factor_repro_cli propose --gate1-confirmation-id
+   <gate1_confirmation_id> --task-ref <task_ref>
+   --source-file <same-source-file>
+   --expected-source-digest <reviewed_source_sha256>`.
+   This mode derives the original durable `task_ref` goal, universe and staged
+   bytes from Gate 1 itself, requires the public `task_ref` from that same
+   projection, rejects a cross-Task confirmation plus `--goal`,
+   `--confirmation-note` and `--universe` substitution, and re-hashes the
+   supplied source before any Platform call. Show the resulting exact source
+   and manifest. Invoke
+   `open-gate2` with
    `operation_id, gate_id, parent_gate_id, workspace_id, platform_session_id,
    task_ref, expected_task_version, attempt_ref, command_id, hermes_run_id,
    hqa_gate_ref, reviewed_source_sha256, gate1_confirmation_id, candidate_id,
@@ -364,7 +396,9 @@ The only legal sequence is:
    the exact candidate/digest/status/note without a refetch.
 
 6. **Prepare continuation, collect Futu final evidence, then next-turn Gate 3
-   (Attempt 2).** Only after Gate 2 is `reviewed`, begin the exact
+   (Attempt 2).** Resolve that exact Gate 2 with the same fixed show command.
+   Only after it returns `reviewed` with the same confirmation ID and exact
+   post-action Task version, begin the exact
    final-research managed turn with `prepare-intent` using
    `{workspace_id, kind:"research_continue", prompt:<exact current user body>}`.
    Preserve that new `payload_ref`. Then run the approved candidate's one-shot
@@ -391,7 +425,9 @@ The only legal sequence is:
    `paper_gate_cli promote` to prepare the isolated review worktree. It never
    commits. Show the returned `promotion_id`, worktree, patch and manifest.
 
-8. **Human Git review and commit, then completion.** The human personally
+8. **Human Git review and commit, then completion.** Resolve the exact prepared
+   Gate 3 with the same fixed show command and preserve its post-action Task
+   version. The human personally
    reviews `git diff` and creates exactly one scoped commit in the named
    worktree. HQA must not type or run that commit for them. After they supply
    the exact 40-character commit, invoke `complete-after-human-commit` with
@@ -423,7 +459,8 @@ not be presented as the normal natural-language user journey.
 
 | Operation | Command |
 |---|---|
-| Propose factor (Scene-B Gate 1) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli propose --goal "<hypothesis>" --source-file <factor.py> --expected-source-digest <reviewed-source-sha256> --confirmation-note "<formula-and-translation-review>" --universe SPY,QQQ` |
+| Propose factor from an already confirmed Browser Gate 1 | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli propose --gate1-confirmation-id <gate1-id> --task-ref <task-ref> --source-file <factor.py> --expected-source-digest <reviewed-source-sha256>` |
+| Create a standalone low-level Gate 1 and propose (diagnostic only) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli propose --goal "<hypothesis>" --source-file <factor.py> --expected-source-digest <reviewed-source-sha256> --confirmation-note "<formula-and-translation-review>" --universe SPY,QQQ` |
 | List candidates (Gate 2 inspect) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli list` |
 | Detail one candidate | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli detail --candidate-id <id>` |
 | Approve translation (gate 2, human-only) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli approve --candidate-id <id> --expected-digest <sha256> --expected-status pending --note "<translation-review>"` |
@@ -433,10 +470,14 @@ not be presented as the normal natural-language user journey.
 | Review confirm | `cd __HQA_REPO_DIR__ && python3 -m hqa.review_cli confirm <id> --judgment "<call>" --basis "<why>"` |
 
 Notes on the write path:
-- `propose` is itself Gate 1: before any platform call it verifies the exact
-  non-symlink source bytes against the human-supplied SHA-256, requires a
-  non-empty confirmation note, stages content-addressed bytes, and writes a
-  durable confirmation plus candidate binding under `data/_runtime/factor-gate1`.
+- Standalone diagnostic `propose` can create Gate 1: before any Platform call
+  it verifies the exact non-symlink source bytes against the human-supplied
+  SHA-256, requires a non-empty confirmation note, stages content-addressed
+  bytes, and writes a durable confirmation plus candidate binding under
+  `data/_runtime/factor-gate1`. The normal integrated Browser flow instead
+  passes `--gate1-confirmation-id` and the same projection's `--task-ref`; it
+  re-attests and reuses the existing confirmation, rejects cross-Task reuse
+  before Platform proposal, and never manufactures a second human decision.
 - `list` is informational only and strips any platform approval command from its
   human-readable output. Run `detail --candidate-id <id>` to obtain one exact
   machine-JSON-backed review bundle. `propose` / `detail` print `candidate_id`,

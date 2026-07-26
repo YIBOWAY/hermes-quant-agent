@@ -612,9 +612,27 @@ def test_hermes_compatibility_wrapper_rejects_forwarded_arguments(tmp_path) -> N
 # --- D-25 read-only gate wrapper -------------------------------------------
 
 READONLY_SRC = REPO / "scripts" / "hermes" / "hqa-quant-readonly.sh"
+PAPER_GATE_SHOW_SRC = REPO / "scripts" / "hermes" / "hqa-paper-gate-show.py"
+_TEST_DATABASE_URL = "postgresql://unit:secret@127.0.0.1:5432/quantplatform"
+_EXACT_GATE_ARGS = [
+    "hermes",
+    "paper-gate",
+    "show",
+    "--gate-id",
+    "paper-gate-1",
+    "--workspace-id",
+    "ws-local-main",
+    "--platform-session-id",
+    "platform-session-1",
+]
 
 
-def _build_gate(tmp_path):
+def _build_gate(
+    tmp_path,
+    *,
+    runtime_env: str | None = None,
+    runtime_env_mode: int = 0o600,
+):
     """Materialise the gate wrapper against a stub platform CLI that echoes
     its argv, so tests can assert both the allow (argv construction) and the
     refuse (exit 2, no exec) paths without touching the real quant-system."""
@@ -625,8 +643,40 @@ def _build_gate(tmp_path):
     stub.write_text(
         "#!/bin/bash\nprintf 'ARGV'\nfor a in \"$@\"; do printf '|%s' \"$a\"; done\n"
         "printf '\\n'\n"
+        'if [ "${1:-}" = hermes ] && [ "${2:-}" = paper-gate ] '
+        '&& [ "${3:-}" = show ]; then\n'
+        "  printf 'DBENV|%s|%s|%s|%s|%s\\n' "
+        '"${QS_DATABASE_ENABLED-unset}" '
+        '"${QS_DATABASE_AUTO_MIGRATE-unset}" '
+        '"${QS_DATABASE_CONNECT_TIMEOUT_SECONDS-unset}" '
+        '"${QS_DATABASE_URL-unset}" '
+        '"${QS_DATABASE_SECRET_SENTINEL-unset}"\n'
+        "  input=''\n  IFS= read -r input || true\n"
+        '  [ -z "$input" ] || printf \'STDIN|%s\\n\' "$input"\n'
+        "fi\n"
     )
     stub.chmod(0o755)
+    env_file = platform / "data" / "_runtime" / "agent-v0.2-backend.env"
+    env_file.parent.mkdir(parents=True)
+    if runtime_env is None:
+        runtime_env = (
+            "QS_ENVIRONMENT=local\n"
+            "QS_DATABASE_ENABLED=true\n"
+            f'QS_DATABASE_URL="{_TEST_DATABASE_URL}"\n'
+            "QS_DATABASE_CONNECT_TIMEOUT_SECONDS=7\n"
+            "QS_DATABASE_AUTO_MIGRATE=false\n"
+            "QS_KILL_SWITCH=true\n"
+        )
+    env_file.write_text(runtime_env, encoding="utf-8")
+    env_file.chmod(runtime_env_mode)
+    launcher = tmp_path / "hqa-paper-gate-show.py"
+    launcher.write_text(
+        PAPER_GATE_SHOW_SRC.read_text(encoding="utf-8").replace(
+            "__HQA_PLATFORM_DIR__", str(platform)
+        ),
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
     body = READONLY_SRC.read_text().replace("__HQA_PLATFORM_DIR__", str(platform))
     gate = tmp_path / "hqa-quant-readonly.sh"
     gate.write_text(body)
@@ -634,13 +684,14 @@ def _build_gate(tmp_path):
     return gate
 
 
-def _run_gate(tmp_path, args):
+def _run_gate(tmp_path, args, *, env=None):
     gate = _build_gate(tmp_path)
     return subprocess.run(
         ["bash", str(gate), *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=env,
     )
 
 
@@ -669,6 +720,27 @@ def _run_gate(tmp_path, args):
             ["paper", "account-show", "--account", "main", "--format", "json"],
             "ARGV|paper|account-show|--account|main|--format|json",
         ),
+        (
+            [
+                "hermes",
+                "paper-gate",
+                "show",
+                "--gate-id",
+                "paper-gate-1",
+                "--workspace-id",
+                "ws-local-main",
+                "--platform-session-id",
+                "platform-session-1",
+            ],
+            (
+                "ARGV|hermes|paper-gate|show\n"
+                "DBENV|true|false|7|"
+                f"{_TEST_DATABASE_URL}|unset\n"
+                'STDIN|{"gate_id":"paper-gate-1",'
+                '"platform_session_id":"platform-session-1",'
+                '"workspace_id":"ws-local-main"}'
+            ),
+        ),
     ],
 )
 def test_gate_allows_readonly_commands(tmp_path, args, expected_argv):
@@ -676,6 +748,34 @@ def test_gate_allows_readonly_commands(tmp_path, args, expected_argv):
     assert result.returncode == 0, result.stderr
     # Argv is forwarded verbatim (trailing flags preserved) to the platform CLI.
     assert result.stdout.strip() == expected_argv
+
+
+def test_exact_gate_allows_context_colons_and_200_character_boundary(
+    tmp_path,
+) -> None:
+    workspace_id = "workspace:" + ("w" * 190)
+    platform_session_id = "session:" + ("s" * 192)
+    assert len(workspace_id) == 200
+    assert len(platform_session_id) == 200
+
+    result = _run_gate(
+        tmp_path,
+        [
+            "hermes",
+            "paper-gate",
+            "show",
+            "--gate-id",
+            "paper-gate-1",
+            "--workspace-id",
+            workspace_id,
+            "--platform-session-id",
+            platform_session_id,
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f'"workspace_id":"{workspace_id}"' in result.stdout
+    assert f'"platform_session_id":"{platform_session_id}"' in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -687,6 +787,83 @@ def test_gate_allows_readonly_commands(tmp_path, args, expected_argv):
         ["agent", "review", "--approve"],  # write: approval lock
         ["agent", "list-candidates"],  # generic evidence bypasses HQA Gate 1
         ["agent", "propose-factor"],  # write: creates candidate file
+        ["hermes", "paper-gate", "register"],  # write: opens a Gate
+        ["hermes", "paper-gate", "list"],  # list-and-substitute is forbidden
+        ["hermes", "paper-gate", "show"],  # missing exact Gate id
+        [
+            "hermes",
+            "paper-gate",
+            "show",
+            "--gate-id",
+            "paper-gate-1",
+        ],  # missing exact workspace/session selectors
+        [
+            "hermes",
+            "paper-gate",
+            "show",
+            "--gate-id",
+            "gate;touch-pwned",
+            "--workspace-id",
+            "ws-local-main",
+            "--platform-session-id",
+            "platform-session-1",
+        ],
+        [
+            "hermes",
+            "paper-gate",
+            "show",
+            "--gate-id",
+            "paper-gate-1",
+            "--workspace-id",
+            "workspace;touch-pwned",
+            "--platform-session-id",
+            "platform-session-1",
+        ],
+        [
+            "hermes",
+            "paper-gate",
+            "show",
+            "--gate-id",
+            "paper-gate-1",
+            "--platform-session-id",
+            "platform-session-1",
+            "--workspace-id",
+            "ws-local-main",
+        ],
+        [
+            "hermes",
+            "paper-gate",
+            "show",
+            "--gate-id",
+            "paper-gate-1",
+            "--workspace-id",
+            "ws-local-main",
+            "--platform-session-id",
+            "platform-session-1",
+            "extra",
+        ],
+        [
+            "hermes",
+            "paper-gate",
+            "show",
+            "--gate-id",
+            "paper-gate-1",
+            "--workspace-id",
+            "w" * 201,
+            "--platform-session-id",
+            "platform-session-1",
+        ],
+        [
+            "hermes",
+            "paper-gate",
+            "show",
+            "--gate-id",
+            "paper-gate-1",
+            "--workspace-id",
+            "ws-local-main",
+            "--platform-session-id",
+            "s" * 201,
+        ],
         ["options", "daily-scan"],  # write: scan snapshot (audit F4)
         ["options", "daily-scan", "--top", "20"],
         ["options", "buyside-screen"],  # write: scan side-effect
@@ -722,11 +899,131 @@ def test_gate_source_declares_readonly_allowlist():
         '"data prices"',
         '"factor list"',
         '"paper account-show"',
+        '"hermes paper-gate show"',
     ):
         assert entry in body
     assert '"options daily-scan"' not in body
     assert '"options buyside-screen"' not in body
     assert '"agent list-candidates"' not in body
+
+
+def _run_built_gate(gate: Path, *, env: dict[str, str] | None = None):
+    return subprocess.run(
+        ["bash", str(gate), *_EXACT_GATE_ARGS],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+
+
+def test_exact_gate_loader_scrubs_inherited_database_env_and_forces_rails(
+    tmp_path,
+) -> None:
+    gate = _build_gate(tmp_path)
+    inherited = dict(
+        os.environ,
+        QS_DATABASE_AUTO_MIGRATE="true",
+        QS_DATABASE_CONNECT_TIMEOUT_SECONDS="999",
+        QS_DATABASE_ENABLED="false",
+        QS_DATABASE_SECRET_SENTINEL="must-not-cross",
+        QS_DATABASE_URL="postgresql://attacker:wrong@127.0.0.1:1/wrong",
+    )
+
+    result = _run_built_gate(gate, env=inherited)
+
+    assert result.returncode == 0, result.stderr
+    assert f"DBENV|true|false|7|{_TEST_DATABASE_URL}|unset" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_error"),
+    [
+        ("missing", "runtime_env_missing"),
+        ("mode", "runtime_env_mode_must_be_600"),
+        ("symlink", "runtime_env_not_regular"),
+        ("malformed", "runtime_env_malformed"),
+        ("missing_url", "database_url_missing"),
+        ("auto_migrate", "database_auto_migrate_forbidden"),
+    ],
+)
+def test_exact_gate_loader_fails_closed_for_untrusted_runtime_env(
+    tmp_path,
+    mutation,
+    expected_error,
+) -> None:
+    gate = _build_gate(tmp_path)
+    env_file = tmp_path / "platform" / "data" / "_runtime" / "agent-v0.2-backend.env"
+    if mutation == "missing":
+        env_file.unlink()
+    elif mutation == "mode":
+        env_file.chmod(0o640)
+    elif mutation == "symlink":
+        victim = tmp_path / "runtime-env-victim"
+        victim.write_text(
+            f"QS_DATABASE_ENABLED=true\nQS_DATABASE_URL={_TEST_DATABASE_URL}\n",
+            encoding="utf-8",
+        )
+        victim.chmod(0o600)
+        env_file.unlink()
+        env_file.symlink_to(victim)
+    elif mutation == "malformed":
+        env_file.write_text(
+            "QS_DATABASE_ENABLED=true\nthis is not dotenv\n",
+            encoding="utf-8",
+        )
+    elif mutation == "missing_url":
+        env_file.write_text("QS_DATABASE_ENABLED=true\n", encoding="utf-8")
+    elif mutation == "auto_migrate":
+        env_file.write_text(
+            "QS_DATABASE_ENABLED=true\n"
+            f"QS_DATABASE_URL={_TEST_DATABASE_URL}\n"
+            "QS_DATABASE_AUTO_MIGRATE=true\n",
+            encoding="utf-8",
+        )
+    result = _run_built_gate(gate)
+
+    assert result.returncode == 78
+    assert f"paper_gate_env_error={expected_error}" in result.stderr
+    assert "ARGV" not in result.stdout
+    assert _TEST_DATABASE_URL not in result.stderr
+
+
+def test_exact_gate_loader_never_evaluates_runtime_shell_syntax(tmp_path) -> None:
+    sentinel = tmp_path / "shell-code-executed"
+    gate = _build_gate(
+        tmp_path,
+        runtime_env=(
+            "QS_DATABASE_ENABLED=true\n"
+            f'IGNORED_UNKNOWN_KEY="$(touch {sentinel})"\n'
+            f'QS_DATABASE_URL="$(touch {sentinel})"\n'
+            "QS_DATABASE_AUTO_MIGRATE=false\n"
+        ),
+    )
+
+    result = _run_built_gate(gate)
+
+    assert result.returncode == 78
+    assert "paper_gate_env_error=database_url_shell_syntax_forbidden" in result.stderr
+    assert not sentinel.exists()
+    assert "ARGV" not in result.stdout
+
+
+def test_install_deploys_private_exact_gate_env_launcher(tmp_path) -> None:
+    scripts_dest = _install(tmp_path)
+    launcher = scripts_dest / "hqa-paper-gate-show.py"
+
+    assert launcher.is_file()
+    assert not launcher.is_symlink()
+    assert launcher.stat().st_mode & 0o777 == 0o700
+    body = launcher.read_text(encoding="utf-8")
+    assert "__HQA_PLATFORM_DIR__" not in body
+    assert "source " not in body
+    assert "QS_DATABASE_AUTO_MIGRATE" in body
+    assert "agent-v0.2-backend.env" in body
+    assert "hqa-paper-gate-show.py" in (
+        scripts_dest / "hqa-quant-readonly.sh"
+    ).read_text(encoding="utf-8")
 
 
 # --- D-25 HQA skill card ----------------------------------------------------
@@ -747,6 +1044,7 @@ _READONLY_SUBCOMMANDS = (
     "data prices",
     "factor list",
     "paper account-show",
+    "hermes paper-gate show",
 )
 
 
@@ -913,10 +1211,7 @@ def test_skill_routes_natural_language_papers_through_two_attempt_coordinator(
     assert "old Platform `StartResearch` / `ContinueResearch` path" in source
     assert "`hqa-research-task`" in source
     assert "Never self-report those derived references in JSON." in source
-    assert (
-        "intent_expires_at, command_id, hermes_run_id, hqa_run_ref"
-        not in source
-    )
+    assert "intent_expires_at, command_id, hermes_run_id, hqa_run_ref" not in source
 
     scripts_dest = _install(tmp_path)
     wrapper = scripts_dest / "hqa-paper-research.sh"
@@ -930,8 +1225,8 @@ def test_skill_routes_natural_language_papers_through_two_attempt_coordinator(
     assert "__HERMES_SCRIPTS_DIR__" not in installed
     assert "**next managed Hermes turn**" in installed
     assert "`prepare-intent` is the sole exception" in installed
-    assert "kind:\"research_start\"" in installed
-    assert "kind:\"research_continue\"" in installed
+    assert 'kind:"research_start"' in installed
+    assert 'kind:"research_continue"' in installed
     assert "subject_run_attestation_ref" in installed
     assert "final_backtest_receipt_digest" in installed
 
@@ -1069,9 +1364,11 @@ def test_skill_card_readonly_templates_use_gate_wrapper():
         cmd = after.split("|")[0].replace("`", "").strip()
         assert cmd, f"empty gate subcommand in: {ln!r}"
         first_two = " ".join(cmd.split()[:2])
+        first_three = " ".join(cmd.split()[:3])
         first_one = cmd.split()[0]
         assert (
             cmd in _READONLY_SUBCOMMANDS
+            or first_three in _READONLY_SUBCOMMANDS
             or first_two in _READONLY_SUBCOMMANDS
             or first_one in _READONLY_SUBCOMMANDS
         ), f"gate template forwards a non-allowlisted subcommand: {cmd!r}"

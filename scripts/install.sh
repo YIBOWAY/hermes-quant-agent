@@ -246,11 +246,30 @@ for source in wrapper_sources:
     body = open(source, encoding="utf-8").read()
     body = body.replace("__HQA_REPO_DIR__", repo_dir)
     body = body.replace("__HQA_PLATFORM_DIR__", platform_dir)
+    body = body.replace("__HERMES_SCRIPTS_DIR__", installed_scripts_dir)
     if not body.startswith("#!/bin/bash\n"):
         raise SystemExit("wrapper lacks fixed bash shebang: " + source)
     body = "#!/bin/bash\n" + exports + "\n" + body[len("#!/bin/bash\n"):]
     if "__HQA_" in body or "__HERMES_" in body:
         raise SystemExit("unsubstituted wrapper placeholder: " + source)
+    destination = os.path.join(staging, "scripts", os.path.basename(source))
+    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+    try:
+        write_all(descriptor, body.encode("utf-8"))
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+launcher_sources = sorted(glob.glob(os.path.join(repo_dir, "scripts/hermes/hqa-*.py")))
+for source in launcher_sources:
+    body = open(source, encoding="utf-8").read()
+    body = body.replace("__HQA_REPO_DIR__", repo_dir)
+    body = body.replace("__HQA_PLATFORM_DIR__", platform_dir)
+    body = body.replace("__HERMES_SCRIPTS_DIR__", installed_scripts_dir)
+    if not body.startswith("#!/usr/bin/python3\n"):
+        raise SystemExit("launcher lacks fixed Python shebang: " + source)
+    if "__HQA_" in body or "__HERMES_" in body:
+        raise SystemExit("unsubstituted launcher placeholder: " + source)
     destination = os.path.join(staging, "scripts", os.path.basename(source))
     descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
     try:
@@ -603,6 +622,10 @@ finally:
 PY
 
 for source in "$REPO_DIR"/scripts/hermes/hqa-*.sh; do
+  [ -e "$source" ] || continue
+  echo "installed: $HERMES_ROOT/scripts/$(basename "$source")"
+done
+for source in "$REPO_DIR"/scripts/hermes/hqa-*.py; do
   [ -e "$source" ] || continue
   echo "installed: $HERMES_ROOT/scripts/$(basename "$source")"
 done

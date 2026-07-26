@@ -155,6 +155,99 @@ def test_gate1_authority_round_trip_verifies_confirmation_and_source(tmp_path) -
     )
 
 
+def test_reuse_gate1_confirmation_preserves_browser_authority(tmp_path) -> None:
+    gate_dir = tmp_path / "gate1"
+    source = tmp_path / "factor.py"
+    source.write_text("# exact browser-reviewed source\n", encoding="utf-8")
+    source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    confirmation_id, _, staged = fr.prepare_gate1_confirmation(
+        goal="task:paper-research-1",
+        universe="SPY,QQQ,IWM",
+        source_file=str(source),
+        expected_source_digest=source_digest,
+        confirmation_note="human reviewed the exact formula and bytes",
+        gate_dir=gate_dir,
+    )
+
+    goal, universe, observed, reused_staged = fr.reuse_gate1_confirmation(
+        gate_dir=gate_dir,
+        confirmation_id=confirmation_id,
+        task_ref="task:paper-research-1",
+        source_file=str(source),
+        expected_source_digest=source_digest,
+    )
+
+    assert goal == "task:paper-research-1"
+    assert universe == "SPY,QQQ,IWM"
+    assert observed == source_digest
+    assert reused_staged == staged
+
+
+def test_reuse_gate1_confirmation_rejects_another_public_task_before_source_read(
+    tmp_path,
+) -> None:
+    gate_dir = tmp_path / "gate1"
+    source = tmp_path / "factor.py"
+    source.write_text("# exact browser-reviewed source\n", encoding="utf-8")
+    source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    confirmation_id, _, _ = fr.prepare_gate1_confirmation(
+        goal="task:paper-research-1",
+        universe="SPY",
+        source_file=str(source),
+        expected_source_digest=source_digest,
+        confirmation_note="reviewed",
+        gate_dir=gate_dir,
+    )
+    source.unlink()
+
+    with pytest.raises(ValueError, match="task binding mismatch"):
+        fr.reuse_gate1_confirmation(
+            gate_dir=gate_dir,
+            confirmation_id=confirmation_id,
+            task_ref="task:paper-research-2",
+            source_file=str(source),
+            expected_source_digest=source_digest,
+        )
+
+
+def test_reuse_gate1_confirmation_requires_a_canonical_public_task_ref(
+    tmp_path,
+) -> None:
+    with pytest.raises(ValueError, match="invalid Gate 1 task reference"):
+        fr.reuse_gate1_confirmation(
+            gate_dir=tmp_path / "gate1",
+            confirmation_id="gate1-" + "a" * 32,
+            task_ref="paper-research-1",
+            source_file=str(tmp_path / "factor.py"),
+            expected_source_digest="b" * 64,
+        )
+
+
+def test_reuse_gate1_confirmation_rejects_substituted_source(tmp_path) -> None:
+    gate_dir = tmp_path / "gate1"
+    source = tmp_path / "factor.py"
+    source.write_text("# exact source\n", encoding="utf-8")
+    source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    confirmation_id, _, _ = fr.prepare_gate1_confirmation(
+        goal="task:paper-research-1",
+        universe="SPY",
+        source_file=str(source),
+        expected_source_digest=source_digest,
+        confirmation_note="reviewed",
+        gate_dir=gate_dir,
+    )
+    source.write_text("# substituted source\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="source digest mismatch"):
+        fr.reuse_gate1_confirmation(
+            gate_dir=gate_dir,
+            confirmation_id=confirmation_id,
+            task_ref="task:paper-research-1",
+            source_file=str(source),
+            expected_source_digest=source_digest,
+        )
+
+
 def test_gate1_exact_binding_rejects_a_different_confirmation(tmp_path) -> None:
     gate_dir, source_digest, manifest_digest, _ = _gate1_authority(tmp_path)
 

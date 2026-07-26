@@ -29,6 +29,7 @@ READONLY_ALLOWLIST=(
   "data prices"
   "factor list"
   "paper account-show"
+  "hermes paper-gate show"
 )
 
 refuse() {
@@ -38,6 +39,24 @@ refuse() {
 
 # Empty args → refuse (no bare-CLI passthrough).
 [ "$#" -ge 1 ] || refuse
+
+# Exact Gate continuation read. The wrapper validates all three selectors and
+# the fixed launcher encodes them into JSON stdin, so shell metacharacters can
+# never become either an argv extension or a second command. No other
+# paper-gate leaf is admitted.
+if [ "$#" -eq 9 ] \
+  && [ "$1" = "hermes" ] \
+  && [ "$2" = "paper-gate" ] \
+  && [ "$3" = "show" ] \
+  && [ "$4" = "--gate-id" ] \
+  && [[ "$5" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] \
+  && [ "$6" = "--workspace-id" ] \
+  && [[ "$7" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$ ]] \
+  && [ "$8" = "--platform-session-id" ] \
+  && [[ "$9" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$ ]]; then
+  SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  exec /usr/bin/python3 "$SCRIPT_DIR/hqa-paper-gate-show.py" "$5" "$7" "$9"
+fi
 
 one="$1"
 two=""

@@ -14,6 +14,7 @@ from typing import Optional
 _CANDIDATE_RE = re.compile(r"candidate_id=(\S+)")
 _CANDIDATE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _CONFIRMATION_ID_RE = re.compile(r"^gate1-[0-9a-f]{32}$")
+_TASK_REF_RE = re.compile(r"^task:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _METRIC_KEYS = ("sharpe", "total_return", "max_drawdown")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -240,7 +241,7 @@ def _read_canonical_json_record(path: Path, *, label: str) -> dict:
     return payload
 
 
-def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> None:
+def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> dict:
     confirmation_id = binding.get("confirmation_id")
     source_digest = binding.get("source_digest")
     if not isinstance(confirmation_id, str) or _CONFIRMATION_ID_RE.fullmatch(
@@ -318,6 +319,7 @@ def _verify_gate1_confirmation(*, gate_dir: Path, binding: dict) -> None:
             "Gate 1 staged source digest mismatch: "
             f"expected {source_digest}, got {observed_source_digest}"
         )
+    return confirmation
 
 
 def prepare_gate1_confirmation(
@@ -383,6 +385,60 @@ def prepare_gate1_confirmation(
             },
         )
     return confirmation_id, observed, str(stable_source)
+
+
+def reuse_gate1_confirmation(
+    *,
+    gate_dir: Path,
+    confirmation_id: str,
+    task_ref: str,
+    source_file: str,
+    expected_source_digest: str,
+) -> tuple[str, str, str, str]:
+    """Re-attest one Browser-created Gate 1 confirmation for proposal.
+
+    The confirmation remains the sole authority for its original goal,
+    universe, human note, and content-addressed staged source.  The caller must
+    also supply the public Task reference from the same Gate receipt so a
+    confirmation from another Task fails before any Platform proposal.
+    """
+
+    gate_dir = _canonical_authority_dir(gate_dir)
+    if _CONFIRMATION_ID_RE.fullmatch(confirmation_id) is None:
+        raise ValueError("invalid Gate 1 confirmation ID")
+    if type(task_ref) is not str or _TASK_REF_RE.fullmatch(task_ref) is None:
+        raise ValueError("invalid Gate 1 task reference")
+    if _HEX64.fullmatch(expected_source_digest) is None:
+        raise ValueError("expected-source-digest must be lowercase SHA-256")
+    confirmation = _verify_gate1_confirmation(
+        gate_dir=gate_dir,
+        binding={
+            "confirmation_id": confirmation_id,
+            "source_digest": expected_source_digest,
+        },
+    )
+    if confirmation.get("goal") != task_ref:
+        raise ValueError("Gate 1 confirmation task binding mismatch")
+    source = _read_external_gate1_source(Path(source_file))
+    observed = hashlib.sha256(source).hexdigest()
+    if observed != expected_source_digest:
+        raise ValueError(
+            "Gate 1 source digest mismatch: "
+            f"expected {expected_source_digest}, got {observed}"
+        )
+    goal = confirmation.get("goal")
+    universe = confirmation.get("universe")
+    staged_source = confirmation.get("staged_source")
+    if (
+        type(goal) is not str
+        or not goal.strip()
+        or type(universe) is not str
+        or not universe.strip()
+        or type(staged_source) is not str
+        or not staged_source
+    ):
+        raise ValueError("Gate 1 confirmation cannot authorize a proposal")
+    return goal, universe, expected_source_digest, staged_source
 
 
 def record_gate1_candidate_binding(
