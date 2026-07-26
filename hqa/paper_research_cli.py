@@ -44,7 +44,7 @@ from typing import Any, Optional, Protocol
 from uuid import UUID
 
 from hqa import config, factor_repro, quant_cli
-from hqa.intent_payload_crypto import MacOSKeychainCrypto
+from hqa.intent_payload_crypto import CryptoFailure, MacOSKeychainCrypto
 from hqa.intent_payloads import IntentPayloadError, IntentPayloadStore
 from hqa.workflow_authority import WorkflowAuthority, WorkflowAuthorityError
 from hqa.workflow_contract import (
@@ -99,6 +99,14 @@ _SAFE_PLATFORM_HERMES_ENV = frozenset(
         "QS_HERMES_GATEWAY_MAX_RESPONSE_BYTES",
         "QS_HERMES_GATEWAY_RUNTIME_ROOT",
         "QS_HERMES_GATEWAY_TIMEOUT_SECONDS",
+    }
+)
+_RETRYABLE_CRYPTO_FAILURES = frozenset(
+    {
+        "keychain_unavailable",
+        "crypto_helper_unavailable",
+        "crypto_helper_timeout",
+        "crypto_helper_failed",
     }
 )
 _OPERATIONS = frozenset(
@@ -3090,18 +3098,19 @@ def main(
             }
         )
         return 2
-    port = registry if registry is not None else SubprocessPaperGateRegistry()
-    intent_store = payload_store if payload_store is not None else _payload_store()
     try:
+        request = _read_request(
+            maximum=(
+                _PREPARE_STDIN_LIMIT
+                if operation == "prepare-intent"
+                else _STDIN_LIMIT
+            )
+        )
+        port = registry if registry is not None else SubprocessPaperGateRegistry()
+        intent_store = payload_store if payload_store is not None else _payload_store()
         result = _execute(
             operation,
-            _read_request(
-                maximum=(
-                    _PREPARE_STDIN_LIMIT
-                    if operation == "prepare-intent"
-                    else _STDIN_LIMIT
-                )
-            ),
+            request,
             authority_factory=authority_factory,
             registry=port,
             promotion_status_reader=promotion_status_reader,
@@ -3132,6 +3141,10 @@ def main(
     except _OperationError as exc:
         code = exc.code
         retryable = exc.retryable
+        exit_code = 1 if retryable else 2
+    except CryptoFailure as exc:
+        code = exc.code
+        retryable = exc.code in _RETRYABLE_CRYPTO_FAILURES
         exit_code = 1 if retryable else 2
     except OSError:
         code = "paper_research_unavailable"

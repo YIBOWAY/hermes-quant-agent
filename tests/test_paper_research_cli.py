@@ -1536,6 +1536,11 @@ def test_strict_request_rejects_duplicate_keys_and_nonfinite_numbers(
 ) -> None:
     authority = _authority(tmp_path)
     monkeypatch.setattr(
+        paper_research_cli,
+        "_payload_store",
+        lambda: pytest.fail("invalid JSON must be rejected before crypto setup"),
+    )
+    monkeypatch.setattr(
         "sys.stdin",
         io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8"),
     )
@@ -1551,6 +1556,49 @@ def test_strict_request_rejects_duplicate_keys_and_nonfinite_numbers(
         json.loads(capsys.readouterr().out)["error"]["code"]
         == "paper_research_invalid_request"
     )
+    assert not authority.root.exists()
+
+
+@pytest.mark.parametrize(
+    ("failure_code", "expected_status", "retryable"),
+    (
+        ("crypto_helper_timeout", 1, True),
+        ("crypto_helper_insecure", 2, False),
+    ),
+)
+def test_crypto_setup_failure_is_controlled_and_classified(
+    failure_code,
+    expected_status,
+    retryable,
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    authority = _authority(tmp_path)
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.TextIOWrapper(io.BytesIO(b"{}"), encoding="utf-8"),
+    )
+
+    def unavailable_store():
+        raise paper_research_cli.CryptoFailure(failure_code, "private detail")
+
+    monkeypatch.setattr(paper_research_cli, "_payload_store", unavailable_store)
+
+    assert (
+        paper_research_cli.main(
+            ["start-plan"],
+            authority_factory=lambda: authority,
+            registry=_Registry(),
+        )
+        == expected_status
+    )
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error == {
+        "code": failure_code,
+        "message": "paper research operation did not advance exactly",
+        "retryable": retryable,
+    }
     assert not authority.root.exists()
 
 
@@ -1593,6 +1641,7 @@ def test_runtime_selector_substitution_and_missing_env_fail_closed(
             ["start-plan"],
             authority_factory=lambda: authority,
             registry=registry,
+            payload_store=_PayloadStore(),
         )
         == 2
     )
@@ -1616,6 +1665,7 @@ def test_runtime_selector_substitution_and_missing_env_fail_closed(
             ["start-plan"],
             authority_factory=lambda: authority,
             registry=registry,
+            payload_store=_PayloadStore(),
         )
         == 2
     )

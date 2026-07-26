@@ -1208,6 +1208,12 @@ def _parse_process_started_at(value: str) -> str:
 
 def _observe_process(pid: int) -> tuple[bool, Tuple[str, ...], Optional[str]]:
     environment = {"LC_ALL": "C", "LANG": "C"}
+    # ``ps lstart`` renders in the process environment's timezone.  Preserve
+    # an explicit operator/test TZ so the rendered wall clock and the parser's
+    # local timezone cannot differ (for example UTC in the sealed test runner
+    # versus the host's Asia/Shanghai default).
+    if "TZ" in os.environ:
+        environment["TZ"] = os.environ["TZ"]
     try:
         output = subprocess.run(
             [
