@@ -22,3 +22,8 @@ data/_runtime/*
 # never publish local bearer tokens, ports, process IDs, or server instances.
 .superpowers/brainstorm/.last-*
 .superpowers/brainstorm/*/state/
+
+# Local tool caches and scratch dirs (never publish).
+.codegraph/
+.tmp/
+.tmp-*/

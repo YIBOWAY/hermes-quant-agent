@@ -3,8 +3,18 @@
 这份文件只回答三个问题：**现在按哪份计划做、实际做到哪里、其他文档该怎么读**。
 长期方向、历史实现细节和特定日期审计分别留在 roadmap、plan 和 audit 中。
 
-> 事实快照：2026-07-23。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
+> 事实快照：2026-07-23（本分支 `codex/full-9h`）。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
 > 必须重新检查 git、进程、HTTP smoke 和测试。
+
+> **2026-07-26 指针**：Agent v0.2 final-source candidate 的后续交付（2026-07-24…26）在
+> `codex/agent-v0-2-release` 分支继续（本分支 tip 是其祖先；HQA `a5589ba` + Platform
+> `e19087e` 均已推送 GitHub）。内容：016–026 additive migration ladder（025 current paper
+> epoch + candidate/release fencing、026 sealed research claim/start/continue lineage 及
+> v1/v2 completion）、`hqa/paper_research_cli` 论文研究入口、task-bound paper gate
+> continuation、release8 全量测试证据封存（platform 2439p / hqa 1895p / hermes-focused
+> 245p / frontend 401p；`kill_switch=true`、`live_trading_enabled=false`、zero orders）。
+> **Agent v0.2 当前权威状态以该分支的 `docs/README.md`（事实快照 2026-07-26）为准**；
+> 本文件其余内容保持 2026-07-23 快照，不再回填。
 
 ## 当前执行入口
 
