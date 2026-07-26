@@ -11,6 +11,21 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 
 
+def _codesign_identity(helper: Path) -> tuple[str, str]:
+    inspected = subprocess.run(
+        ["/usr/bin/codesign", "-d", "--verbose=4", str(helper)],
+        text=True,
+        capture_output=True,
+        timeout=5,
+    )
+    assert inspected.returncode == 0, inspected.stdout + inspected.stderr
+    identifier = re.search(r"^Identifier=(.+)$", inspected.stderr, re.MULTILINE)
+    cdhash = re.search(r"^CDHash=(.+)$", inspected.stderr, re.MULTILINE)
+    assert identifier is not None, inspected.stderr
+    assert cdhash is not None, inspected.stderr
+    return identifier.group(1), cdhash.group(1)
+
+
 def _install(tmp_path):
     fake_home = tmp_path / "home"
     fake_home.mkdir(mode=0o700)
@@ -377,6 +392,20 @@ def test_install_builds_private_native_intent_crypto_helper(tmp_path) -> None:
     assert not helper.is_symlink()
     assert helper.stat().st_mode & 0o777 == 0o700
     assert helper.parent.stat().st_mode & 0o777 == 0o700
+    first_identity = _codesign_identity(helper)
+    assert first_identity[0] == "hqa-intent-payload-crypto"
+
+    repeated = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(os.environ, HOME=str(fake_home), HERMES_HOME=str(hermes_home)),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=60,
+    )
+
+    assert repeated.returncode == 0, repeated.stdout
+    assert _codesign_identity(helper) == first_identity
 
 
 def test_wrappers_pass_hermes_escape_check(tmp_path):

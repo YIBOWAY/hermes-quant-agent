@@ -120,27 +120,51 @@ PY
 
 SWIFTC="$(/usr/bin/xcrun --find swiftc)"
 SDK="$(/usr/bin/xcrun --show-sdk-path)"
-TEMPORARY="$(/usr/bin/mktemp "$PARENT/.hqa-intent-payload-crypto.XXXXXX")"
+TEMPORARY_DIRECTORY="$(
+  /usr/bin/mktemp -d "$PARENT/.hqa-intent-payload-crypto-build.XXXXXX"
+)"
+TEMPORARY="$TEMPORARY_DIRECTORY/hqa-intent-payload-crypto"
 cleanup() {
   if [ -n "${TEMPORARY:-}" ]; then
     /bin/rm -f -- "$TEMPORARY"
   fi
+  if [ -n "${TEMPORARY_DIRECTORY:-}" ]; then
+    /bin/rmdir -- "$TEMPORARY_DIRECTORY" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 
-"$SWIFTC" -sdk "$SDK" -O -whole-module-optimization -o "$TEMPORARY" "$SOURCE"
+"$SWIFTC" \
+  -sdk "$SDK" \
+  -O \
+  -whole-module-optimization \
+  -o "$TEMPORARY" \
+  "$SOURCE"
 /bin/chmod 700 "$TEMPORARY"
-/usr/bin/python3 - "$TEMPORARY" "$DESTINATION" <<'PY'
+/usr/bin/codesign \
+  --force \
+  --sign - \
+  --identifier hqa-intent-payload-crypto \
+  --timestamp=none \
+  "$TEMPORARY"
+/usr/bin/codesign --verify --strict "$TEMPORARY"
+/usr/bin/python3 - "$TEMPORARY_DIRECTORY" "$TEMPORARY" "$DESTINATION" <<'PY'
 import os
 import stat
 import sys
 
 
-temporary = os.path.abspath(sys.argv[1])
-destination = os.path.abspath(sys.argv[2])
+temporary_directory = os.path.abspath(sys.argv[1])
+temporary = os.path.abspath(sys.argv[2])
+destination = os.path.abspath(sys.argv[3])
 parent = os.path.dirname(destination)
-if os.path.dirname(temporary) != parent:
-    raise SystemExit("temporary helper must share destination parent")
+if os.path.dirname(temporary_directory) != parent:
+    raise SystemExit("temporary directory must share destination parent")
+if (
+    os.path.dirname(temporary) != temporary_directory
+    or os.path.basename(temporary) != "hqa-intent-payload-crypto"
+):
+    raise SystemExit("temporary helper must have the stable private build path")
 
 flags = os.O_RDONLY | os.O_DIRECTORY
 flags |= getattr(os, "O_CLOEXEC", 0)
@@ -172,9 +196,26 @@ try:
         or stat.S_IMODE(parent_metadata.st_mode) != 0o700
     ):
         raise SystemExit("destination parent must remain private")
+    temporary_directory_name = os.path.basename(temporary_directory)
+    temporary_directory_fd = os.open(
+        temporary_directory_name,
+        flags,
+        dir_fd=parent_fd,
+    )
+    temporary_directory_metadata = os.fstat(temporary_directory_fd)
+    if (
+        not stat.S_ISDIR(temporary_directory_metadata.st_mode)
+        or temporary_directory_metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(temporary_directory_metadata.st_mode) != 0o700
+    ):
+        raise SystemExit("temporary build directory is not private")
     temp_name = os.path.basename(temporary)
     destination_name = os.path.basename(destination)
-    temp = os.stat(temp_name, dir_fd=parent_fd, follow_symlinks=False)
+    temp = os.stat(
+        temp_name,
+        dir_fd=temporary_directory_fd,
+        follow_symlinks=False,
+    )
     if (
         not stat.S_ISREG(temp.st_mode)
         or temp.st_uid != os.geteuid()
@@ -200,13 +241,17 @@ try:
     os.replace(
         temp_name,
         destination_name,
-        src_dir_fd=parent_fd,
+        src_dir_fd=temporary_directory_fd,
         dst_dir_fd=parent_fd,
     )
     os.fsync(parent_fd)
 finally:
+    if "temporary_directory_fd" in locals():
+        os.close(temporary_directory_fd)
     os.close(parent_fd)
 PY
 TEMPORARY=""
+/bin/rmdir -- "$TEMPORARY_DIRECTORY"
+TEMPORARY_DIRECTORY=""
 
 echo "built: $DESTINATION"

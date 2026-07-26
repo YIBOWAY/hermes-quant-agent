@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -18,6 +19,21 @@ def _build(destination: Path) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         timeout=60,
     )
+
+
+def _codesign_identity(helper: Path) -> tuple[str, str]:
+    inspected = subprocess.run(
+        ["/usr/bin/codesign", "-d", "--verbose=4", str(helper)],
+        text=True,
+        capture_output=True,
+        timeout=5,
+    )
+    assert inspected.returncode == 0, inspected.stdout + inspected.stderr
+    identifier = re.search(r"^Identifier=(.+)$", inspected.stderr, re.MULTILINE)
+    cdhash = re.search(r"^CDHash=(.+)$", inspected.stderr, re.MULTILINE)
+    assert identifier is not None, inspected.stderr
+    assert cdhash is not None, inspected.stderr
+    return identifier.group(1), cdhash.group(1)
 
 
 def test_build_produces_a_private_physical_swift_helper(tmp_path: Path) -> None:
@@ -43,6 +59,24 @@ def test_build_produces_a_private_physical_swift_helper(tmp_path: Path) -> None:
     assert no_protocol.returncode == 64
     assert no_protocol.stdout == ""
     assert no_protocol.stderr == ""
+
+
+def test_build_uses_stable_codesign_identity_across_random_staging_names(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "first" / "hqa-intent-payload-crypto"
+    second = tmp_path / "second" / "hqa-intent-payload-crypto"
+
+    first_build = _build(first)
+    second_build = _build(second)
+
+    assert first_build.returncode == 0, first_build.stdout + first_build.stderr
+    assert second_build.returncode == 0, second_build.stdout + second_build.stderr
+    first_identity = _codesign_identity(first)
+    second_identity = _codesign_identity(second)
+    assert first_identity[0] == "hqa-intent-payload-crypto"
+    assert second_identity[0] == "hqa-intent-payload-crypto"
+    assert first_identity == second_identity
 
 
 def test_build_refuses_symlinked_destination_ancestor_without_touching_target(
