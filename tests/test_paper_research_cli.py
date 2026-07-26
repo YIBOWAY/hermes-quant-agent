@@ -10,6 +10,7 @@ import pytest
 from hqa import paper_research_cli
 from hqa.intent_payload_crypto import DeterministicCryptoFake
 from hqa.intent_payloads import IntentPayloadStore
+from hqa.research_claim import build_research_claim, research_claim_digest
 from hqa.workflow_authority import WorkflowAuthority
 from hqa.workflow_contract import (
     BindCandidateManifest,
@@ -44,6 +45,24 @@ FINAL_SUBJECT_COMMAND_ID = "20000000-0000-4000-8000-000000000002"
 PLAN_SUBJECT_RUN_ID = "hermes-plan-subject-run"
 FINAL_SUBJECT_RUN_ID = "hermes-final-subject-run"
 FINAL_OUTPUT_DIGEST = "f" * 64
+PAPER_TITLE = (
+    "Short-Term Reversals and Longer-Term Momentum Around the World: "
+    "Theory and Evidence"
+)
+ORDERED_UNIVERSE = [
+    "SPY",
+    "QQQ",
+    "IWM",
+    "DIA",
+    "XLK",
+    "XLF",
+    "XLV",
+    "XLY",
+    "XLP",
+    "XLE",
+]
+RESEARCH_CLAIM = build_research_claim(PAPER_TITLE, ORDERED_UNIVERSE)
+RESEARCH_CLAIM_DIGEST = research_claim_digest(RESEARCH_CLAIM)
 
 
 def _final_backtest_evidence(
@@ -66,11 +85,23 @@ def _final_backtest_evidence(
 class _PayloadStore:
     def __init__(self) -> None:
         self.records: dict[str, dict] = {}
+        self.envelopes: dict[str, dict] = {}
         self.bind_calls: list[tuple[str, str]] = []
         self.put_calls: list[dict] = []
 
-    def add(self, payload_ref: str, kind: str) -> None:
-        self.records[payload_ref] = {
+    def add(
+        self,
+        payload_ref: str,
+        kind: str,
+        *,
+        research_claim: dict | None = None,
+        prompt: str = "PRIVATE-test-paper-body",
+    ) -> None:
+        provider_policy = paper_research_cli._managed_session_policy(
+            platform_session_id=PLATFORM_SESSION_ID,
+            hermes_session_id=HERMES_SESSION_ID,
+        )
+        record = {
             "schema_version": "2.0",
             "payload_ref": payload_ref,
             "payload_digest": payload_ref.removeprefix("payload:sha256:"),
@@ -79,18 +110,33 @@ class _PayloadStore:
             "workspace_id": f"workspace:{WORKSPACE_ID}",
             "session_id": f"session:{PLATFORM_SESSION_ID}",
             "client_intent_id": f"intent-{len(self.records) + 1}",
-            "provider_policy_digest": (
-                paper_research_cli._managed_session_policy_digest(
-                    platform_session_id=PLATFORM_SESSION_ID,
-                    hermes_session_id=HERMES_SESSION_ID,
-                )
-            ),
+            "provider_policy_digest": paper_research_cli.hashlib.sha256(
+                paper_research_cli._canonical_bytes(provider_policy)
+            ).hexdigest(),
             "created_at": CREATED_AT,
             "expires_at": EXPIRES,
             "ttl_days": 10,
             "status": "active",
             "consumer_ref": None,
         }
+        envelope = {
+            "schema_version": "2.0",
+            "kind": kind,
+            "owner_id": "owner-test",
+            "workspace_id": f"workspace:{WORKSPACE_ID}",
+            "session_id": f"session:{PLATFORM_SESSION_ID}",
+            "client_intent_id": record["client_intent_id"],
+            "provider_policy": provider_policy,
+            "prompt": prompt,
+            "ttl_days": 10,
+            "provider_policy_digest": record["provider_policy_digest"],
+            "created_at": CREATED_AT,
+            "expires_at": EXPIRES,
+        }
+        if research_claim is not None:
+            envelope["research_claim"] = dict(research_claim)
+        self.records[payload_ref] = record
+        self.envelopes[payload_ref] = envelope
 
     def put(self, request):
         self.put_calls.append(dict(request))
@@ -141,6 +187,13 @@ class _PayloadStore:
             "consumer_ref": None,
         }
         self.records[payload_ref] = record
+        envelope = {
+            **request,
+            "provider_policy_digest": provider_policy_digest,
+            "created_at": created_at,
+            "expires_at": expires_at,
+        }
+        self.envelopes[payload_ref] = envelope
         return dict(record)
 
     def status(
@@ -173,6 +226,22 @@ class _PayloadStore:
         self.bind_calls.append((payload_ref, consumer_ref))
         return dict(record)
 
+    def resolve(
+        self,
+        payload_ref,
+        *,
+        owner_id,
+        workspace_id,
+        session_id,
+        consumer_ref=None,
+    ):
+        record = self.records[payload_ref]
+        assert record["owner_id"] == owner_id
+        assert record["workspace_id"] == workspace_id
+        assert record["session_id"] == session_id
+        assert record["consumer_ref"] == consumer_ref
+        return dict(self.envelopes[payload_ref])
+
 
 class _Registry:
     def __init__(self) -> None:
@@ -182,6 +251,7 @@ class _Registry:
         self.attest_calls: list[dict] = []
         self.attestation_mutator = None
         self.attestation_post_mutator = None
+        self.completion_mutator = None
 
     def attest(self, document):
         request = dict(document)
@@ -274,19 +344,31 @@ class _Registry:
         payload = dict(document)
         self.completion_calls.append(payload)
         completion = {
+            field: payload["completion_evidence"][field]
+            for field in (
+                set(payload["completion_evidence"])
+                & paper_research_cli._PLATFORM_COMPLETION_FIELDS
+            )
+        }
+        completion.update({
             "completion_evidence": payload["completion_evidence"],
+            "created_at": "2026-07-24T00:00:00.000000Z",
             "gate_id": payload["gate_id"],
             "hqa_completion_receipt_digest": payload["hqa_completion_receipt_digest"],
             "hqa_completion_receipt_ref": payload["hqa_completion_receipt_ref"],
             "reviewed_commit": payload["completion_evidence"]["reviewed_commit"],
             "status": "completed",
             "workspace_id": payload["workspace_id"],
-        }
+        })
+        assert set(completion) == paper_research_cli._PLATFORM_COMPLETION_FIELDS
         gate = self.gates[payload["gate_id"]]
         previous = gate.get("completion")
         if previous is not None:
             assert previous == completion
-            return dict(completion)
+            result = dict(completion)
+            if self.completion_mutator is not None:
+                result = self.completion_mutator(result)
+            return result
         gate.update(
             completion=dict(completion),
             expected_status="completed",
@@ -296,7 +378,10 @@ class _Registry:
             reviewed_commit=payload["completion_evidence"]["reviewed_commit"],
             status="completed",
         )
-        return dict(completion)
+        result = dict(completion)
+        if self.completion_mutator is not None:
+            result = self.completion_mutator(result)
+        return result
 
 
 def _authority(tmp_path: Path) -> WorkflowAuthority:
@@ -508,6 +593,121 @@ def test_prepare_intent_real_store_is_encrypted_metadata_only_and_idempotent(
     for path in payload_root.rglob("*"):
         if path.is_file():
             assert plaintext not in path.read_bytes(), path
+
+
+def test_claimed_research_start_is_encrypted_and_exact_variants_fail_closed(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    authority = _authority(tmp_path)
+    registry = _Registry()
+    payload_root = tmp_path / "claimed-intent-payloads"
+    payload_store = IntentPayloadStore(
+        payload_root,
+        crypto=DeterministicCryptoFake(
+            key=b"paper exact research claim binding".ljust(32, b"!")
+        ),
+    )
+    private_prompt = "PRIVATE exact paper reproduction request"
+    prepare_code, prepared = _call(
+        monkeypatch,
+        capsys,
+        operation="prepare-intent",
+        request={
+            "workspace_id": WORKSPACE_ID,
+            "kind": "research_start",
+            "prompt": private_prompt,
+            "paper_title": PAPER_TITLE,
+            "universe": ORDERED_UNIVERSE,
+        },
+        authority=authority,
+        registry=registry,
+        payload_store=payload_store,
+    )
+
+    assert prepare_code == 0
+    assert prepared["research_claim_digest"] == RESEARCH_CLAIM_DIGEST
+    public_prepare = json.dumps(prepared, ensure_ascii=False)
+    assert private_prompt not in public_prepare
+    assert PAPER_TITLE not in public_prepare
+    assert ",".join(ORDERED_UNIVERSE) not in public_prepare
+    resolved = payload_store.resolve(
+        prepared["payload_ref"],
+        owner_id="owner-test",
+        workspace_id=f"workspace:{WORKSPACE_ID}",
+        session_id=f"session:{PLATFORM_SESSION_ID}",
+    )
+    assert resolved["prompt"] == private_prompt
+    assert resolved["research_claim"] == RESEARCH_CLAIM
+    private_needles = [
+        private_prompt.encode(),
+        PAPER_TITLE.encode(),
+        json.dumps(ORDERED_UNIVERSE, separators=(",", ":")).encode(),
+    ]
+    for path in payload_root.rglob("*"):
+        if path.is_file():
+            raw = path.read_bytes()
+            assert all(needle not in raw for needle in private_needles), path
+
+    variants = [
+        build_research_claim(PAPER_TITLE + "!", ORDERED_UNIVERSE),
+        build_research_claim(
+            PAPER_TITLE,
+            [ORDERED_UNIVERSE[1], ORDERED_UNIVERSE[0], *ORDERED_UNIVERSE[2:]],
+        ),
+        build_research_claim(PAPER_TITLE, ORDERED_UNIVERSE[:-1]),
+        build_research_claim(PAPER_TITLE, [*ORDERED_UNIVERSE, "TLT"]),
+    ]
+    for index, variant in enumerate(variants):
+        code, rejected = _call(
+            monkeypatch,
+            capsys,
+            operation="start-plan",
+            request={
+                **_start_request(
+                    operation_id=f"claimed-start-drift-{index}",
+                    payload_ref=prepared["payload_ref"],
+                ),
+                "research_claim_digest": research_claim_digest(variant),
+            },
+            authority=authority,
+            registry=registry,
+            payload_store=payload_store,
+        )
+        assert code == 2
+        assert rejected["error"]["code"] == (
+            "paper_research_claim_binding_mismatch"
+        )
+        rejected_output = json.dumps(rejected, ensure_ascii=False)
+        assert private_prompt not in rejected_output
+        assert PAPER_TITLE not in rejected_output
+        assert not authority.root.exists()
+
+    code, started = _call(
+        monkeypatch,
+        capsys,
+        operation="start-plan",
+        request={
+            **_start_request(
+                operation_id="claimed-start-exact",
+                payload_ref=prepared["payload_ref"],
+            ),
+            "research_claim_digest": RESEARCH_CLAIM_DIGEST,
+        },
+        authority=authority,
+        registry=registry,
+        payload_store=payload_store,
+    )
+    assert code == 0, started
+    assert started["research_claim_digest"] == RESEARCH_CLAIM_DIGEST
+    snapshot = authority.snapshot(started["task_ref"])
+    assert snapshot.research_claim_digest == RESEARCH_CLAIM_DIGEST
+    assert snapshot.attempts[0].research_claim_digest == RESEARCH_CLAIM_DIGEST
+    assert snapshot.attempts[0].payload_digest == prepared["payload_digest"]
+    public_started = json.dumps(started, ensure_ascii=False)
+    assert private_prompt not in public_started
+    assert PAPER_TITLE not in public_started
 
 
 def test_prepare_intent_same_current_command_rejects_different_body_without_leak(
@@ -731,18 +931,30 @@ def test_prepare_intent_refuses_body_in_argv(
     assert not authority.root.exists()
 
 
+@pytest.mark.parametrize("claimed", [False, True], ids=["legacy-v1", "claim-v2"])
 def test_complete_metadata_only_two_attempt_paper_flow(
     tmp_path,
     monkeypatch,
     capsys,
+    claimed,
 ) -> None:
     authority = _authority(tmp_path)
     registry = _Registry()
     payload1 = "payload:sha256:" + "a" * 64
     payload2 = "payload:sha256:" + "b" * 64
     payload_store = _PayloadStore()
-    payload_store.add(payload1, "research_start")
-    payload_store.add(payload2, "research_continue")
+    payload_store.add(
+        payload1,
+        "research_start",
+        research_claim=RESEARCH_CLAIM if claimed else None,
+        prompt="PRIVATE planning body",
+    )
+    payload_store.add(
+        payload2,
+        "research_continue",
+        research_claim=RESEARCH_CLAIM if claimed else None,
+        prompt="PRIVATE final body",
+    )
 
     code, started = _call(
         monkeypatch,
@@ -759,6 +971,11 @@ def test_complete_metadata_only_two_attempt_paper_flow(
             "subject_hermes_run_id": PLAN_SUBJECT_RUN_ID,
             "plan_version": 1,
             "plan_digest": PLAN_DIGEST,
+            **(
+                {"research_claim_digest": RESEARCH_CLAIM_DIGEST}
+                if claimed
+                else {}
+            ),
         },
         authority=authority,
         registry=registry,
@@ -800,9 +1017,67 @@ def test_complete_metadata_only_two_attempt_paper_flow(
         "hermes_run_id": "hermes-gate1-run",
         "hqa_gate_ref": "gate:paper-gate1",
         "source_file_ref": "/tmp/paper_factor.py",
-        "universe": "US ETFs",
         "reviewed_source_sha256": SOURCE_DIGEST,
+        **(
+            {"research_claim_digest": RESEARCH_CLAIM_DIGEST}
+            if claimed
+            else {"universe": "US ETFs"}
+        ),
     }
+
+    wrong_title_digest = research_claim_digest(
+        build_research_claim(PAPER_TITLE + "!", ORDERED_UNIVERSE)
+    )
+    adversarial_gate1_requests = (
+        (
+            "one-char-title",
+            {"research_claim_digest": wrong_title_digest},
+            "paper_research_claim_binding_mismatch",
+        ),
+        (
+            "reordered-universe",
+            {
+                "universe": [
+                    ORDERED_UNIVERSE[1],
+                    ORDERED_UNIVERSE[0],
+                    *ORDERED_UNIVERSE[2:],
+                ]
+            },
+            "paper_research_invalid_request",
+        ),
+        (
+            "missing-universe",
+            {"universe": ORDERED_UNIVERSE[:-1]},
+            "paper_research_invalid_request",
+        ),
+        (
+            "extra-universe",
+            {"universe": [*ORDERED_UNIVERSE, "TLT"]},
+            "paper_research_invalid_request",
+        ),
+    )
+    for suffix, changes, expected_error in (
+        adversarial_gate1_requests if claimed else ()
+    ):
+        adversarial = {
+            **gate1_request,
+            "operation_id": f"paper-open-gate1-{suffix}",
+            "gate_id": f"paper-gate1-{suffix}",
+            **changes,
+        }
+        code, rejected = _call(
+            monkeypatch,
+            capsys,
+            operation="open-gate1",
+            request=adversarial,
+            authority=authority,
+            registry=registry,
+            payload_store=payload_store,
+        )
+        assert code == 2
+        assert rejected["error"]["code"] == expected_error
+        assert adversarial["gate_id"] not in registry.gates
+
     code, gate1_opened = _call(
         monkeypatch,
         capsys,
@@ -815,6 +1090,39 @@ def test_complete_metadata_only_two_attempt_paper_flow(
     assert code == 0
     assert gate1_opened["gate"]["attempt_ref"] == plan_attempt_ref
     assert gate1_opened["gate"]["hqa_run_ref"] is None
+    assert gate1_opened["gate"]["universe"] == (
+        f"research-claim:sha256:{RESEARCH_CLAIM_DIGEST}"
+        if claimed
+        else "US ETFs"
+    )
+    assert {
+        field: gate1_opened["gate"][field]
+        for field in (
+            "research_claim_digest",
+            "research_start_payload_digest",
+            "research_continue_payload_digest",
+        )
+    } == (
+        {
+            "research_claim_digest": RESEARCH_CLAIM_DIGEST,
+            "research_start_payload_digest": "a" * 64,
+            "research_continue_payload_digest": None,
+        }
+        if claimed
+        else {
+            "research_claim_digest": None,
+            "research_start_payload_digest": None,
+            "research_continue_payload_digest": None,
+        }
+    )
+    if claimed:
+        assert gate1_opened["research_claim_digest"] == RESEARCH_CLAIM_DIGEST
+    else:
+        assert "research_claim_digest" not in gate1_opened
+    gate1_public = json.dumps(gate1_opened, ensure_ascii=False)
+    assert PAPER_TITLE not in gate1_public
+    assert not any(symbol in gate1_public for symbol in ORDERED_UNIVERSE)
+    assert "PRIVATE planning body" not in gate1_public
 
     gate1_receipt = authority.apply(
         ConfirmFormula(
@@ -862,6 +1170,20 @@ def test_complete_metadata_only_two_attempt_paper_flow(
     )
     assert code == 0
     assert gate2_opened["gate"]["attempt_ref"] == plan_attempt_ref
+    assert {
+        field: gate2_opened["gate"][field]
+        for field in (
+            "research_claim_digest",
+            "research_start_payload_digest",
+            "research_continue_payload_digest",
+        )
+    } == {
+        "research_claim_digest": (
+            RESEARCH_CLAIM_DIGEST if claimed else None
+        ),
+        "research_start_payload_digest": "a" * 64 if claimed else None,
+        "research_continue_payload_digest": None,
+    }
 
     gate2_receipt = authority.apply(
         BindCandidateManifest(
@@ -900,6 +1222,11 @@ def test_complete_metadata_only_two_attempt_paper_flow(
         "expected_digest": CANDIDATE_DIGEST,
         "final_backtest_receipt_id": FINAL_RECEIPT,
         "base_commit": BASE_COMMIT,
+        **(
+            {"research_claim_digest": RESEARCH_CLAIM_DIGEST}
+            if claimed
+            else {}
+        ),
     }
     register = registry.register
     failed_once = False
@@ -942,6 +1269,20 @@ def test_complete_metadata_only_two_attempt_paper_flow(
     assert code == 0
     final_attempt_ref = gate3_opened["gate"]["attempt_ref"]
     assert final_attempt_ref != plan_attempt_ref
+    assert {
+        field: gate3_opened["gate"][field]
+        for field in (
+            "research_claim_digest",
+            "research_start_payload_digest",
+            "research_continue_payload_digest",
+        )
+    } == {
+        "research_claim_digest": (
+            RESEARCH_CLAIM_DIGEST if claimed else None
+        ),
+        "research_start_payload_digest": "a" * 64 if claimed else None,
+        "research_continue_payload_digest": "b" * 64 if claimed else None,
+    }
     assert gate3_opened["gate"]["expected_task_version"] == (
         gate2_receipt.task_version + 6
     )
@@ -1008,6 +1349,49 @@ def test_complete_metadata_only_two_attempt_paper_flow(
             ),
         )
 
+    completion_request = {
+        "operation_id": "paper-complete-after-human",
+        "gate_id": "paper-gate3",
+        "workspace_id": WORKSPACE_ID,
+        "task_ref": task_ref,
+        "expected_task_version": observed.task_version,
+        "attempt_ref": final_attempt_ref,
+        "reviewed_commit": REVIEWED_COMMIT,
+        **(
+            {"research_claim_digest": RESEARCH_CLAIM_DIGEST}
+            if claimed
+            else {}
+        ),
+    }
+    before_lineage_rejections = authority.snapshot(task_ref)
+    for field in (
+        "research_claim_digest",
+        "research_start_payload_digest",
+        "research_continue_payload_digest",
+    ):
+        stored = registry.gates["paper-gate3"][field]
+        registry.gates["paper-gate3"][field] = "e" * 64
+        code, rejected_lineage = _call(
+            monkeypatch,
+            capsys,
+            operation="complete-after-human-commit",
+            request=completion_request,
+            authority=authority,
+            registry=registry,
+            promotion_status_reader=promotion_status,
+            payload_store=payload_store,
+        )
+        assert code == 2
+        assert rejected_lineage["error"]["code"] == (
+            "paper_research_claim_binding_mismatch"
+        )
+        after_rejection = authority.snapshot(task_ref)
+        assert after_rejection.version == before_lineage_rejections.version
+        assert after_rejection.state == before_lineage_rejections.state
+        assert after_rejection.terminal_outcome is None
+        assert not registry.completion_calls
+        registry.gates["paper-gate3"][field] = stored
+
     complete = registry.complete
     completion_timed_out = False
 
@@ -1024,15 +1408,6 @@ def test_complete_metadata_only_two_attempt_paper_flow(
         return result
 
     registry.complete = complete_after_apply_then_timeout
-    completion_request = {
-        "operation_id": "paper-complete-after-human",
-        "gate_id": "paper-gate3",
-        "workspace_id": WORKSPACE_ID,
-        "task_ref": task_ref,
-        "expected_task_version": observed.task_version,
-        "attempt_ref": final_attempt_ref,
-        "reviewed_commit": REVIEWED_COMMIT,
-    }
     code, completion_unknown = _call(
         monkeypatch,
         capsys,
@@ -1093,6 +1468,30 @@ def test_complete_metadata_only_two_attempt_paper_flow(
         "workflow-audit:" + completion_evidence["workflow_audit_digest"]
     )
     assert len(completion_evidence["workflow_audit_digest"]) == 64
+    assert completion_evidence["schema_version"] == (
+        "agent-v0.2-paper-completion/v2"
+        if claimed
+        else "agent-v0.2-paper-completion/v1"
+    )
+    if claimed:
+        assert completion_evidence["research_claim_digest"] == (
+            RESEARCH_CLAIM_DIGEST
+        )
+        assert completion_evidence["research_start_payload_digest"] == "a" * 64
+        assert completion_evidence["research_continue_payload_digest"] == "b" * 64
+    else:
+        assert not (
+            {
+                "research_claim_digest",
+                "research_start_payload_digest",
+                "research_continue_payload_digest",
+            }
+            & set(completion_evidence)
+        )
+    public_completion = json.dumps(completed, ensure_ascii=False)
+    assert PAPER_TITLE not in public_completion
+    assert "PRIVATE planning body" not in public_completion
+    assert "PRIVATE final body" not in public_completion
     assert completed["hqa_completion_receipt_ref"].startswith("hqa-paper-completion:")
     assert completed["hqa_completion_receipt_digest"] == (
         paper_research_cli.hashlib.sha256(
@@ -1136,6 +1535,68 @@ def test_complete_metadata_only_two_attempt_paper_flow(
     assert (
         replayed["hqa_completion_receipt_digest"]
         == (completed["hqa_completion_receipt_digest"])
+    )
+
+    private_extra = "PRIVATE-platform-completion-extra"
+    registry.completion_mutator = lambda response: {
+        **response,
+        "unexpected_sensitive_field": private_extra,
+    }
+    code, extra_field = _call(
+        monkeypatch,
+        capsys,
+        operation="complete-after-human-commit",
+        request=completion_request,
+        authority=authority,
+        registry=registry,
+        promotion_status_reader=promotion_status,
+        payload_store=payload_store,
+    )
+    assert code == 2
+    assert extra_field["error"]["code"] == (
+        "paper_research_platform_completion_mismatch"
+    )
+    assert private_extra not in json.dumps(extra_field)
+
+    registry.completion_mutator = lambda response: {
+        **response,
+        "reviewed_commit": "9" * 40,
+    }
+    code, drifted_commit = _call(
+        monkeypatch,
+        capsys,
+        operation="complete-after-human-commit",
+        request=completion_request,
+        authority=authority,
+        registry=registry,
+        promotion_status_reader=promotion_status,
+        payload_store=payload_store,
+    )
+    assert code == 2
+    assert drifted_commit["error"]["code"] == (
+        "paper_research_platform_completion_mismatch"
+    )
+
+    registry.completion_mutator = lambda response: {
+        **response,
+        "completion_evidence": {
+            **response["completion_evidence"],
+            "schema_version": "agent-v0.2-paper-completion/drift",
+        },
+    }
+    code, drifted_evidence = _call(
+        monkeypatch,
+        capsys,
+        operation="complete-after-human-commit",
+        request=completion_request,
+        authority=authority,
+        registry=registry,
+        promotion_status_reader=promotion_status,
+        payload_store=payload_store,
+    )
+    assert code == 2
+    assert drifted_evidence["error"]["code"] == (
+        "paper_research_platform_completion_mismatch"
     )
 
 
@@ -1875,6 +2336,9 @@ def test_subprocess_registry_uses_fixed_cli_and_strict_json_stdin(
         final_backtest_summary_digest=None,
         final_backtest_report_ref=None,
         final_backtest_report_digest=None,
+        research_claim_digest=None,
+        research_start_payload_digest=None,
+        research_continue_payload_digest=None,
         parent_gate_id=None,
         source_file_ref="/tmp/paper.py",
         universe="US ETFs",

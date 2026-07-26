@@ -1,7 +1,7 @@
 ---
 name: hqa-quant
 description: "HQA quant ops from Hermes — read-only market/signal/radar queries, local prediction and opportunity ledgers, human-gated research/account writes, artifact-first answers, and 30s async triage for long jobs."
-version: 1.18.0
+version: 1.18.1
 platforms: [macos]
 metadata:
   hermes:
@@ -232,14 +232,17 @@ The installed coordinator is:
 
 It reads exactly one strict JSON object from stdin. The command is a write path,
 so every invocation remains subject to the normal Hermes approval prompt. Never
-route it through `hqa-quant-readonly.sh`. `prepare-intent` is the sole exception
-to the otherwise metadata-only JSON schema: its stdin object carries the exact
-current user message in `prompt`. That body must travel only through stdin and
-process memory into the encrypted IntentPayloadStore—never argv, environment,
-temporary files, logs, or stdout. Every later operation is metadata-only: pass
-content-addressed payload/result/provider references and digests, never the
-paper body, prompt, source bytes, API credentials, or a human note other than
-the explicit plan-confirmation note.
+route it through `hqa-quant-readonly.sh`. Each `prepare-intent` call is the sole
+exception to the otherwise metadata-only JSON schema: its stdin object carries
+the exact current user message in `prompt`, the exact `paper_title`, and the
+exact ordered `universe` symbol array. Those values must travel only through
+stdin and process memory into the encrypted IntentPayloadStore; never argv, environment,
+temporary files, or logs. The receipt exposes only
+`research_claim_digest`, not `prompt` or `paper_title`. Every non-prepare
+operation is metadata-only: pass content-addressed payload/result/provider
+references and digests, never the paper body, prompt, paper title, source bytes,
+ordered universe, API credentials, or a human note other than the explicit
+plan-confirmation note.
 
 Use only IDs that the current workspace turn or the immediately preceding exact
 receipt supplied. Never invent, list-and-substitute, or silently refresh an ID.
@@ -278,15 +281,22 @@ In particular:
   reconcile the same action identity; never guess or silently refresh.
 - The first operation for each natural-language research body is
   `prepare-intent`. Send exactly
-  `{workspace_id, kind, prompt}` on stdin, where `prompt` is the verbatim
-  current user message and `kind` is exactly `research_start` or
-  `research_continue`. Omit owner, TTL, provider policy and client identity:
+  `{workspace_id, kind, prompt, paper_title, universe}` on stdin, where
+  `prompt` is the verbatim current user message, `paper_title` is the exact
+  human-confirmed title, `universe` is a non-empty ordered JSON array of exact
+  uppercase symbols, and `kind` is exactly `research_start` or
+  `research_continue`. Symbol order is part of the claim: never sort, dedupe,
+  add, remove, or substitute a symbol. If either the exact title or ordered
+  universe is unavailable, ask the human and stop before preparing the intent;
+  never infer either from a digest or silently choose a default. Omit owner,
+  TTL, provider policy and client identity:
   HQA derives the owner from WorkflowAuthority, fixes TTL to 7 days, derives
   the idempotency identity from the current command, binds both current
   Session selectors into the policy reference, and read-attests the current
   command/Run/workspace/session before writing. Preserve only the returned
-  metadata (`payload_ref`, digests, scope, TTL/status); stdout never contains
-  `prompt`. The same current command with different body or kind conflicts.
+  metadata (`payload_ref`, `research_claim_digest`, other digests, scope,
+  TTL/status); stdout never contains `prompt` or `paper_title`. The same current
+  command with a different body, kind, title, or ordered universe conflicts.
   If exact current user bytes are unavailable, stop rather than paraphrasing.
 - `prepare-intent` writes only the existing encrypted IntentPayloadStore. It
   does not create a Task/Attempt, register a Gate, run a provider/backtest, or
@@ -307,11 +317,15 @@ In particular:
   preceding `prepare-intent` in this same managed Session. It must still be
   active, unexpired, exact-owner/workspace/session scoped, and bound to the
   current managed-session policy reference. `start-plan` requires kind
-  `research_start`; `open-gate3` requires kind `research_continue`. Pass only
-  its `payload_ref`. The coordinator reads authoritative owner/workspace/
+  `research_start`; `open-gate3` requires kind `research_continue`. Pass its
+  `payload_ref` and the exact `research_claim_digest` from that
+  `prepare-intent` receipt. The coordinator reads authoritative owner/workspace/
   Session/TTL metadata, rejects another consumer before Workflow mutation,
-  and binds the payload to the exact new Attempt after apply. Never supply an
-  expiry timestamp as a substitute for that authority.
+  decrypts and re-hashes the sealed claim in process, and binds both payload and
+  claim digest to Attempt 1. Attempt 2 inherits that immutable Task claim when
+  it is created; a claimless Task can never acquire a claim on a later Attempt.
+  Never supply an expiry timestamp as a substitute for that authority, and
+  never reconstruct a claim from its digest.
 - Gate 1/2 stay on planning Attempt 1 and Gate 3 creates final-research
   Attempt 2. The Futu receipt and its config/summary/report references and
   digests are read from the canonical final receipt; they are never typed into
@@ -335,18 +349,20 @@ The only legal sequence is:
 
 1. **Prepare the initial intent, then run the plan.** In the current managed
    Hermes turn, invoke `prepare-intent` first with
-   `{workspace_id, kind:"research_start", prompt:<exact current user body>}`.
-   Preserve its returned `payload_ref`; do not print or persist the prompt
-   elsewhere. Then let Hermes analyze the named paper and create an explicit
-   plan card. Preserve the succeeded planning command/Run IDs and exact output
-   digest.
+   `{workspace_id, kind:"research_start", prompt:<exact current user body>,
+   paper_title:<exact title>, universe:[<ordered symbols>]}`. Preserve its
+   returned `payload_ref` and `research_claim_digest`; do not print or persist
+   the prompt or title elsewhere. Do not begin until the ordered research
+   universe is explicit. Then let Hermes analyze the named paper and create an
+   explicit plan card. Preserve the succeeded planning command/Run IDs and
+   exact output digest.
 
 2. **Next-turn capture (Attempt 1).** In the **next managed Hermes turn**,
    invoke `start-plan`; its injected current command/Run prove the coordinator
    invocation while the preserved IDs identify the subject:
    `operation_id, workspace_id, platform_session_id, payload_ref,
    command_id, hermes_run_id, subject_command_id, subject_hermes_run_id,
-   plan_version, plan_digest`.
+   plan_version, plan_digest, research_claim_digest`.
    `plan_digest` must equal the independently attested subject output digest,
    and `payload_ref` must name an active `research_start` payload.
    The coordinator records
@@ -365,7 +381,16 @@ The only legal sequence is:
    SHA-256 to the human, then invoke `open-gate1` with
    `operation_id, gate_id, workspace_id, platform_session_id, task_ref,
    expected_task_version, attempt_ref, command_id, hermes_run_id, hqa_gate_ref,
-   source_file_ref, universe, reviewed_source_sha256`.
+   source_file_ref, reviewed_source_sha256, research_claim_digest`.
+   A claimed workflow must not send `paper_title` or `universe` again. HQA
+   decrypts the Attempt 1 payload only in process, re-hashes the sealed claim,
+   and writes only `research-claim:sha256:<research_claim_digest>` to the
+   Platform Gate's legacy `universe` slot. The Gate registration also carries
+   the exact claim and Attempt 1 payload digests. Reordered, missing, extra, or
+   otherwise changed symbols produce a different digest at `prepare-intent`;
+   `open-gate1` accepts only the digest already bound to the Task. A legacy
+   claimless v1 workflow remains compatible and instead supplies one bounded
+   printable `universe` string.
    `attempt_ref` must be planning Attempt 1. The coordinator only opens the
    browser challenge. The human's separate `ConfirmFormulaSource` action is
    what calls the existing `paper_gate_cli confirm-formula`; never click or
@@ -380,8 +405,8 @@ The only legal sequence is:
    <gate1_confirmation_id> --task-ref <task_ref>
    --source-file <same-source-file>
    --expected-source-digest <reviewed_source_sha256>`.
-   This mode derives the original durable `task_ref` goal, universe and staged
-   bytes from Gate 1 itself, requires the public `task_ref` from that same
+   This mode derives the original durable `task_ref` goal, claim marker and
+   staged bytes from Gate 1 itself, requires the public `task_ref` from that same
    projection, rejects a cross-Task confirmation plus `--goal`,
    `--confirmation-note` and `--universe` substitution, and re-hashes the
    supplied source before any Platform call. Show the resulting exact source
@@ -400,8 +425,10 @@ The only legal sequence is:
    Only after it returns `reviewed` with the same confirmation ID and exact
    post-action Task version, begin the exact
    final-research managed turn with `prepare-intent` using
-   `{workspace_id, kind:"research_continue", prompt:<exact current user body>}`.
-   Preserve that new `payload_ref`. Then run the approved candidate's one-shot
+   `{workspace_id, kind:"research_continue", prompt:<exact current user body>,
+   paper_title:<same exact title>, universe:[<same ordered symbols>]}`.
+   Require its returned `research_claim_digest` to equal Attempt 1 and preserve
+   that new `payload_ref`. Then run the approved candidate's one-shot
    backtest with `factor_repro_cli backtest ... --provider futu --final`. Do not
    substitute sample/local/Tiingo evidence. Preserve the succeeded
    final-research command/Run IDs and content-addressed `backtest-…` result. In
@@ -410,14 +437,17 @@ The only legal sequence is:
    task_ref, expected_task_version, payload_ref, command_id, hermes_run_id,
    subject_command_id, subject_hermes_run_id, result_ref, hqa_gate_ref,
    reviewed_source_sha256, gate1_confirmation_id, candidate_id, expected_digest,
-   final_backtest_receipt_id, base_commit`.
+   final_backtest_receipt_id, base_commit, research_claim_digest`.
    `payload_ref` must name an active `research_continue` payload. Platform
    independently derives the subject Run/provider evidence, and HQA
    read-verifies that the canonical receipt says `provider=futu` and binds the
    exact candidate/digest plus receipt/config/summary/report digests.
    `result_ref` must be exactly
    `result:<final_backtest_receipt_id>`. The coordinator creates Attempt 2 and
-   records submission/Run/provider/result facts before entering Gate 3.
+   records submission/Run/provider/result facts before entering Gate 3. The
+   Gate 2 registration repeats the exact claim/start digests from Gate 1; Gate
+   3 repeats both and adds the exact continuation payload digest. Platform
+   rejects any break in that lineage.
 
 7. **Independent promotion review.** The human's
    `PreparePromotionReview` browser action first resolves the exact domain Gate
@@ -432,15 +462,18 @@ The only legal sequence is:
    worktree. HQA must not type or run that commit for them. After they supply
    the exact 40-character commit, invoke `complete-after-human-commit` with
    `operation_id, gate_id, workspace_id, task_ref, expected_task_version,
-   attempt_ref, reviewed_commit`.
+   attempt_ref, reviewed_commit, research_claim_digest`.
    The coordinator calls the read-only promotion-status seam, re-attests the
    exact candidate/digest/final receipt/base/patch and reviewed commit, then
    records `CompleteAttempt → CompleteTask`, reverse-audits the Workflow
    authority, creates one immutable content-addressed HQA completion receipt,
+   binds it to the exact claim plus both start/continue payload digests,
    and registers that exact terminal fact through
-   `quant-system hermes paper-gate complete`. Until Platform returns the same
-   receipt ref/digest with `status=completed`, the paper workflow is not
-   complete and candidate evidence must remain fail-closed. If that registrar
+   `quant-system hermes paper-gate complete`. HQA requires the closed Platform
+   completion schema and exact evidence values; unknown response fields are
+   rejected and never echoed. Until Platform returns the same receipt
+   ref/digest with `status=completed`, the paper workflow is not complete and
+   candidate evidence must remain fail-closed. If that registrar
    times out, treat it as `paper_research_platform_outcome_unknown` and replay
    this same logical operation/receipt; never create a replacement Task,
    Attempt, Gate, promotion, or backtest.

@@ -46,8 +46,15 @@ from uuid import UUID
 from hqa import config, factor_repro, quant_cli
 from hqa.intent_payload_crypto import CryptoFailure, MacOSKeychainCrypto
 from hqa.intent_payloads import IntentPayloadError, IntentPayloadStore
+from hqa.research_claim import (
+    ResearchClaimError,
+    build_research_claim,
+    normalize_research_claim,
+    research_claim_digest,
+)
 from hqa.workflow_authority import WorkflowAuthority, WorkflowAuthorityError
 from hqa.workflow_contract import (
+    BindResearchClaim,
     CompleteAttempt,
     CompleteTask,
     ConfirmPlan,
@@ -165,6 +172,9 @@ _REGISTER_FIELDS = {
     "final_backtest_summary_digest",
     "final_backtest_report_ref",
     "final_backtest_report_digest",
+    "research_claim_digest",
+    "research_start_payload_digest",
+    "research_continue_payload_digest",
     "parent_gate_id",
     "source_file_ref",
     "universe",
@@ -182,6 +192,50 @@ _COMPLETE_FIELDS = {
     "hqa_completion_receipt_ref",
     "hqa_completion_receipt_digest",
     "completion_evidence",
+}
+_PLATFORM_COMPLETION_FIELDS = {
+    "attempt_ref",
+    "attempt_status",
+    "attempt_terminal_outcome",
+    "base_commit",
+    "candidate_digest",
+    "candidate_id",
+    "completion_evidence",
+    "created_at",
+    "domain_gate_outcome",
+    "domain_gate_ref",
+    "final_backtest_receipt_id",
+    "gate_id",
+    "hqa_completion_receipt_digest",
+    "hqa_completion_receipt_ref",
+    "hqa_run_ref",
+    "promotion_id",
+    "provider_evidence_ref",
+    "subject_command_id",
+    "subject_hermes_run_id",
+    "subject_run_attestation_ref",
+    "subject_run_attestation_digest",
+    "final_backtest_provider",
+    "final_backtest_receipt_digest",
+    "final_backtest_config_ref",
+    "final_backtest_config_digest",
+    "final_backtest_summary_ref",
+    "final_backtest_summary_digest",
+    "final_backtest_report_ref",
+    "final_backtest_report_digest",
+    "plan_version",
+    "plan_digest",
+    "plan_confirmation_note_digest",
+    "reviewed_commit",
+    "status",
+    "task_ref",
+    "task_status",
+    "task_terminal_outcome",
+    "task_version",
+    "workflow_audit_digest",
+    "workflow_audit_ref",
+    "workflow_audit_status",
+    "workspace_id",
 }
 _COMPLETION_EVIDENCE_FIELDS = {
     "schema_version",
@@ -224,6 +278,11 @@ _COMPLETION_EVIDENCE_FIELDS = {
     "workflow_audit_status",
     "workflow_audit_ref",
     "workflow_audit_digest",
+}
+_CLAIM_COMPLETION_EVIDENCE_FIELDS = _COMPLETION_EVIDENCE_FIELDS | {
+    "research_claim_digest",
+    "research_start_payload_digest",
+    "research_continue_payload_digest",
 }
 _FINAL_BACKTEST_FIELDS = {
     "final_backtest_provider",
@@ -313,6 +372,16 @@ class IntentPayloadMetadataPort(Protocol):
         owner_id: str,
         workspace_id: str,
         session_id: str,
+    ) -> dict[str, Any]: ...
+
+    def resolve(
+        self,
+        payload_ref: str,
+        *,
+        owner_id: str,
+        workspace_id: str,
+        session_id: str,
+        consumer_ref: Optional[str] = None,
     ) -> dict[str, Any]: ...
 
 
@@ -452,6 +521,126 @@ def _active_payload(
             retryable=False,
         )
     return status
+
+
+def _payload_research_claim(
+    store: IntentPayloadMetadataPort,
+    payload: Mapping[str, Any],
+    *,
+    platform_session_id: str,
+    hermes_session_id: str,
+    expected_digest: Optional[str],
+) -> Optional[dict[str, Any]]:
+    """Resolve and verify one encrypted claim without emitting its contents."""
+
+    try:
+        envelope = store.resolve(
+            str(payload["payload_ref"]),
+            owner_id=str(payload["owner_id"]),
+            workspace_id=str(payload["workspace_id"]),
+            session_id=str(payload["session_id"]),
+            consumer_ref=(
+                str(payload["consumer_ref"])
+                if payload.get("consumer_ref") is not None
+                else None
+            ),
+        )
+    except IntentPayloadError as exc:
+        raise _OperationError(
+            "paper_research_claim_binding_unknown"
+            if exc.retryable
+            else "paper_research_claim_binding_mismatch",
+            retryable=bool(exc.retryable),
+        ) from exc
+    except OSError as exc:
+        raise _OperationError(
+            "paper_research_claim_binding_unknown",
+            retryable=True,
+        ) from exc
+
+    base_fields = {
+        "schema_version",
+        "kind",
+        "owner_id",
+        "workspace_id",
+        "session_id",
+        "client_intent_id",
+        "provider_policy",
+        "prompt",
+        "ttl_days",
+        "provider_policy_digest",
+        "created_at",
+        "expires_at",
+    }
+    has_claim = type(envelope) is dict and "research_claim" in envelope
+    if (
+        type(envelope) is not dict
+        or set(envelope)
+        != (base_fields | ({"research_claim"} if has_claim else set()))
+        or envelope.get("schema_version") != "2.0"
+        or envelope.get("kind") != payload.get("kind")
+        or envelope.get("owner_id") != payload.get("owner_id")
+        or envelope.get("workspace_id") != payload.get("workspace_id")
+        or envelope.get("session_id") != payload.get("session_id")
+        or envelope.get("client_intent_id")
+        != payload.get("client_intent_id")
+        or envelope.get("ttl_days") != payload.get("ttl_days")
+        or envelope.get("created_at") != payload.get("created_at")
+        or envelope.get("expires_at") != payload.get("expires_at")
+        or envelope.get("provider_policy")
+        != _managed_session_policy(
+            platform_session_id=platform_session_id,
+            hermes_session_id=hermes_session_id,
+        )
+        or envelope.get("provider_policy_digest")
+        != payload.get("provider_policy_digest")
+        or type(envelope.get("prompt")) is not str
+        or not str(envelope["prompt"]).strip()
+    ):
+        raise _OperationError(
+            "paper_research_claim_binding_mismatch",
+            retryable=False,
+        )
+    try:
+        claim = (
+            normalize_research_claim(envelope["research_claim"])
+            if has_claim
+            else None
+        )
+        actual_digest = (
+            research_claim_digest(claim)
+            if claim is not None
+            else None
+        )
+    except ResearchClaimError as exc:
+        raise _OperationError(
+            "paper_research_claim_binding_mismatch",
+            retryable=False,
+        ) from exc
+    if actual_digest != expected_digest:
+        raise _OperationError(
+            "paper_research_claim_binding_mismatch",
+            retryable=False,
+        )
+    return claim
+
+
+def _payload_research_claim_digest(
+    store: IntentPayloadMetadataPort,
+    payload: Mapping[str, Any],
+    *,
+    platform_session_id: str,
+    hermes_session_id: str,
+    expected_digest: Optional[str],
+) -> Optional[str]:
+    claim = _payload_research_claim(
+        store,
+        payload,
+        platform_session_id=platform_session_id,
+        hermes_session_id=hermes_session_id,
+        expected_digest=expected_digest,
+    )
+    return research_claim_digest(claim) if claim is not None else None
 
 
 def _require_payload_consumer_replay(
@@ -613,6 +802,44 @@ def _emit(document: Mapping[str, Any]) -> None:
 def _require_fields(document: Mapping[str, Any], fields: set[str]) -> None:
     if set(document) != fields:
         raise _InputError("request fields do not match operation schema")
+
+
+def _require_fields_with_optional_group(
+    document: Mapping[str, Any],
+    fields: set[str],
+    optional_group: set[str],
+) -> None:
+    if set(document) not in {frozenset(fields), frozenset(fields | optional_group)}:
+        raise _InputError("request fields do not match operation schema")
+
+
+def _research_claim_from_request(
+    document: Mapping[str, Any],
+) -> Optional[dict[str, Any]]:
+    present = {"paper_title", "universe"} & set(document)
+    if not present:
+        return None
+    if present != {"paper_title", "universe"}:
+        raise _InputError("research claim fields are incomplete")
+    paper_title = document.get("paper_title")
+    universe = document.get("universe")
+    if type(paper_title) is not str or type(universe) is not list:
+        raise _InputError("research claim is invalid")
+    try:
+        return build_research_claim(
+            paper_title,
+            universe,
+        )
+    except (ResearchClaimError, TypeError) as exc:
+        raise _InputError("research claim is invalid") from exc
+
+
+def _optional_research_claim_digest(
+    document: Mapping[str, Any],
+) -> Optional[str]:
+    if "research_claim_digest" not in document:
+        return None
+    return _digest(document, "research_claim_digest")
 
 
 def _runtime_request(
@@ -1483,7 +1710,7 @@ def _gate_output(
     replayed: bool,
     snapshot: object,
 ) -> dict[str, Any]:
-    return {
+    output = {
         "contract": _CONTRACT,
         "operation": operation,
         "ok": True,
@@ -1493,6 +1720,10 @@ def _gate_output(
         "task_version": getattr(snapshot, "version"),
         "workflow_state": getattr(snapshot, "state"),
     }
+    claim_digest = getattr(snapshot, "research_claim_digest", None)
+    if claim_digest is not None:
+        output["research_claim_digest"] = claim_digest
+    return output
 
 
 def _prepare_intent(
@@ -1508,11 +1739,15 @@ def _prepare_intent(
         "prompt",
         *_RUNTIME_SELECTORS,
     }
+    claim_fields = {"paper_title", "universe"}
     request = _runtime_request(
         request,
-        operation_fields=fields - set(_RUNTIME_SELECTORS),
+        operation_fields=(
+            fields | claim_fields
+        )
+        - set(_RUNTIME_SELECTORS),
     )
-    _require_fields(request, fields)
+    _require_fields_with_optional_group(request, fields, claim_fields)
     workspace_id = _identifier(request, "workspace_id")
     platform_session_id = _identifier(request, "platform_session_id")
     hermes_session_id = _identifier(request, "hermes_session_id")
@@ -1522,6 +1757,7 @@ def _prepare_intent(
     if kind not in {"research_start", "research_continue"}:
         raise _InputError("kind is invalid")
     prompt = _prompt(request)
+    research_claim = _research_claim_from_request(request)
 
     # This read-only attestation binds all caller-visible selectors to one
     # durable command in the current managed Hermes Session. It is not a
@@ -1544,19 +1780,20 @@ def _prepare_intent(
     )
     client_intent_id = f"paper-intent:{command_id}"
     try:
-        receipt = payload_store.put(
-            {
-                "schema_version": "2.0",
-                "kind": kind,
-                "owner_id": owner_id,
-                "workspace_id": f"workspace:{workspace_id}",
-                "session_id": f"session:{platform_session_id}",
-                "client_intent_id": client_intent_id,
-                "provider_policy": provider_policy,
-                "prompt": prompt,
-                "ttl_days": 7,
-            }
-        )
+        intent_request = {
+            "schema_version": "2.0",
+            "kind": kind,
+            "owner_id": owner_id,
+            "workspace_id": f"workspace:{workspace_id}",
+            "session_id": f"session:{platform_session_id}",
+            "client_intent_id": client_intent_id,
+            "provider_policy": provider_policy,
+            "prompt": prompt,
+            "ttl_days": 7,
+        }
+        if research_claim is not None:
+            intent_request["research_claim"] = research_claim
+        receipt = payload_store.put(intent_request)
     except IntentPayloadError as exc:
         if exc.code == "intent_idempotency_conflict":
             code = "paper_research_intent_conflict"
@@ -1632,7 +1869,7 @@ def _prepare_intent(
             "paper_research_intent_receipt_invalid",
             retryable=False,
         )
-    return {
+    output = {
         "contract": _CONTRACT,
         "operation": "prepare-intent",
         "ok": True,
@@ -1652,6 +1889,11 @@ def _prepare_intent(
         "ttl_days": 7,
         "status": "active",
     }
+    if research_claim is not None:
+        output["research_claim_digest"] = research_claim_digest(
+            research_claim
+        )
+    return output
 
 
 def _start_plan(
@@ -1674,11 +1916,12 @@ def _start_plan(
         "plan_version",
         "plan_digest",
     }
+    claim_fields = {"research_claim_digest"}
     request = _runtime_request(
         request,
-        operation_fields=fields - set(_RUNTIME_SELECTORS),
+        operation_fields=(fields | claim_fields) - set(_RUNTIME_SELECTORS),
     )
-    _require_fields(request, fields)
+    _require_fields_with_optional_group(request, fields, claim_fields)
     outer = _identifier(request, "operation_id", workflow=True)
     workspace_id = _identifier(request, "workspace_id")
     platform_session_id = _identifier(request, "platform_session_id")
@@ -1687,6 +1930,7 @@ def _start_plan(
     _identifier(request, "hermes_run_id")
     plan_version = _plan_version(request)
     plan_digest = _digest(request, "plan_digest")
+    expected_claim_digest = _optional_research_claim_digest(request)
     _attest_invocation(
         registry,
         request,
@@ -1714,6 +1958,13 @@ def _start_plan(
         hermes_session_id=str(request["hermes_session_id"]),
         expected_kind="research_start",
     )
+    claim_digest = _payload_research_claim_digest(
+        payload_store,
+        payload,
+        platform_session_id=platform_session_id,
+        hermes_session_id=str(request["hermes_session_id"]),
+        expected_digest=expected_claim_digest,
+    )
     intent_expires_at = str(payload["expires_at"])
     binding = {
         "workspace_id": workspace_id,
@@ -1730,6 +1981,8 @@ def _start_plan(
         "plan_version": plan_version,
         "plan_digest": plan_digest,
     }
+    if claim_digest is not None:
+        binding["research_claim_digest"] = claim_digest
     start_operation_id = _operation_id(outer, "start", binding)
     _require_payload_consumer_replay(
         authority,
@@ -1758,6 +2011,17 @@ def _start_plan(
         payload=payload,
         attempt_ref=attempt_ref,
     )
+    if claim_digest is not None:
+        receipt = authority.apply(  # type: ignore[attr-defined]
+            BindResearchClaim(
+                _operation_id(outer, "claim-bind", binding),
+                task_ref,
+                receipt.task_version,
+                attempt_ref,
+                payload_ref,
+                claim_digest,
+            )
+        )
     command_ref = f"command:{subject['command_id']}"
     receipt = authority.apply(  # type: ignore[attr-defined]
         ObserveSubmission(
@@ -1834,12 +2098,14 @@ def _start_plan(
         or getattr(attempt, "terminal_outcome") != "completed"
         or getattr(attempt, "run_ref") != run_ref
         or provider_ref not in getattr(attempt, "provider_evidence_refs")
+        or getattr(snapshot, "research_claim_digest", None) != claim_digest
+        or getattr(attempt, "research_claim_digest", None) != claim_digest
     ):
         raise _OperationError(
             "paper_research_plan_evidence_mismatch",
             retryable=False,
         )
-    return {
+    output = {
         "contract": _CONTRACT,
         "operation": "start-plan",
         "ok": True,
@@ -1855,6 +2121,9 @@ def _start_plan(
         "subject_run_attestation_digest": subject["evidence_digest"],
         "replayed": bool(receipt.replayed),
     }
+    if claim_digest is not None:
+        output["research_claim_digest"] = claim_digest
+    return output
 
 
 def _confirm_plan(
@@ -1948,6 +2217,7 @@ def _open_gate1(
     *,
     authority_factory: Callable[[], object],
     registry: PaperGateRegistryPort,
+    payload_store: IntentPayloadMetadataPort,
 ) -> dict[str, Any]:
     fields = {
         "operation_id",
@@ -1962,14 +2232,20 @@ def _open_gate1(
         "hermes_run_id",
         "hqa_gate_ref",
         "source_file_ref",
-        "universe",
         "reviewed_source_sha256",
     }
+    legacy_fields = {"universe"}
+    claim_fields = {"research_claim_digest"}
     request = _runtime_request(
         request,
-        operation_fields=fields - set(_RUNTIME_SELECTORS),
+        operation_fields=(fields | legacy_fields | claim_fields)
+        - set(_RUNTIME_SELECTORS),
     )
-    _require_fields(request, fields)
+    if set(request) not in {
+        frozenset(fields | legacy_fields),
+        frozenset(fields | claim_fields),
+    }:
+        raise _InputError("request fields do not match operation schema")
     _identifier(request, "operation_id", workflow=True)
     gate_id = _identifier(request, "gate_id", workflow=True)
     workspace_id = _identifier(request, "workspace_id")
@@ -1981,7 +2257,7 @@ def _open_gate1(
     hermes_run_id = _identifier(request, "hermes_run_id")
     hqa_gate_ref = _ref(request, "hqa_gate_ref")
     source_file_ref = _absolute_path(request, "source_file_ref")
-    universe = _text(request, "universe")
+    expected_claim_digest = _optional_research_claim_digest(request)
     source_digest = _digest(request, "reviewed_source_sha256")
     _attest_invocation(registry, request, workspace_id=workspace_id)
     authority = authority_factory()
@@ -1993,6 +2269,46 @@ def _open_gate1(
         task_ref=task_ref,
     )
     attempt = _attempt(snapshot, attempt_ref)
+    task_claim_digest = getattr(snapshot, "research_claim_digest", None)
+    if task_claim_digest is None:
+        if expected_claim_digest is not None:
+            raise _OperationError(
+                "paper_research_claim_binding_mismatch",
+                retryable=False,
+            )
+        universe = _text(request, "universe")
+        research_start_payload_digest = None
+    else:
+        if expected_claim_digest != task_claim_digest:
+            raise _OperationError(
+                "paper_research_claim_binding_mismatch",
+                retryable=False,
+            )
+        payload = _active_payload(
+            payload_store,
+            authority,
+            payload_ref=str(getattr(attempt, "payload_ref", "")),
+            workspace_id=workspace_id,
+            platform_session_id=platform_session_id,
+            hermes_session_id=str(request["hermes_session_id"]),
+            expected_kind="research_start",
+        )
+        claim_digest = _payload_research_claim_digest(
+            payload_store,
+            payload,
+            platform_session_id=platform_session_id,
+            hermes_session_id=str(request["hermes_session_id"]),
+            expected_digest=expected_claim_digest,
+        )
+        if claim_digest != task_claim_digest:
+            raise _OperationError(
+                "paper_research_claim_binding_mismatch",
+                retryable=False,
+            )
+        universe = f"research-claim:sha256:{task_claim_digest}"
+        research_start_payload_digest = str(
+            getattr(attempt, "payload_digest")
+        )
     registration = _registration(
         gate_id=gate_id,
         gate_kind="gate1",
@@ -2019,6 +2335,9 @@ def _open_gate1(
         final_backtest_summary_digest=None,
         final_backtest_report_ref=None,
         final_backtest_report_digest=None,
+        research_claim_digest=task_claim_digest,
+        research_start_payload_digest=research_start_payload_digest,
+        research_continue_payload_digest=None,
         parent_gate_id=None,
         source_file_ref=source_file_ref,
         universe=universe,
@@ -2150,7 +2469,7 @@ def _open_gate2(
     if request.get("expected_status") != "pending":
         raise _InputError("expected_status must be pending")
     _attest_invocation(registry, request, workspace_id=workspace_id)
-    _parent_gate(
+    parent = _parent_gate(
         registry,
         parent_gate_id=parent_gate_id,
         expected_kind="gate1",
@@ -2175,6 +2494,24 @@ def _open_gate2(
         task_ref=task_ref,
     )
     attempt = _attempt(snapshot, attempt_ref)
+    claim_digest = getattr(snapshot, "research_claim_digest", None)
+    research_start_payload_digest = (
+        str(getattr(attempt, "payload_digest"))
+        if claim_digest is not None
+        else None
+    )
+    if any(
+        parent.get(field) != value
+        for field, value in {
+            "research_claim_digest": claim_digest,
+            "research_start_payload_digest": research_start_payload_digest,
+            "research_continue_payload_digest": None,
+        }.items()
+    ):
+        raise _OperationError(
+            "paper_research_parent_gate_mismatch",
+            retryable=False,
+        )
     registration = _registration(
         gate_id=gate_id,
         gate_kind="gate2",
@@ -2201,6 +2538,9 @@ def _open_gate2(
         final_backtest_summary_digest=None,
         final_backtest_report_ref=None,
         final_backtest_report_digest=None,
+        research_claim_digest=claim_digest,
+        research_start_payload_digest=research_start_payload_digest,
+        research_continue_payload_digest=None,
         parent_gate_id=parent_gate_id,
         source_file_ref=None,
         universe=None,
@@ -2285,11 +2625,12 @@ def _open_gate3(
         "final_backtest_receipt_id",
         "base_commit",
     }
+    claim_fields = {"research_claim_digest"}
     request = _runtime_request(
         request,
-        operation_fields=fields - set(_RUNTIME_SELECTORS),
+        operation_fields=(fields | claim_fields) - set(_RUNTIME_SELECTORS),
     )
-    _require_fields(request, fields)
+    _require_fields_with_optional_group(request, fields, claim_fields)
     outer = _identifier(request, "operation_id", workflow=True)
     gate_id = _identifier(request, "gate_id", workflow=True)
     parent_gate_id = _identifier(request, "parent_gate_id", workflow=True)
@@ -2320,6 +2661,7 @@ def _open_gate3(
     if result_ref != f"result:{final_receipt_id}":
         raise _InputError("result_ref must bind the final backtest receipt")
     base_commit = _commit(request, "base_commit")
+    expected_claim_digest = _optional_research_claim_digest(request)
     _attest_invocation(
         registry,
         request,
@@ -2373,6 +2715,40 @@ def _open_gate3(
         hermes_session_id=str(request["hermes_session_id"]),
         expected_kind="research_continue",
     )
+    claim_digest = _payload_research_claim_digest(
+        payload_store,
+        payload,
+        platform_session_id=platform_session_id,
+        hermes_session_id=str(request["hermes_session_id"]),
+        expected_digest=expected_claim_digest,
+    )
+    if getattr(before, "research_claim_digest", None) != claim_digest:
+        raise _OperationError(
+            "paper_research_claim_binding_mismatch",
+            retryable=False,
+        )
+    research_start_payload_digest = (
+        str(getattr(before.attempts[0], "payload_digest"))
+        if claim_digest is not None and before.attempts
+        else None
+    )
+    research_continue_payload_digest = (
+        str(payload["payload_digest"])
+        if claim_digest is not None
+        else None
+    )
+    if any(
+        parent.get(field) != value
+        for field, value in {
+            "research_claim_digest": claim_digest,
+            "research_start_payload_digest": research_start_payload_digest,
+            "research_continue_payload_digest": None,
+        }.items()
+    ):
+        raise _OperationError(
+            "paper_research_parent_gate_mismatch",
+            retryable=False,
+        )
     intent_expires_at = str(payload["expires_at"])
     binding = {
         "gate_id": gate_id,
@@ -2395,6 +2771,8 @@ def _open_gate3(
         "base_commit": base_commit,
         **final_backtest,
     }
+    if claim_digest is not None:
+        binding["research_claim_digest"] = claim_digest
     continue_operation_id = _operation_id(
         outer,
         "research-continue",
@@ -2424,6 +2802,11 @@ def _open_gate3(
             "subject_hermes_run_id": subject["hermes_run_id"],
             "subject_run_attestation_ref": subject["attestation_ref"],
             "subject_run_attestation_digest": subject["evidence_digest"],
+            "research_claim_digest": claim_digest,
+            "research_start_payload_digest": research_start_payload_digest,
+            "research_continue_payload_digest": (
+                research_continue_payload_digest
+            ),
             **final_backtest,
             "parent_gate_id": parent_gate_id,
             "source_file_ref": None,
@@ -2461,6 +2844,10 @@ def _open_gate3(
             or provider_ref not in getattr(stored_attempt, "provider_evidence_refs")
             or result_ref not in getattr(stored_attempt, "result_refs")
             or getattr(stored_attempt, "domain_gate_ref") != hqa_gate_ref
+            or getattr(stored_attempt, "research_claim_digest", None)
+            != claim_digest
+            or getattr(before, "research_claim_digest", None)
+            != claim_digest
         ):
             raise _OperationError(
                 "paper_research_gate3_evidence_mismatch",
@@ -2568,6 +2955,8 @@ def _open_gate3(
         or result_ref not in getattr(attempt, "result_refs")
         or getattr(attempt, "domain_gate_ref") != hqa_gate_ref
         or snapshot.state != "awaiting_domain_gate"
+        or getattr(attempt, "research_claim_digest", None) != claim_digest
+        or getattr(snapshot, "research_claim_digest", None) != claim_digest
     ):
         raise _OperationError(
             "paper_research_gate3_evidence_mismatch",
@@ -2591,6 +2980,9 @@ def _open_gate3(
         subject_hermes_run_id=subject["hermes_run_id"],
         subject_run_attestation_ref=subject["attestation_ref"],
         subject_run_attestation_digest=subject["evidence_digest"],
+        research_claim_digest=claim_digest,
+        research_start_payload_digest=research_start_payload_digest,
+        research_continue_payload_digest=research_continue_payload_digest,
         **final_backtest,
         parent_gate_id=parent_gate_id,
         source_file_ref=None,
@@ -2676,11 +3068,12 @@ def _complete_after_human_commit(
         "reviewed_commit",
         *_RUNTIME_SELECTORS,
     }
+    claim_fields = {"research_claim_digest"}
     request = _runtime_request(
         request,
-        operation_fields=fields - set(_RUNTIME_SELECTORS),
+        operation_fields=(fields | claim_fields) - set(_RUNTIME_SELECTORS),
     )
-    _require_fields(request, fields)
+    _require_fields_with_optional_group(request, fields, claim_fields)
     outer = _identifier(request, "operation_id", workflow=True)
     gate_id = _identifier(request, "gate_id", workflow=True)
     workspace_id = _identifier(request, "workspace_id")
@@ -2688,6 +3081,7 @@ def _complete_after_human_commit(
     expected = _positive_version(request)
     attempt_ref = _ref(request, "attempt_ref")
     reviewed_commit = _commit(request, "reviewed_commit")
+    expected_claim_digest = _optional_research_claim_digest(request)
     _attest_invocation(registry, request, workspace_id=workspace_id)
     gate = registry.show(gate_id)
     run_ref = gate.get("hqa_run_ref")
@@ -2813,6 +3207,42 @@ def _complete_after_human_commit(
         task_ref=task_ref,
     )
     attempt = _attempt(snapshot, attempt_ref)
+    attempts = tuple(getattr(snapshot, "attempts", ()))
+    if (
+        len(attempts) != 2
+        or getattr(snapshot, "research_claim_digest", None)
+        != expected_claim_digest
+        or any(
+            getattr(item, "research_claim_digest", None)
+            != expected_claim_digest
+            for item in attempts
+        )
+    ):
+        raise _OperationError(
+            "paper_research_claim_binding_mismatch",
+            retryable=False,
+        )
+    expected_gate_lineage = {
+        "research_claim_digest": expected_claim_digest,
+        "research_start_payload_digest": (
+            getattr(attempts[0], "payload_digest")
+            if expected_claim_digest is not None
+            else None
+        ),
+        "research_continue_payload_digest": (
+            getattr(attempts[1], "payload_digest")
+            if expected_claim_digest is not None
+            else None
+        ),
+    }
+    if any(
+        gate.get(field) != value
+        for field, value in expected_gate_lineage.items()
+    ):
+        raise _OperationError(
+            "paper_research_claim_binding_mismatch",
+            retryable=False,
+        )
     gate3_matches = [
         binding
         for binding in getattr(attempt, "gate3_bindings")
@@ -2890,7 +3320,11 @@ def _complete_after_human_commit(
         terminal_operation_id=getattr(task_completion, "operation_id"),
     )
     completion_evidence = {
-        "schema_version": "agent-v0.2-paper-completion/v1",
+        "schema_version": (
+            "agent-v0.2-paper-completion/v2"
+            if expected_claim_digest is not None
+            else "agent-v0.2-paper-completion/v1"
+        ),
         "task_ref": task_ref,
         "task_version": final.version,
         "task_status": "completed",
@@ -2944,8 +3378,21 @@ def _complete_after_human_commit(
         "workflow_audit_ref": workflow_audit_ref,
         "workflow_audit_digest": workflow_audit_digest,
     }
+    if expected_claim_digest is not None:
+        completion_evidence.update(
+            {
+                "research_claim_digest": expected_claim_digest,
+                "research_start_payload_digest": attempts[0].payload_digest,
+                "research_continue_payload_digest": attempts[1].payload_digest,
+            }
+        )
+    expected_completion_fields = (
+        _CLAIM_COMPLETION_EVIDENCE_FIELDS
+        if expected_claim_digest is not None
+        else _COMPLETION_EVIDENCE_FIELDS
+    )
     if (
-        set(completion_evidence) != _COMPLETION_EVIDENCE_FIELDS
+        set(completion_evidence) != expected_completion_fields
         or completion_evidence["task_terminal_outcome"] != "completed"
         or completion_evidence["attempt_terminal_outcome"] != "completed"
         or completion_evidence["domain_gate_outcome"] != "passed"
@@ -2978,17 +3425,34 @@ def _complete_after_human_commit(
             "workspace_id": workspace_id,
         }
     )
+    completion_projection_fields = (
+        set(completion_evidence) & _PLATFORM_COMPLETION_FIELDS
+    )
     if (
-        platform_completion.get("gate_id") != gate_id
+        set(platform_completion) != _PLATFORM_COMPLETION_FIELDS
+        or platform_completion.get("gate_id") != gate_id
         or platform_completion.get("workspace_id") != workspace_id
         or platform_completion.get("status") != "completed"
         or platform_completion.get("hqa_completion_receipt_ref") != completion_ref
         or platform_completion.get("hqa_completion_receipt_digest") != completion_digest
+        or platform_completion.get("reviewed_commit") != reviewed_commit
+        or platform_completion.get("completion_evidence")
+        != completion_evidence
+        or type(platform_completion.get("created_at")) is not str
+        or not str(platform_completion["created_at"]).endswith("Z")
+        or any(
+            platform_completion.get(field) != completion_evidence[field]
+            for field in completion_projection_fields
+        )
     ):
         raise _OperationError(
             "paper_research_platform_completion_mismatch",
             retryable=False,
         )
+    platform_completion_projection = {
+        field: platform_completion[field]
+        for field in sorted(_PLATFORM_COMPLETION_FIELDS)
+    }
     return {
         "contract": _CONTRACT,
         "operation": "complete-after-human-commit",
@@ -3005,7 +3469,7 @@ def _complete_after_human_commit(
         "completion_evidence": completion_evidence,
         "hqa_completion_receipt_ref": completion_ref,
         "hqa_completion_receipt_digest": completion_digest,
-        "platform_completion": platform_completion,
+        "platform_completion": platform_completion_projection,
         "replayed": bool(task_completion.replayed),
     }
 
@@ -3045,6 +3509,7 @@ def _execute(
             request,
             authority_factory=authority_factory,
             registry=registry,
+            payload_store=payload_store,
         )
     if operation == "open-gate2":
         return _open_gate2(

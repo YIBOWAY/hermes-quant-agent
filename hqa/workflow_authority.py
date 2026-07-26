@@ -19,6 +19,7 @@ from hqa.workflow_contract import (
     AttemptSnapshot,
     BeginReconcile,
     BindCandidateManifest,
+    BindResearchClaim,
     COMMAND_TYPES,
     CompleteAttempt,
     CompleteTask,
@@ -1059,6 +1060,35 @@ class WorkflowAuthority:
                     "plan_source_ref": task["plan_source_ref"],
                 },
             )
+        if type(command) is BindResearchClaim:
+            attempt = self._attempt(task, command.attempt_ref)
+            if (
+                attempt is not task["attempts"][-1]
+                or attempt["attempt_number"] != 1
+                or attempt["state"] != "planned"
+                or attempt["payload_ref"] != command.payload_ref
+                or attempt["submission_command_ref"] is not None
+                or attempt["research_claim_digest"] is not None
+                or (
+                    task["research_claim_digest"] is not None
+                    and task["research_claim_digest"]
+                    != command.research_claim_digest
+                )
+            ):
+                _error("workflow_binding_conflict")
+            return (
+                "research_claim_bound",
+                task["task_ref"],
+                command.attempt_ref,
+                {
+                    "attempt_ref": command.attempt_ref,
+                    "payload_ref": command.payload_ref,
+                    "payload_digest": payload_digest_from_ref(
+                        command.payload_ref
+                    ),
+                    "research_claim_digest": command.research_claim_digest,
+                },
+            )
         if type(command) is ProposePlan:
             return (
                 "plan_proposed",
@@ -1416,6 +1446,7 @@ class WorkflowAuthority:
             "gate1_manifest_digest": None,
             "gate3_refs": [],
             "result_refs": [],
+            "research_claim_digest": None,
             "terminal_outcome": None,
             "attempts": [self._new_attempt(data, record)],
         }
@@ -1428,6 +1459,41 @@ class WorkflowAuthority:
         data: Any,
     ) -> None:
         event_type = record["event_type"]
+        if event_type == "research_claim_bound":
+            data = _require_fields(
+                data,
+                {
+                    "attempt_ref",
+                    "payload_ref",
+                    "payload_digest",
+                    "research_claim_digest",
+                },
+            )
+            attempt = self._attempt(task, data["attempt_ref"])
+            if (
+                attempt is not task["attempts"][-1]
+                or attempt["attempt_number"] != 1
+                or attempt["state"] != "planned"
+                or attempt["payload_ref"] != data["payload_ref"]
+                or attempt["payload_digest"] != data["payload_digest"]
+                or data["payload_digest"]
+                != payload_digest_from_ref(data["payload_ref"])
+                or not _safe_digest(data["research_claim_digest"])
+                or attempt["research_claim_digest"] is not None
+                or (
+                    task["research_claim_digest"] is not None
+                    and task["research_claim_digest"]
+                    != data["research_claim_digest"]
+                )
+            ):
+                _error("workflow_binding_conflict")
+            attempt["research_claim_digest"] = data[
+                "research_claim_digest"
+            ]
+            task["research_claim_digest"] = data[
+                "research_claim_digest"
+            ]
+            return
         if event_type == "research_continued":
             data = _require_fields(
                 data,
@@ -1491,7 +1557,11 @@ class WorkflowAuthority:
                     managed_session_ref=task["managed_session_ref"],
                 ),
             )
-            task["attempts"].append(self._new_attempt(data, record))
+            continued_attempt = self._new_attempt(data, record)
+            continued_attempt["research_claim_digest"] = task[
+                "research_claim_digest"
+            ]
+            task["attempts"].append(continued_attempt)
             return
         if event_type in ("plan_proposed", "plan_revised"):
             data = _require_fields(
@@ -2146,6 +2216,7 @@ class WorkflowAuthority:
             "payload_tombstone_operation_id": None,
             "payload_tombstone_operation_digest": None,
             "payload_tombstone_workflow_event_id": None,
+            "research_claim_digest": None,
             "plan_version": data.get("plan_version"),
             "plan_digest": data.get("plan_digest"),
             "plan_source_ref": data.get("plan_source_ref"),
@@ -2914,6 +2985,9 @@ class WorkflowAuthority:
                     "terminal_observation_digest"
                 ],
                 terminal_outcome=attempt["terminal_outcome"],
+                research_claim_digest=attempt[
+                    "research_claim_digest"
+                ],
             )
             for attempt in task["attempts"]
         )
@@ -2942,6 +3016,7 @@ class WorkflowAuthority:
             result_refs=tuple(task["result_refs"]),
             terminal_outcome=task["terminal_outcome"],
             attempts=attempts,
+            research_claim_digest=task["research_claim_digest"],
         )
 
     def _public_event(self, record: dict[str, Any]) -> WorkflowEvent:

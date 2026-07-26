@@ -4,6 +4,7 @@ import pytest
 
 import hqa.workflow_contract as workflow_contract_module
 from hqa.workflow_contract import (
+    BindResearchClaim,
     COMMAND_TYPES,
     ConfirmFormula,
     ConfirmPlan,
@@ -67,6 +68,39 @@ def test_start_and_continue_require_exact_content_addressed_payload_refs() -> No
                 invalid,
                 "2026-07-20T01:02:03Z",
             )
+
+
+def test_research_claim_binding_is_content_addressed_and_closed() -> None:
+    command = BindResearchClaim(
+        "op-bind-claim",
+        "task:one",
+        1,
+        "attempt:one",
+        PAYLOAD_A,
+        DIGEST_B,
+    )
+
+    document = command_to_document(command)
+    assert document == {
+        "schema_version": 2,
+        "kind": "workflow.bind_research_claim",
+        "operation_id": "op-bind-claim",
+        "task_ref": "task:one",
+        "expected_version": 1,
+        "attempt_ref": "attempt:one",
+        "payload_ref": PAYLOAD_A,
+        "research_claim_digest": DIGEST_B,
+    }
+    assert parse_workflow_command_document(document) == command
+    with pytest.raises(WorkflowContractError):
+        BindResearchClaim(
+            "op-bind-claim",
+            "task:one",
+            1,
+            "attempt:one",
+            PAYLOAD_A,
+            "B" * 64,
+        )
 
 
 def test_existing_task_commands_require_positive_expected_version_and_exact_refs() -> None:

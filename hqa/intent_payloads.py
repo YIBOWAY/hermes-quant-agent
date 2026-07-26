@@ -19,6 +19,7 @@ import time
 from typing import Any, Callable, Iterator, Mapping, Optional
 
 from hqa.intent_payload_crypto import CryptoFailure, IntentPayloadCrypto
+from hqa.research_claim import ResearchClaimError, normalize_research_claim
 
 
 _SCHEMA_VERSION = "2.0"
@@ -38,7 +39,8 @@ _REQUEST_FIELDS = frozenset(
         "ttl_days",
     }
 )
-_ENVELOPE_FIELDS = _REQUEST_FIELDS | {
+_RESEARCH_CLAIM_FIELD = frozenset({"research_claim"})
+_ENVELOPE_METADATA_FIELDS = {
     "provider_policy_digest",
     "created_at",
     "expires_at",
@@ -210,7 +212,10 @@ def _validate_consumer_for_kind(value: Any, kind: str) -> str:
 
 
 def _normalize_request(request: Any) -> dict[str, Any]:
-    if type(request) is not dict or set(request) != _REQUEST_FIELDS:
+    if type(request) is not dict or set(request) not in {
+        _REQUEST_FIELDS,
+        _REQUEST_FIELDS | _RESEARCH_CLAIM_FIELD,
+    }:
         raise _invalid("intent request fields are invalid")
     if request["schema_version"] != _SCHEMA_VERSION:
         raise _invalid("intent schema_version is unsupported")
@@ -252,6 +257,15 @@ def _normalize_request(request: Any) -> dict[str, Any]:
         "prompt": prompt,
         "ttl_days": ttl_days,
     }
+    if "research_claim" in request:
+        if kind not in {"research_start", "research_continue"}:
+            raise _invalid("research_claim is valid only for research intents")
+        try:
+            normalized["research_claim"] = normalize_research_claim(
+                request["research_claim"]
+            )
+        except ResearchClaimError as exc:
+            raise _invalid("research_claim is invalid") from exc
     if len(_canonical_bytes(normalized)) > _MAX_ENVELOPE_BYTES:
         raise _invalid("intent canonical envelope exceeds the maximum size")
     return normalized
@@ -2256,11 +2270,19 @@ class IntentPayloadStore:
         if _digest_bytes(plaintext) != entry["payload_digest"]:
             raise _corrupt("intent plaintext digest does not match its reference")
         envelope = self._decode_canonical_json(plaintext, "intent plaintext envelope")
-        if type(envelope) is not dict or set(envelope) != _ENVELOPE_FIELDS:
+        request_fields = (
+            _REQUEST_FIELDS | _RESEARCH_CLAIM_FIELD
+            if type(envelope) is dict and "research_claim" in envelope
+            else _REQUEST_FIELDS
+        )
+        if (
+            type(envelope) is not dict
+            or set(envelope) != request_fields | _ENVELOPE_METADATA_FIELDS
+        ):
             raise _corrupt("intent plaintext envelope fields are invalid")
         try:
             normalized = _normalize_request(
-                {field: envelope[field] for field in _REQUEST_FIELDS}
+                {field: envelope[field] for field in request_fields}
             )
         except IntentPayloadError as exc:
             raise _corrupt("intent plaintext envelope values are invalid") from exc

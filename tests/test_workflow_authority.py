@@ -14,6 +14,7 @@ from hqa.workflow_authority import WorkflowAuthority, WorkflowAuthorityError
 from hqa.workflow_contract import (
     BeginReconcile,
     BindCandidateManifest,
+    BindResearchClaim,
     CompleteAttempt,
     CompleteTask,
     ConfirmFormula,
@@ -60,6 +61,233 @@ def _start(store: WorkflowAuthority):
     return store.apply(
         StartResearch("op-start", WORKSPACE, SESSION, PAYLOAD_A, EXPIRES)
     )
+
+
+def test_research_claim_digest_is_durable_on_task_and_exact_attempt(
+    tmp_path,
+) -> None:
+    store = _store(tmp_path)
+    started = _start(store)
+    assert started.attempt_ref is not None
+    claim_digest = "7" * 64
+
+    bound = store.apply(
+        BindResearchClaim(
+            "op-bind-research-claim",
+            started.task_ref,
+            started.task_version,
+            started.attempt_ref,
+            PAYLOAD_A,
+            claim_digest,
+        )
+    )
+    replayed = store.apply(
+        BindResearchClaim(
+            "op-bind-research-claim",
+            started.task_ref,
+            started.task_version,
+            started.attempt_ref,
+            PAYLOAD_A,
+            claim_digest,
+        )
+    )
+    snapshot = store.snapshot(started.task_ref)
+
+    assert bound.task_version == 2
+    assert replayed.replayed is True
+    assert snapshot.research_claim_digest == claim_digest
+    assert snapshot.attempts[0].research_claim_digest == claim_digest
+    assert snapshot.attempts[0].payload_digest == "a" * 64
+    with pytest.raises(WorkflowAuthorityError) as conflict:
+        store.apply(
+            BindResearchClaim(
+                "op-bind-research-claim-drift",
+                started.task_ref,
+                bound.task_version,
+                started.attempt_ref,
+                PAYLOAD_A,
+                "8" * 64,
+            )
+        )
+    assert conflict.value.code == "workflow_binding_conflict"
+
+
+def test_research_claim_is_inherited_by_attempt_two_and_claimless_task_cannot_upgrade(
+    tmp_path,
+) -> None:
+    def continue_after_plan(
+        store: WorkflowAuthority,
+        *,
+        prefix: str,
+        bind_claim: bool,
+    ):
+        started = store.apply(
+            StartResearch(
+                f"{prefix}-start",
+                f"workspace:{prefix}",
+                f"session:{prefix}",
+                PAYLOAD_A,
+                EXPIRES,
+            )
+        )
+        assert started.attempt_ref is not None
+        receipt = started
+        if bind_claim:
+            receipt = store.apply(
+                BindResearchClaim(
+                    f"{prefix}-claim",
+                    receipt.task_ref,
+                    receipt.task_version,
+                    started.attempt_ref,
+                    PAYLOAD_A,
+                    "7" * 64,
+                )
+            )
+        receipt = store.apply(
+            ObserveSubmission(
+                f"{prefix}-submit",
+                receipt.task_ref,
+                receipt.task_version,
+                started.attempt_ref,
+                f"command:{prefix}",
+            )
+        )
+        receipt = store.apply(
+            ObserveRun(
+                f"{prefix}-run",
+                receipt.task_ref,
+                receipt.task_version,
+                started.attempt_ref,
+                f"command:{prefix}",
+                f"run:{prefix}",
+            )
+        )
+        receipt = store.apply(
+            ObserveProviderEvidence(
+                f"{prefix}-provider",
+                receipt.task_ref,
+                receipt.task_version,
+                started.attempt_ref,
+                f"run:{prefix}",
+                f"provider-evidence:{prefix}",
+            )
+        )
+        receipt = store.apply(
+            ProposePlan(
+                f"{prefix}-plan",
+                receipt.task_ref,
+                receipt.task_version,
+                1,
+                PLAN,
+                f"run:{prefix}",
+                True,
+            )
+        )
+        receipt = store.apply(
+            RequestPlanConfirmation(
+                f"{prefix}-request-plan",
+                receipt.task_ref,
+                receipt.task_version,
+                1,
+                PLAN,
+            )
+        )
+        receipt = store.apply(
+            CompleteAttempt(
+                f"{prefix}-complete-plan",
+                receipt.task_ref,
+                receipt.task_version,
+                started.attempt_ref,
+                "completed",
+                f"run:{prefix}",
+                f"provider-evidence:{prefix}",
+            )
+        )
+        receipt = store.apply(
+            ConfirmPlan(
+                f"{prefix}-confirm-plan",
+                receipt.task_ref,
+                receipt.task_version,
+                1,
+                PLAN,
+                "Reviewed.",
+            )
+        )
+        receipt = store.apply(
+            ConfirmFormula(
+                f"{prefix}-confirm-formula",
+                receipt.task_ref,
+                receipt.task_version,
+                f"gate:{prefix}",
+                SOURCE,
+                "Reviewed.",
+            )
+        )
+        receipt = store.apply(
+            BindCandidateManifest(
+                f"{prefix}-candidate",
+                receipt.task_ref,
+                receipt.task_version,
+                f"gate:{prefix}",
+                f"candidate:{prefix}",
+                "9" * 64,
+            )
+        )
+        continued = store.apply(
+            ContinueResearch(
+                f"{prefix}-continue",
+                receipt.task_ref,
+                receipt.task_version,
+                PAYLOAD_B,
+                EXPIRES,
+            )
+        )
+        assert continued.attempt_ref is not None
+        return continued
+
+    claimed = _store(tmp_path / "claimed")
+    claimed_continued = continue_after_plan(
+        claimed,
+        prefix="claimed",
+        bind_claim=True,
+    )
+    claimed_snapshot = claimed.snapshot(claimed_continued.task_ref)
+    assert [item.research_claim_digest for item in claimed_snapshot.attempts] == [
+        "7" * 64,
+        "7" * 64,
+    ]
+    claimed.rebuild_projection()
+    rebuilt = claimed.snapshot(claimed_continued.task_ref)
+    assert [item.research_claim_digest for item in rebuilt.attempts] == [
+        "7" * 64,
+        "7" * 64,
+    ]
+
+    claimless = _store(tmp_path / "claimless")
+    claimless_continued = continue_after_plan(
+        claimless,
+        prefix="claimless",
+        bind_claim=False,
+    )
+    with pytest.raises(WorkflowAuthorityError) as conflict:
+        claimless.apply(
+            BindResearchClaim(
+                "claimless-late-bind",
+                claimless_continued.task_ref,
+                claimless_continued.task_version,
+                claimless_continued.attempt_ref,
+                PAYLOAD_B,
+                "7" * 64,
+            )
+        )
+    assert conflict.value.code == "workflow_binding_conflict"
+    claimless.rebuild_projection()
+    replayed = claimless.snapshot(claimless_continued.task_ref)
+    assert replayed.research_claim_digest is None
+    assert [item.research_claim_digest for item in replayed.attempts] == [
+        None,
+        None,
+    ]
 
 
 def _start_with_run(store: WorkflowAuthority):

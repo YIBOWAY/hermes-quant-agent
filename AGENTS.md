@@ -33,14 +33,28 @@ Rules for AI agents working in this repository.
     review, sealed candidate evidence, and PostgreSQL-only release/cutover
     authority. Bind evidence to the actual clean three-repo
     HEADs; dated commit anchors below are historical only.
-  - Migrations 016 through 024 are the additive release-candidate ladder after
+  - Migrations 016 through 026 are the additive release-candidate ladder after
     the live 006–015 baseline. Never infer their live state from source or this
     file: inspect PostgreSQL migration metadata, schema readiness, role grants,
     and the runtime health projection in the current operator window. Schema
     readiness never implies public write authorization. Migration 023 preserves
     one stable conversation root while binding every Run to its resolved
     compression tip; migration 024 makes approval/stop external outcomes
-    durable and replay-safe.
+    durable and replay-safe. Migration 025 fences every new managed Session and
+    Command to either the active candidate or the exact accepted release at the
+    current paper-authority epoch; a later paper-authority mutation therefore
+    invalidates the stale release path. Migration 026 seals the HQA research
+    claim plus start/continue payload digests across Gate 1/2/3 and requires
+    exact v2 completion replay while preserving only the explicitly claim-less
+    historical v1 envelope.
+  - HQA's research claim body (paper title plus ordered universe) remains only
+    in the encrypted Intent Payload Store; workflow, PostgreSQL and public
+    completion projections carry digests. Claim binding is limited to Attempt
+    1, terminal completion first re-verifies the exact pre-terminal
+    Task/Attempt lineage, and the Platform completion response is a closed
+    42-key contract with no passthrough extras. This claim/completion hardening
+    is source + isolated-review **APPROVE**; it is not evidence that migrations
+    025/026 have been applied to live PostgreSQL or that release/cutover is open.
   - The real paper-factor path completed exact Gate 1, Gate 2 CAS, Futu final
     receipt `backtest-32a022e60947473be481a2404d85646d`, human Gate 3 commit
     `7ad6a92`, registry promotion and cleanup. It is an operational US ETF proxy
@@ -71,9 +85,14 @@ Rules for AI agents working in this repository.
   separate local authorization (public cutover still OFF).
 - V4–V8 M1–M6 details remain dated delivery evidence. The current order is:
   finish the final UI/contract; refresh full/focused suites and explicitly
-  migrate the live schema; seal the exact test-only preflight; open a bounded
+  inspect the live schema; in one controlled window perform
+  **backup -> migration 025 -> migration 026 -> service restart**
+  (applying any missing earlier ladder entries in order before 025); seal the
+  exact test-only preflight; open a bounded
   **private candidate admission**; start and verify connector liveness; execute
-  complete candidate browser E2E and seal its real-flow facts; accept the exact
+  complete candidate browser E2E and seal its real-flow facts. Thus the
+  data-plane order is always **backup -> 025 -> 026 -> restart -> live E2E**.
+  Accept the exact
   candidate; only then open the final runtime-bound release stamp/public
   cutover, exercise rollback, and run a final public smoke. Authoritative status
   is `docs/README.md` plus the active plan. A public cutover is never a
@@ -105,7 +124,7 @@ Rules for AI agents working in this repository.
   and not Plan-V6 full-UI acceptance. A fake Hermes adapter is for hermetic
   tests only, never a temporary public user path.
 - Migrations 006 through 015 were applied to live `quantplatform` under
-  explicit authorization. Migrations 016 through 024 form one ordered additive
+  explicit authorization. Migrations 016 through 026 form one ordered additive
   release-candidate upgrade and must be applied only by the explicit migration
   command after backup, isolated replay and current live inspection. Do not
   re-apply the obsolete `UNIQUE(task_id)`-only 006 or treat an old replay plan
@@ -113,7 +132,11 @@ Rules for AI agents working in this repository.
   exact columns and must fail closed on ACL drift. Migration 022 makes both
   selected source/fork point and Hermes-canonical resolved parent mandatory;
   023 separates the durable conversation root from the resolved Run tip; 024
-  records approval/stop outcome CAS and consumes the exact control outbox.
+  records approval/stop outcome CAS and consumes the exact control outbox; 025
+  binds managed Session/Command writes to the current paper epoch plus the
+  active candidate or accepted release; 026 seals research claim/start/continue
+  digests through Gate 1/2/3 and splits completion into claim-less v1 versus
+  exact-lineage v2.
   Schema readiness and the constrained-role canary are not public write
   authorization.
 - Treat the local `~/.hermes/hermes-agent` checkout as a third owned dependency

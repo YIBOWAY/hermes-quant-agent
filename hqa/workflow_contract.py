@@ -162,6 +162,21 @@ class ContinueResearch(_ExistingTaskOperation):
 
 
 @dataclass(frozen=True)
+class BindResearchClaim(_ExistingTaskOperation):
+    """Bind one sealed research claim to the exact payload-backed Attempt."""
+
+    attempt_ref: str
+    payload_ref: str
+    research_claim_digest: str
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _validate_ref(self.attempt_ref, "attempt_ref", "attempt:")
+        _validate_payload_ref(self.payload_ref)
+        _validate_digest(self.research_claim_digest, "research_claim_digest")
+
+
+@dataclass(frozen=True)
 class ProposePlan(_ExistingTaskOperation):
     plan_version: int
     plan_digest: str
@@ -495,6 +510,7 @@ class CompleteTask(_ExistingTaskOperation):
 WorkflowCommand = Union[
     StartResearch,
     ContinueResearch,
+    BindResearchClaim,
     ProposePlan,
     RevisePlan,
     RequestPlanConfirmation,
@@ -519,6 +535,7 @@ WorkflowCommand = Union[
 COMMAND_TYPES = (
     StartResearch,
     ContinueResearch,
+    BindResearchClaim,
     ProposePlan,
     RevisePlan,
     RequestPlanConfirmation,
@@ -710,6 +727,7 @@ class AttemptSnapshot:
     reconcile_reason: Optional[str]
     terminal_observation_digest: Optional[str]
     terminal_outcome: Optional[str]
+    research_claim_digest: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -734,6 +752,7 @@ class WorkflowSnapshot:
     result_refs: Tuple[str, ...]
     terminal_outcome: Optional[str]
     attempts: Tuple[AttemptSnapshot, ...]
+    research_claim_digest: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -801,6 +820,7 @@ __all__ = (
     "AttemptSnapshot",
     "BeginReconcile",
     "BindCandidateManifest",
+    "BindResearchClaim",
     "COMMAND_TYPES",
     "CompleteAttempt",
     "CompleteTask",

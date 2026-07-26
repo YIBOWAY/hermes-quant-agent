@@ -12,7 +12,7 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。**2026-07-26 final-source candidate：** 三仓 release branch 已包含 managed Web session、精确消息 fork UI、Web Run-stop 控件、selected + Hermes-resolved 双重 lineage、conversation-root/resolved-run-tip identity、durable approval/stop outcome、自然语言论文 intent 入口、Gate 1 exact-source 浏览器复核、sealed candidate evidence 与 PostgreSQL-only release/cutover authority。016–024 是 006–015 之后的有序 additive ladder。是否已迁移、connector 是否 fresh、candidate/release/cutover 是否打开，必须以当前 PostgreSQL/health/runtime evidence 为准，不能由文档推导。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。**2026-07-26 final-source candidate：** 三仓 release branch 已包含 managed Web session、精确消息 fork UI、Web Run-stop 控件、selected + Hermes-resolved 双重 lineage、conversation-root/resolved-run-tip identity、durable approval/stop outcome、自然语言论文 intent 入口、Gate 1 exact-source 浏览器复核、sealed candidate evidence 与 PostgreSQL-only release/cutover authority。016–026 是 006–015 之后的有序 additive ladder；025 增加 current paper epoch/candidate/release fencing，026 封存 research claim/start/continue lineage 及 v1/v2 completion。是否已迁移、connector 是否 fresh、candidate/release/cutover 是否打开，必须以当前 PostgreSQL/health/runtime evidence 为准，不能由文档推导。 |
 | V0 Workspace v1 candidate ADR | [`design/2026-07-16-agent-workspace-v1-adr.md`](design/2026-07-16-agent-workspace-v1-adr.md) | **SOURCE + FORMAL EVIDENCE + INDEPENDENT CLOSE-OUT DONE**；这只冻结 interface/cardinality/authority，不授权 runtime/live effect。 |
 | L2a-Send thin write rail ADR | [`design/2026-07-22-l2a-send-thin-write-rail-adr.md`](design/2026-07-22-l2a-send-thin-write-rail-adr.md) | Browser composite `submit-turn` → HQA Intent Payload Store → ledger `conversation_turn` → worker bind/resolve → Hermes；**M1+M2 ACCEPT@2026-07-22**。≠ Plan-V6 全 UI。 |
 | V0/V2 release closure | [`audits/2026-07-19-v0-v2-release-closure.md`](audits/2026-07-19-v0-v2-release-closure.md) | 三仓 source、live identity、validation binding 与 independent `CLEAR` 的事实源；verdict 明确 `release_authorized=false`。 |
@@ -32,9 +32,10 @@
 ## 一句话项目阶段
 
 **Agent v0.2 当前 source 已进入 final candidate；运行态是否 DONE 必须现场验证。** 三仓最终架构已收敛到 managed Hermes
-Session/Run + PostgreSQL AgentWorkspace + deterministic HQA connector；016–024 补齐 candidate
+Session/Run + PostgreSQL AgentWorkspace + deterministic HQA connector；016–026 补齐 candidate
 admission、真实纵切证据、release authority、paper Gate/run attestation、resolved fork lineage、
-conversation root / resolved Run tip 与 crash-safe approval/stop outcome。
+conversation root / resolved Run tip、crash-safe approval/stop outcome、current paper epoch release
+fencing 与 sealed research claim/start/continue lineage。
 普通 Web 用户可从共享 follow spine 对精确非终态 Run 发起停止，并在未知结果时复用同一
 `client_action_id`；不需要手写 BFF API。
 真实论文路径已完成 Gate 1 exact source、
@@ -117,9 +118,9 @@ browser E2E 仍未完成；不得从历史 M1–M6 ACCEPT 推导 `release_author
 | Scene-B Gate 1/2/final/Gate 3（Wave 2） | **DONE / HISTORICAL** | 人类 Gate 3 commit `524e791e5e3e22cec12a4166ad8fc3617c735566` 已进入 promoted registry 并 cleanup。 |
 | Agent v0.2 paper factor Gate 1/2/final/Gate 3 | **REAL BACKEND FLOW DONE / WEB PENDING** | exact source/candidate/digest、Futu final receipt、human commit `7ad6a92` 与 cleanup 已闭环；这是 US ETF operational proxy，不是全球论文完整复现。 |
 | Hermes official API session read | **DONE（代码 + 本机只读验收）** | 平台 BFF 能读真实 session list/detail/messages；浏览器不持有 Hermes key。 |
-| PostgreSQL Agent v0.2 authority | **006–015 LIVE BASELINE / 016–024 FINAL LADDER** | 016–024 为 candidate、纵切证据、release、paper attestation、resolved lineage、Run tip 与 control outcome 的 additive schema；live 状态必须现场查询。schema readiness 仍不自动授权 public write。 |
+| PostgreSQL Agent v0.2 authority | **006–015 LIVE BASELINE / 016–026 FINAL LADDER** | 016–026 为 candidate、纵切证据、release、paper attestation、resolved lineage、Run tip、control outcome、current paper epoch fencing 与 research claim lineage 的 additive schema；025 让旧 release 在 paper-authority epoch 漂移后失效，026 要求 Gate 1/2 的 claim+start 与 Gate 3 新增 continue 摘要严格传递，并以 claim-less v1 / exact-lineage v2 completion 分流。live 状态必须现场查询；schema readiness 仍不自动授权 public write。 |
 | deterministic connector worker | **FINAL SOURCE / RUNTIME-DYNAMIC** | supervised claim/lease/recover/dispatch、managed-session provisioning、capability drift probe 与 fresh liveness 已落地；是否正在常驻且可放行必须读当前 generation/advisory-lock/health，不能看源码猜。 |
-| Task/Attempt + payload + exact binding | **FOUNDATION REVISED AND ACCEPTED** | HQA append-only journal、projection/replay/CAS、encrypted payload、multi-Attempt binding 与跨权威 audit 已对齐；旧 `UNIQUE(task_id)` 006 问题是历史 blocker，不再是当前 NEXT。 |
+| Task/Attempt + payload + exact binding | **FOUNDATION REVISED AND ACCEPTED** | HQA append-only journal、projection/replay/CAS、encrypted payload、multi-Attempt binding 与跨权威 audit 已对齐；research claim 明文（论文标题 + 有序 universe）只进 encrypted Intent Payload Store，公开 workflow/Platform 只投影 digest；claim 只允许绑定 Attempt 1，terminal completion 前重验 pre-terminal exact lineage，Platform completion 为闭合 42-key 合同。该增量已 source + isolated review APPROVE；旧 `UNIQUE(task_id)` 006 问题是历史 blocker，不再是当前 NEXT。 |
 | V3 Intent / WorkflowAuthority | **SOURCE ACCEPTED / LOCAL DARK INSTALL DONE** | AES-GCM/Keychain intent、TTL/tombstone、Task `1:N` Attempt、CAS/replay/backup 与只读 Hermes skill 已交付；唯一 retention cron 为 local no-agent。无 Web/Hermes mutation/provider/DB/交易。 |
 | Browser Gate 1/2/3 | **FINAL EXACT CONTRACT SOURCE** | Gate 1 从 owner-only BFF 读取并由 WebCrypto 重算 exact UTF-8 bytes；Gate 2 只允许 human-supplied exact CAS；Gate 3 prepare-only + 人类 Git commit。浏览器实测结果属于运行证据。 |
 | Hermes chat/stream/resume/stop | **MANAGED FINAL SOURCE / RUNTIME-DYNAMIC** | durable managed Session/Run、resume、provider evidence、approval/stop 和 exact-message fork 已进入受控 Hermes candidate；实际开放必须同时满足 clean runtime identity、accepted candidate、release stamp/cutover、connector 与 recovery evidence。 |
@@ -310,22 +311,25 @@ periodic/manual update + no-agent watcher；watcher 只报告漂移，不得 ins
    commit/runtime digest。
 2. **刷新完整验证。** Platform non-PG + isolated/live PG、HQA full、Hermes focused contract、
    frontend test/typecheck/lint/build 全绿；Hermes 40k upstream suite不在 gate 内。
-3. **确认并升级 live DB facts。** 先备份和隔离恢复演练，再按顺序 apply 016–024；复核
-   constrained role exact grants、ACL drift fail-closed、managed-session provisioning canary、
-   root/tip 与 run-control outcome readiness。
-4. **封存真实 evidence。** 绑定测试 artifacts、真实 Vertical A、论文 Gate 1/2/3 via
-   `/hermes`、multi-turn、restart recovery、exact-message fork 和 zero-orders safety receipts。
-5. **打开私有 candidate admission。** 只绑定 test-only preflight，保持 public OFF；候选 admission
+3. **确认并升级 live DB facts。** 先备份和隔离恢复演练；若 016–024 有缺失，先按顺序补齐，
+   然后严格执行 **backup → 025 → 026 → restart**。复核 constrained role exact
+   grants、ACL drift fail-closed、managed-session provisioning canary、root/tip、run-control
+   outcome、current paper epoch fencing 与 research lineage readiness。
+4. **打开私有 candidate admission。** 只绑定 test-only preflight，保持 public OFF；候选 admission
    是 connector 和真实 `/hermes` 验收的唯一临时准入事实。
-6. **启动 connector 并验 liveness。** fresh heartbeat、managed-session provisioning、空队列
+5. **启动 connector 并验 liveness，执行 live E2E。** fresh heartbeat、managed-session provisioning、空队列
    零 provider；在 candidate admission 下完成 `/hermes` 多轮、刷新/重启、历史 session
-   read-only + exact fork、两条纵切、approval/stop/result evidence。
-7. **封存并接受 exact candidate。** 校验五条 canonical flow、schema/runtime identity 和
+   read-only + exact fork、两条纵切、approval/stop/result evidence。数据面顺序始终是
+   **backup → 025 → 026 → restart → live E2E**；candidate/preflight 是 restart 后、E2E 前的
+   准入控制步骤。
+6. **封存并接受 exact candidate。** 绑定测试 artifacts、真实 Vertical A、论文 Gate 1/2/3、
+   multi-turn、restart recovery、exact-message fork 与 zero-orders safety receipts；校验五条
+   canonical flow、schema/runtime identity 和
    zero-orders snapshot，生成 final evidence 后接受同一 admission。
-8. **打开 operator release stamp 与 public cutover。** 必须绑定已接受 candidate、final clean
+7. **打开 operator release stamp 与 public cutover。** 必须绑定已接受 candidate、final clean
    runtime identity、schema fingerprint 和 sealed evidence；完成 public smoke 与 close
    cutover/stamp 回滚演练，必要时以全新 action 再打开最终状态。
-9. **最终 operator close-out seal。** 将 DONE/NOT DONE 写入外部 mode-600 密封报告并绑定
+8. **最终 operator close-out seal。** 将 DONE/NOT DONE 写入外部 mode-600 密封报告并绑定
    PostgreSQL candidate/stamp/cutover、三仓 runtime digest、测试和真实 flow artifacts。
    candidate 之后不得用 docs-only commit 给当前 release 改名；任何仓库提交都会改变 runtime
    identity，必须关闭旧 stamp/cutover 并完整重跑 candidate/evidence/release。legacy
