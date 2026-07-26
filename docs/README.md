@@ -12,7 +12,7 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。**2026-07-26 final-source candidate：** 三仓 release branch 已包含 managed Web session、精确消息 fork UI、selected + Hermes-resolved 双重 lineage、conversation-root/resolved-run-tip identity、durable approval/stop outcome、自然语言论文 intent 入口、Gate 1 exact-source 浏览器复核、sealed candidate evidence 与 PostgreSQL-only release/cutover authority。016–024 是 006–015 之后的有序 additive ladder。是否已迁移、connector 是否 fresh、candidate/release/cutover 是否打开，必须以当前 PostgreSQL/health/runtime evidence 为准，不能由文档推导。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。**2026-07-26 final-source candidate：** 三仓 release branch 已包含 managed Web session、精确消息 fork UI、Web Run-stop 控件、selected + Hermes-resolved 双重 lineage、conversation-root/resolved-run-tip identity、durable approval/stop outcome、自然语言论文 intent 入口、Gate 1 exact-source 浏览器复核、sealed candidate evidence 与 PostgreSQL-only release/cutover authority。016–024 是 006–015 之后的有序 additive ladder。是否已迁移、connector 是否 fresh、candidate/release/cutover 是否打开，必须以当前 PostgreSQL/health/runtime evidence 为准，不能由文档推导。 |
 | V0 Workspace v1 candidate ADR | [`design/2026-07-16-agent-workspace-v1-adr.md`](design/2026-07-16-agent-workspace-v1-adr.md) | **SOURCE + FORMAL EVIDENCE + INDEPENDENT CLOSE-OUT DONE**；这只冻结 interface/cardinality/authority，不授权 runtime/live effect。 |
 | L2a-Send thin write rail ADR | [`design/2026-07-22-l2a-send-thin-write-rail-adr.md`](design/2026-07-22-l2a-send-thin-write-rail-adr.md) | Browser composite `submit-turn` → HQA Intent Payload Store → ledger `conversation_turn` → worker bind/resolve → Hermes；**M1+M2 ACCEPT@2026-07-22**。≠ Plan-V6 全 UI。 |
 | V0/V2 release closure | [`audits/2026-07-19-v0-v2-release-closure.md`](audits/2026-07-19-v0-v2-release-closure.md) | 三仓 source、live identity、validation binding 与 independent `CLEAR` 的事实源；verdict 明确 `release_authorized=false`。 |
@@ -35,6 +35,8 @@
 Session/Run + PostgreSQL AgentWorkspace + deterministic HQA connector；016–024 补齐 candidate
 admission、真实纵切证据、release authority、paper Gate/run attestation、resolved fork lineage、
 conversation root / resolved Run tip 与 crash-safe approval/stop outcome。
+普通 Web 用户可从共享 follow spine 对精确非终态 Run 发起停止，并在未知结果时复用同一
+`client_action_id`；不需要手写 BFF API。
 真实论文路径已完成 Gate 1 exact source、
 Gate 2 exact CAS、Futu final backtest、隔离 Gate 3 review/commit/cleanup，全程 zero orders，
 `kill_switch=true`、`live_trading_enabled=false`。该因子是论文的 **US ETF operational proxy**，
@@ -303,8 +305,9 @@ periodic/manual update + no-agent watcher；watcher 只报告漂移，不得 ins
 
 ## 接下来按什么顺序做
 
-1. **冻结 final release candidate。** Platform 完成 external exact-message fork UI 及其
-   browser-facing contract；三仓保持 clean，记录 final commit/runtime digest。
+1. **冻结 final release candidate。** Platform 完成 external exact-message fork UI、
+   Web Run-stop control 及其 browser-facing contract；三仓保持 clean，记录 final
+   commit/runtime digest。
 2. **刷新完整验证。** Platform non-PG + isolated/live PG、HQA full、Hermes focused contract、
    frontend test/typecheck/lint/build 全绿；Hermes 40k upstream suite不在 gate 内。
 3. **确认并升级 live DB facts。** 先备份和隔离恢复演练，再按顺序 apply 016–024；复核
@@ -322,8 +325,11 @@ periodic/manual update + no-agent watcher；watcher 只报告漂移，不得 ins
 8. **打开 operator release stamp 与 public cutover。** 必须绑定已接受 candidate、final clean
    runtime identity、schema fingerprint 和 sealed evidence；完成 public smoke 与 close
    cutover/stamp 回滚演练，必要时以全新 action 再打开最终状态。
-9. **最终 docs re-seal。** 只有上述步骤全绿才把 V6/V7/V8 与 Agent v0.2 写成 DONE；docs commit
-   改变 runtime identity 时必须重新 stamp/cutover 并做 final smoke。legacy redirect 仍另行审批。
+9. **最终 operator close-out seal。** 将 DONE/NOT DONE 写入外部 mode-600 密封报告并绑定
+   PostgreSQL candidate/stamp/cutover、三仓 runtime digest、测试和真实 flow artifacts。
+   candidate 之后不得用 docs-only commit 给当前 release 改名；任何仓库提交都会改变 runtime
+   identity，必须关闭旧 stamp/cutover 并完整重跑 candidate/evidence/release。legacy
+   redirect 仍另行审批。
 
 不得从旧 Wave 3、旧 1a-4、历史 audit 或 unchecked checkbox 自行增加/重排当前步骤。
 

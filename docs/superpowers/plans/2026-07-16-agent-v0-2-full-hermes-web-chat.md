@@ -3,7 +3,8 @@
 > **FINAL-SOURCE ADDENDUM（2026-07-26，当前事实源）：** Agent v0.2 三仓 release branch
 > 已包含最终路径所需 source：managed Web session、exact-message fork UI、selected source /
 > fork point 与 Hermes-canonical resolved parent 双重 lineage、自然语言 paper intent 入口、
-> Gate 1 exact-source browser review、sealed candidate evidence 与 PostgreSQL-only
+> Web Run-stop control（unknown outcome 复用同一 action）、Gate 1 exact-source browser
+> review、sealed candidate evidence 与 PostgreSQL-only
 > release/cutover authority、conversation-root/resolved-run-tip identity 与 durable
 > approval/stop outcome。任何 release evidence 必须绑定提交后的 clean 三仓 HEAD，不能把
 > 下方 dated code anchor 当最终 runtime identity。
@@ -1078,13 +1079,14 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
 | V4 PG schema/BFF saga/security | LIVE 006–015 + CONSTRAINED CANARY ACCEPT | 015 exact provisioning grants/ACL-drift fail-closed accepted；public release remains independent |
 | V5 supervised dispatch worker | RELEASE-CANDIDATE CODE ACCEPTED / DAEMON PENDING | supervised connector/provisioning/recovery source ready；final service install、fresh heartbeat/liveness pending |
-| V6 final workspace UI | **PARTIAL / FORK UI IN PROGRESS** | final architecture, managed composer/transcript/spine present；external exact-message fork backend landed，frontend/browser acceptance pending |
+| V6 final workspace UI | **SOURCE COMPLETE / LIVE E2E PENDING** | managed composer/transcript/spine、external exact-message fork UI、Web Run-stop control 与 same-action retry 均已进入 final source；仍须真实 browser acceptance |
 | V7 decisions/results/vertical slices | **PARTIAL / REAL PAPER BACKEND DONE** | exact Gate 1/2/Futu final/Gate 3 commit+cleanup complete as US ETF proxy；Vertical A + paper flow via final `/hermes` browser still pending |
 | V8 adversarial acceptance/release | **PARTIAL / RELEASE CANDIDATE** | live 015 canary done；sealed artifacts、final identities、stamp/cutover、connector and browser E2E still pending；do not claim release authorization |
 
 ## 9. 当前立即执行顺序
 
-1. 完成 Platform external exact-message fork UI/contract；保持三个 release worktree clean。
+1. 冻结 Platform external exact-message fork UI、Web Run-stop control/contract；保持三个
+   release worktree clean。
 2. 读取 final Platform/HQA/Hermes HEAD，刷新 Platform/HQA full、Hermes focused、
    frontend test/typecheck/lint/build；不运行 Hermes 40k suite。
 3. 备份、隔离恢复演练并按顺序 apply live migrations 016–024；复核 schema fingerprint、
@@ -1098,8 +1100,10 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 7. 只在 accepted candidate + final evidence 全部匹配后打开 release stamp 与 public cutover；
    完成 public smoke、close cutover/stamp 回滚演练和最终恢复。
 8. 在冻结事实上完成独立 Code/Security/Workflow/Reality reviews。
-9. 只有全绿后才同步 DONE docs；docs commit 改变 runtime identity 时，关闭旧 stamp/cutover，
-   重新 seal/open 并做 final smoke。legacy redirect 仍另开后续计划。
+9. 只有全绿后才在 runtime repos 外生成 mode-600 operator DONE close-out bundle，绑定当前
+   PostgreSQL 与三仓 digest。candidate 后的 docs-only commit 也会改变 runtime identity；
+   若必须提交，则先关闭旧 stamp/cutover 并完整重跑 candidate/真实 evidence/release，
+   不能只重新 seal/open。legacy redirect 仍另开后续计划。
 
 这条顺序不再以“把九个 blocker 做完”为模糊任务，而是以最终用户路径、三入口 Interface、四份
 权威和不可伪造的故障验收为施工边界。

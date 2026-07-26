@@ -28,9 +28,10 @@ Rules for AI agents working in this repository.
 - **Agent v0.2 release-candidate status (2026-07-26 source freeze):**
   - The release branches now contain the complete final-path source: managed
     Web sessions and exact-message fork UI, exact selected plus Hermes-resolved
-    fork lineage, natural-language paper-research intent entry, browser
-    Gate 1 exact-source review, sealed candidate evidence, and PostgreSQL-only
-    release/cutover authority. Bind evidence to the actual clean three-repo
+    fork lineage, browser Run-stop control with same-action replay,
+    natural-language paper-research intent entry, browser Gate 1 exact-source
+    review, sealed candidate evidence, and PostgreSQL-only release/cutover
+    authority. Bind evidence to the actual clean three-repo
     HEADs; dated commit anchors below are historical only.
   - Migrations 016 through 024 are the additive release-candidate ladder after
     the live 006–015 baseline. Never infer their live state from source or this
@@ -49,6 +50,11 @@ Rules for AI agents working in this repository.
     the current candidate, connector generation, release stamp, public cutover,
     runtime identities, schema fingerprint and evidence digest before claiming
     `release_authorized=true`, `chat_write_ready=true` or Agent v0.2 DONE.
+    Freeze repository documentation before candidate admission. Record the
+    final operator result in PostgreSQL plus the external sealed close-out
+    bundle; a later docs-only commit changes runtime identity and therefore
+    requires a fresh candidate/evidence/release cycle rather than relabeling the
+    existing release.
 - Slice V0/V1/V2 close-out records under `docs/audits/` remain historical
   provenance. Their old runtime commits, roles, PIDs, “candidate not installed”
     and write-gate conclusions must not override the 2026-07-26 final-source
