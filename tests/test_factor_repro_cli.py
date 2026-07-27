@@ -3,12 +3,39 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from hqa import factor_repro_cli as cli
+
+
+def test_generated_approval_command_uses_configured_installed_wrapper(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    wrapper = tmp_path / "Hermes Scripts" / "hqa-factor-repro.sh"
+    digest = "a" * 64
+    monkeypatch.setattr(cli.config, "FACTOR_REPRO_BIN", wrapper)
+
+    command = cli._approval_command("factor-x-1", digest)
+
+    assert shlex.split(command) == [
+        str(wrapper),
+        "approve",
+        "--candidate-id",
+        "factor-x-1",
+        "--expected-digest",
+        digest,
+        "--expected-status",
+        "pending",
+        "--note",
+        "<translation-review>",
+    ]
+    assert "python3 -m hqa.factor_repro_cli" not in command
+    assert "cd " not in command
 
 
 @pytest.fixture(autouse=True)
@@ -196,6 +223,8 @@ def _experiment_receipt(
         "approved_candidates_loaded": [factor_id],
         "candidate_binding": binding,
     }
+
+
 def test_propose_requires_and_persists_exact_source_gate_before_candidate(
     monkeypatch, capsys, tmp_path
 ):
@@ -250,7 +279,8 @@ def test_propose_requires_and_persists_exact_source_gate_before_candidate(
     assert "status=pending" in out
     assert f"--expected-digest {digest}" in out
     assert "--expected-status pending" in out
-    assert "python3 -m hqa.factor_repro_cli approve" in out
+    assert f"{cli.config.FACTOR_REPRO_BIN} approve --candidate-id factor-x-1" in out
+    assert "python3 -m hqa.factor_repro_cli" not in out
     assert "gate1_confirmation_id=" in out
     assert f"gate1_source_digest={source_digest}" in out
     assert "HUMAN GATE" in out
@@ -260,7 +290,10 @@ def test_propose_requires_and_persists_exact_source_gate_before_candidate(
     bindings = list((gate_dir / "bindings").glob("*.json"))
     assert len(records) == 1
     assert len(bindings) == 1
-    assert json.loads(bindings[0].read_text(encoding="utf-8"))["candidate_id"] == "factor-x-1"
+    assert (
+        json.loads(bindings[0].read_text(encoding="utf-8"))["candidate_id"]
+        == "factor-x-1"
+    )
 
 
 def test_propose_reuses_exact_browser_gate1_without_recreating_human_decision(
@@ -461,13 +494,19 @@ def test_propose_revalidates_gate1_after_platform_returns(
 
     monkeypatch.setattr(cli.quant_cli, "run_propose_factor", propose)
 
-    rc = cli.main([
-        "propose",
-        "--goal", "reviewed factor",
-        "--source-file", str(source),
-        "--expected-source-digest", source_digest,
-        "--confirmation-note", "formula and implementation reviewed",
-    ])
+    rc = cli.main(
+        [
+            "propose",
+            "--goal",
+            "reviewed factor",
+            "--source-file",
+            str(source),
+            "--expected-source-digest",
+            source_digest,
+            "--confirmation-note",
+            "formula and implementation reviewed",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert rc == 1
@@ -484,7 +523,9 @@ def test_propose_source_digest_mismatch_fails_before_platform(
     monkeypatch.setattr(
         cli.quant_cli,
         "run_propose_factor",
-        lambda *args, **kwargs: pytest.fail("Gate 1 mismatch must not create candidate"),
+        lambda *args, **kwargs: pytest.fail(
+            "Gate 1 mismatch must not create candidate"
+        ),
     )
 
     rc = cli.main(
@@ -580,16 +621,24 @@ def test_propose_rejects_tampered_existing_confirmation_before_platform(
     monkeypatch.setattr(
         cli.quant_cli,
         "run_propose_factor",
-        lambda *args, **kwargs: pytest.fail("tampered Gate 1 must fail before platform"),
+        lambda *args, **kwargs: pytest.fail(
+            "tampered Gate 1 must fail before platform"
+        ),
     )
 
-    rc = cli.main([
-        "propose",
-        "--goal", "reviewed factor",
-        "--source-file", str(source),
-        "--expected-source-digest", source_digest,
-        "--confirmation-note", "formula and translation reviewed",
-    ])
+    rc = cli.main(
+        [
+            "propose",
+            "--goal",
+            "reviewed factor",
+            "--source-file",
+            str(source),
+            "--expected-source-digest",
+            source_digest,
+            "--confirmation-note",
+            "formula and translation reviewed",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert rc == 2
@@ -610,11 +659,19 @@ def test_propose_returns_nonzero_when_candidate_id_missing(monkeypatch, capsys):
         "run_propose_factor",
         lambda goal, source_file, universe="SPY,QQQ": (0, "unexpected output"),
     )
-    rc = cli.main([
-        "propose", "--goal", "momentum 20d reversal", "--source-file", source,
-        "--expected-source-digest", source_digest,
-        "--confirmation-note", "reviewed",
-    ])
+    rc = cli.main(
+        [
+            "propose",
+            "--goal",
+            "momentum 20d reversal",
+            "--source-file",
+            source,
+            "--expected-source-digest",
+            source_digest,
+            "--confirmation-note",
+            "reviewed",
+        ]
+    )
     assert rc == 1
     assert "candidate_id=?" in capsys.readouterr().out
 
@@ -643,10 +700,14 @@ def test_propose_timeout_is_controlled_and_never_exposes_authority(
     rc = cli.main(
         [
             "propose",
-            "--goal", "reviewed factor",
-            "--source-file", "/tmp/source.py",
-            "--expected-source-digest", source_digest,
-            "--confirmation-note", "reviewed",
+            "--goal",
+            "reviewed factor",
+            "--source-file",
+            "/tmp/source.py",
+            "--expected-source-digest",
+            source_digest,
+            "--confirmation-note",
+            "reviewed",
         ]
     )
 
@@ -679,11 +740,19 @@ def test_propose_returns_nonzero_and_writes_no_binding_without_exact_receipt(
         lambda *args, **kwargs: (0, json.dumps(payload)),
     )
 
-    rc = cli.main([
-        "propose", "--goal", "goal", "--source-file", "/tmp/source.py",
-        "--expected-source-digest", source_digest,
-        "--confirmation-note", "reviewed",
-    ])
+    rc = cli.main(
+        [
+            "propose",
+            "--goal",
+            "goal",
+            "--source-file",
+            "/tmp/source.py",
+            "--expected-source-digest",
+            source_digest,
+            "--confirmation-note",
+            "reviewed",
+        ]
+    )
 
     assert rc == 1
     assert "incomplete platform receipt" in capsys.readouterr().err.lower()
@@ -693,9 +762,30 @@ def test_propose_returns_nonzero_and_writes_no_binding_without_exact_receipt(
 @pytest.mark.parametrize(
     ("platform_code", "payload"),
     [
-        (1, {"candidate_id": "factor-x-1", "status": "pending", "manifest_digest": "a" * 64}),
-        (0, {"candidate_id": "factor-x-1", "status": "rejected", "manifest_digest": "a" * 64}),
-        (0, {"candidate_id": "INVALID/PATH", "status": "pending", "manifest_digest": "a" * 64}),
+        (
+            1,
+            {
+                "candidate_id": "factor-x-1",
+                "status": "pending",
+                "manifest_digest": "a" * 64,
+            },
+        ),
+        (
+            0,
+            {
+                "candidate_id": "factor-x-1",
+                "status": "rejected",
+                "manifest_digest": "a" * 64,
+            },
+        ),
+        (
+            0,
+            {
+                "candidate_id": "INVALID/PATH",
+                "status": "pending",
+                "manifest_digest": "a" * 64,
+            },
+        ),
     ],
 )
 def test_propose_binds_only_successful_machine_pending_receipt(
@@ -719,11 +809,19 @@ def test_propose_binds_only_successful_machine_pending_receipt(
         lambda *args, **kwargs: (platform_code, json.dumps(payload)),
     )
 
-    rc = cli.main([
-        "propose", "--goal", "goal", "--source-file", "/tmp/source.py",
-        "--expected-source-digest", source_digest,
-        "--confirmation-note", "reviewed",
-    ])
+    rc = cli.main(
+        [
+            "propose",
+            "--goal",
+            "goal",
+            "--source-file",
+            "/tmp/source.py",
+            "--expected-source-digest",
+            source_digest,
+            "--confirmation-note",
+            "reviewed",
+        ]
+    )
 
     assert rc == 1
     assert "incomplete platform receipt" in capsys.readouterr().err.lower()
@@ -752,11 +850,19 @@ def test_propose_does_not_promote_human_kv_output_to_authority(
         ),
     )
 
-    rc = cli.main([
-        "propose", "--goal", "goal", "--source-file", "/tmp/source.py",
-        "--expected-source-digest", source_digest,
-        "--confirmation-note", "reviewed",
-    ])
+    rc = cli.main(
+        [
+            "propose",
+            "--goal",
+            "goal",
+            "--source-file",
+            "/tmp/source.py",
+            "--expected-source-digest",
+            source_digest,
+            "--confirmation-note",
+            "reviewed",
+        ]
+    )
 
     assert rc == 1
     assert "incomplete platform receipt" in capsys.readouterr().err.lower()
@@ -780,27 +886,33 @@ def test_approve_requires_explicit_human_cas_values_and_never_refetches(
     monkeypatch.setattr(
         cli.quant_cli,
         "run_agent_review",
-        lambda **kwargs: seen.update(kwargs)
-        or (
-            0,
-            json.dumps(
-                {
-                    "candidate_id": "factor-x-1",
-                    "decision": "approve",
-                    "registration": "manual_required",
-                    "manifest_digest": "a" * 64,
-                }
-            ),
+        lambda **kwargs: (
+            seen.update(kwargs)
+            or (
+                0,
+                json.dumps(
+                    {
+                        "candidate_id": "factor-x-1",
+                        "decision": "approve",
+                        "registration": "manual_required",
+                        "manifest_digest": "a" * 64,
+                    }
+                ),
+            )
         ),
     )
 
     rc = cli.main(
         [
             "approve",
-            "--candidate-id", "factor-x-1",
-            "--expected-digest", "a" * 64,
-            "--expected-status", "pending",
-            "--note", "translation confirmed",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--expected-status",
+            "pending",
+            "--note",
+            "translation confirmed",
         ]
     )
 
@@ -831,13 +943,19 @@ def test_approve_refuses_candidate_without_gate1_binding(monkeypatch, capsys) ->
         lambda **kwargs: pytest.fail("unbound candidate must not reach Gate 2"),
     )
 
-    rc = cli.main([
-        "approve",
-        "--candidate-id", "factor-x-1",
-        "--expected-digest", "a" * 64,
-        "--expected-status", "pending",
-        "--note", "reviewed",
-    ])
+    rc = cli.main(
+        [
+            "approve",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--expected-status",
+            "pending",
+            "--note",
+            "reviewed",
+        ]
+    )
 
     assert rc == 2
     assert "Gate 1 binding missing" in capsys.readouterr().err
@@ -853,13 +971,19 @@ def test_approve_nonzero_empty_platform_result_never_claims_success(
         lambda **kwargs: (1, ""),
     )
 
-    rc = cli.main([
-        "approve",
-        "--candidate-id", "factor-x-1",
-        "--expected-digest", "a" * 64,
-        "--expected-status", "pending",
-        "--note", "reviewed",
-    ])
+    rc = cli.main(
+        [
+            "approve",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--expected-status",
+            "pending",
+            "--note",
+            "reviewed",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert rc == 1
@@ -881,10 +1005,14 @@ def test_approve_timeout_reports_ambiguous_outcome_without_traceback(
     rc = cli.main(
         [
             "approve",
-            "--candidate-id", "factor-x-1",
-            "--expected-digest", "a" * 64,
-            "--expected-status", "pending",
-            "--note", "reviewed",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--expected-status",
+            "pending",
+            "--note",
+            "reviewed",
         ]
     )
 
@@ -899,10 +1027,42 @@ def test_approve_timeout_reports_ambiguous_outcome_without_traceback(
     "platform_code,payload",
     [
         (0, None),
-        (0, {"candidate_id": "other", "decision": "approve", "registration": "manual_required", "manifest_digest": "a" * 64}),
-        (0, {"candidate_id": "factor-x-1", "decision": "reject", "registration": "manual_required", "manifest_digest": "a" * 64}),
-        (0, {"candidate_id": "factor-x-1", "decision": "approve", "registration": "automatic", "manifest_digest": "a" * 64}),
-        (0, {"candidate_id": "factor-x-1", "decision": "approve", "registration": "manual_required", "manifest_digest": "b" * 64}),
+        (
+            0,
+            {
+                "candidate_id": "other",
+                "decision": "approve",
+                "registration": "manual_required",
+                "manifest_digest": "a" * 64,
+            },
+        ),
+        (
+            0,
+            {
+                "candidate_id": "factor-x-1",
+                "decision": "reject",
+                "registration": "manual_required",
+                "manifest_digest": "a" * 64,
+            },
+        ),
+        (
+            0,
+            {
+                "candidate_id": "factor-x-1",
+                "decision": "approve",
+                "registration": "automatic",
+                "manifest_digest": "a" * 64,
+            },
+        ),
+        (
+            0,
+            {
+                "candidate_id": "factor-x-1",
+                "decision": "approve",
+                "registration": "manual_required",
+                "manifest_digest": "b" * 64,
+            },
+        ),
     ],
 )
 def test_approve_requires_exact_machine_receipt(
@@ -918,13 +1078,19 @@ def test_approve_requires_exact_machine_receipt(
         lambda **kwargs: (platform_code, output),
     )
 
-    rc = cli.main([
-        "approve",
-        "--candidate-id", "factor-x-1",
-        "--expected-digest", "a" * 64,
-        "--expected-status", "pending",
-        "--note", "reviewed",
-    ])
+    rc = cli.main(
+        [
+            "approve",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--expected-status",
+            "pending",
+            "--note",
+            "reviewed",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert rc == 1
@@ -938,54 +1104,78 @@ def test_approve_requires_exact_machine_receipt(
         # omit candidate-id
         [
             "approve",
-            "--expected-digest", "a" * 64,
-            "--expected-status", "pending",
-            "--note", "n",
+            "--expected-digest",
+            "a" * 64,
+            "--expected-status",
+            "pending",
+            "--note",
+            "n",
         ],
         # omit expected-digest
         [
             "approve",
-            "--candidate-id", "factor-x-1",
-            "--expected-status", "pending",
-            "--note", "n",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-status",
+            "pending",
+            "--note",
+            "n",
         ],
         # omit expected-status
         [
             "approve",
-            "--candidate-id", "factor-x-1",
-            "--expected-digest", "a" * 64,
-            "--note", "n",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--note",
+            "n",
         ],
         # omit note
         [
             "approve",
-            "--candidate-id", "factor-x-1",
-            "--expected-digest", "a" * 64,
-            "--expected-status", "pending",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--expected-status",
+            "pending",
         ],
         # empty/whitespace note
         [
             "approve",
-            "--candidate-id", "factor-x-1",
-            "--expected-digest", "a" * 64,
-            "--expected-status", "pending",
-            "--note", "   ",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--expected-status",
+            "pending",
+            "--note",
+            "   ",
         ],
         # malformed digest
         [
             "approve",
-            "--candidate-id", "factor-x-1",
-            "--expected-digest", "not-a-digest",
-            "--expected-status", "pending",
-            "--note", "n",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "not-a-digest",
+            "--expected-status",
+            "pending",
+            "--note",
+            "n",
         ],
         # non-pending status
         [
             "approve",
-            "--candidate-id", "factor-x-1",
-            "--expected-digest", "a" * 64,
-            "--expected-status", "approved",
-            "--note", "n",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--expected-status",
+            "approved",
+            "--note",
+            "n",
         ],
     ],
 )
@@ -1017,13 +1207,19 @@ def test_promote_refuses_without_exact_gate1_binding(monkeypatch, capsys) -> Non
         lambda **kwargs: pytest.fail("unbound Scene-B candidate must not reach Gate 3"),
     )
 
-    rc = cli.main([
-        "promote",
-        "--candidate-id", "factor-x-1",
-        "--expected-digest", "a" * 64,
-        "--final-backtest-receipt", "backtest-" + "c" * 32,
-        "--base-commit", "b" * 40,
-    ])
+    rc = cli.main(
+        [
+            "promote",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--final-backtest-receipt",
+            "backtest-" + "c" * 32,
+            "--base-commit",
+            "b" * 40,
+        ]
+    )
 
     assert rc == 2
     assert "Gate 1 binding missing" in capsys.readouterr().err
@@ -1066,14 +1262,17 @@ def test_promote_passes_exact_binding_and_requires_four_field_receipt(
     monkeypatch.setattr(
         cli.factor_repro,
         "require_final_backtest_receipt",
-        lambda **kwargs: seen.setdefault("backtest", []).append(kwargs)
-        or {"factor_id": "reviewed_factor"},
+        lambda **kwargs: (
+            seen.setdefault("backtest", []).append(kwargs)
+            or {"factor_id": "reviewed_factor"}
+        ),
     )
     monkeypatch.setattr(
         cli.factor_repro,
         "verify_gate3_receipt",
-        lambda receipt, **kwargs: seen.update(verified={"receipt": receipt, **kwargs})
-        or gate3_evidence,
+        lambda receipt, **kwargs: (
+            seen.update(verified={"receipt": receipt, **kwargs}) or gate3_evidence
+        ),
     )
     monkeypatch.setattr(
         cli.quant_cli,
@@ -1083,28 +1282,36 @@ def test_promote_passes_exact_binding_and_requires_four_field_receipt(
     monkeypatch.setattr(
         cli.quant_cli,
         "run_promotion_status",
-        lambda promotion_id: seen.update(status_promotion_id=promotion_id)
-        or (
-            0,
-            json.dumps(
-                {
-                    "promotion_id": promotion_id,
-                    "status": "awaiting_human_commit",
-                    "reviewed_commit": None,
-                    "reason": "worktree is not clean",
-                    **gate3_evidence,
-                }
-            ),
+        lambda promotion_id: (
+            seen.update(status_promotion_id=promotion_id)
+            or (
+                0,
+                json.dumps(
+                    {
+                        "promotion_id": promotion_id,
+                        "status": "awaiting_human_commit",
+                        "reviewed_commit": None,
+                        "reason": "worktree is not clean",
+                        **gate3_evidence,
+                    }
+                ),
+            )
         ),
     )
 
-    rc = cli.main([
-        "promote",
-        "--candidate-id", "factor-x-1",
-        "--expected-digest", "a" * 64,
-        "--final-backtest-receipt", "backtest-" + "c" * 32,
-        "--base-commit", "b" * 40,
-    ])
+    rc = cli.main(
+        [
+            "promote",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--final-backtest-receipt",
+            "backtest-" + "c" * 32,
+            "--base-commit",
+            "b" * 40,
+        ]
+    )
 
     assert rc == 0
     assert seen == {
@@ -1197,7 +1404,16 @@ def test_promote_refuses_without_exact_final_backtest_receipt(
         (1, {}),
         (0, {}),
         (0, {"promotion_id": "p", "worktree": "/tmp/w", "patch": "/tmp/p"}),
-        (0, {"promotion_id": "p", "worktree": "/tmp/w", "patch": "/tmp/p", "manifest": "/tmp/m", "extra": True}),
+        (
+            0,
+            {
+                "promotion_id": "p",
+                "worktree": "/tmp/w",
+                "patch": "/tmp/p",
+                "manifest": "/tmp/m",
+                "extra": True,
+            },
+        ),
     ],
 )
 def test_promote_fails_closed_on_invalid_platform_receipt(
@@ -1212,13 +1428,19 @@ def test_promote_fails_closed_on_invalid_platform_receipt(
         lambda **kwargs: (code, json.dumps(payload) if payload else ""),
     )
 
-    rc = cli.main([
-        "promote",
-        "--candidate-id", "factor-x-1",
-        "--expected-digest", "a" * 64,
-        "--final-backtest-receipt", "backtest-" + "c" * 32,
-        "--base-commit", "b" * 40,
-    ])
+    rc = cli.main(
+        [
+            "promote",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--final-backtest-receipt",
+            "backtest-" + "c" * 32,
+            "--base-commit",
+            "b" * 40,
+        ]
+    )
 
     assert rc == 1
     assert "Gate 3 preparation failed" in capsys.readouterr().err
@@ -1247,13 +1469,19 @@ def test_promote_postvalidation_failure_returns_recovery_identity(
         ),
     )
 
-    rc = cli.main([
-        "promote",
-        "--candidate-id", "factor-x-1",
-        "--expected-digest", "a" * 64,
-        "--final-backtest-receipt", "backtest-" + "c" * 32,
-        "--base-commit", "b" * 40,
-    ])
+    rc = cli.main(
+        [
+            "promote",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--final-backtest-receipt",
+            "backtest-" + "c" * 32,
+            "--base-commit",
+            "b" * 40,
+        ]
+    )
 
     captured = capsys.readouterr()
     assert rc == 1
@@ -1284,10 +1512,14 @@ def test_promote_timeout_recovers_promotion_id_from_partial_stdout(
     rc = cli.main(
         [
             "promote",
-            "--candidate-id", "factor-x-1",
-            "--expected-digest", "a" * 64,
-            "--final-backtest-receipt", "backtest-" + "c" * 32,
-            "--base-commit", "b" * 40,
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--final-backtest-receipt",
+            "backtest-" + "c" * 32,
+            "--base-commit",
+            "b" * 40,
         ]
     )
 
@@ -1298,9 +1530,7 @@ def test_promote_timeout_recovers_promotion_id_from_partial_stdout(
 
 
 @pytest.mark.parametrize("suffix", ["", "-r2", "-r9", "-r10", "-r100"])
-def test_gate3_recovery_preserves_every_platform_retry_identity(
-    capsys, suffix
-) -> None:
+def test_gate3_recovery_preserves_every_platform_retry_identity(capsys, suffix) -> None:
     promotion_id = "promo-" + "a" * 32 + suffix
 
     cli._print_gate3_recovery({"promotion_id": promotion_id})
@@ -1418,7 +1648,9 @@ def test_list_redacts_platform_gate2_command(monkeypatch, capsys) -> None:
     assert "path=/tmp/candidates/factor-x-1" not in out
 
 
-def test_list_redaction_drops_adversarial_command_inside_path(monkeypatch, capsys) -> None:
+def test_list_redaction_drops_adversarial_command_inside_path(
+    monkeypatch, capsys
+) -> None:
     digest = "f" * 64
     monkeypatch.setattr(
         cli.quant_cli,
@@ -1484,7 +1716,9 @@ def test_detail_prints_one_consistent_source_review_bundle(monkeypatch, capsys) 
     assert f"--expected-digest {digest}" in out
 
 
-def test_backtest_builds_config_runs_experiment_and_prints_metrics(monkeypatch, capsys, tmp_path):
+def test_backtest_builds_config_runs_experiment_and_prints_metrics(
+    monkeypatch, capsys, tmp_path
+):
     digest = "1" * 64
     seen = {}
 
@@ -1517,7 +1751,9 @@ def test_backtest_builds_config_runs_experiment_and_prints_metrics(monkeypatch, 
             ),
         )
 
-    monkeypatch.setattr(cli.quant_cli, "run_experiment_config", fake_run_experiment_config)
+    monkeypatch.setattr(
+        cli.quant_cli, "run_experiment_config", fake_run_experiment_config
+    )
     monkeypatch.setattr(cli.config, "LOG_DIR", tmp_path)
     config_out = tmp_path / "exp.json"
     rc = cli.main(
@@ -1594,7 +1830,9 @@ def test_backtest_rejects_unsafe_candidate_id_before_writing_config(
     assert "candidate-id" in capsys.readouterr().out
 
 
-def test_backtest_rejects_synthetic_provider_before_platform(monkeypatch, tmp_path) -> None:
+def test_backtest_rejects_synthetic_provider_before_platform(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setattr(
         cli.quant_cli,
         "run_experiment_config",
@@ -1605,13 +1843,20 @@ def test_backtest_rejects_synthetic_provider_before_platform(monkeypatch, tmp_pa
         cli.main(
             [
                 "backtest",
-                "--candidate-id", "cand-real-source",
-                "--expected-digest", "a" * 64,
-                "--symbol", "SPY",
-                "--start", "2020-01-02",
-                "--end", "2026-06-30",
-                "--provider", "sample",
-                "--config-out", str(tmp_path / "must-not-exist.json"),
+                "--candidate-id",
+                "cand-real-source",
+                "--expected-digest",
+                "a" * 64,
+                "--symbol",
+                "SPY",
+                "--start",
+                "2020-01-02",
+                "--end",
+                "2026-06-30",
+                "--provider",
+                "sample",
+                "--config-out",
+                str(tmp_path / "must-not-exist.json"),
                 "--final",
             ]
         )
@@ -1627,18 +1872,26 @@ def test_backtest_rejects_synthetic_provider_from_environment_default(
     monkeypatch.setattr(
         cli.quant_cli,
         "run_experiment_config",
-        lambda *args, **kwargs: pytest.fail("invalid default provider reached platform"),
+        lambda *args, **kwargs: pytest.fail(
+            "invalid default provider reached platform"
+        ),
     )
 
     rc = cli.main(
         [
             "backtest",
-            "--candidate-id", "cand-real-source",
-            "--expected-digest", "a" * 64,
-            "--symbol", "SPY",
-            "--start", "2020-01-02",
-            "--end", "2026-06-30",
-            "--config-out", str(tmp_path / "must-not-exist.json"),
+            "--candidate-id",
+            "cand-real-source",
+            "--expected-digest",
+            "a" * 64,
+            "--symbol",
+            "SPY",
+            "--start",
+            "2020-01-02",
+            "--end",
+            "2026-06-30",
+            "--config-out",
+            str(tmp_path / "must-not-exist.json"),
             "--final",
         ]
     )
@@ -1691,18 +1944,28 @@ def test_backtest_refuses_exact_candidate_without_gate1_binding(
     monkeypatch.setattr(
         cli.quant_cli,
         "run_experiment_config",
-        lambda *args, **kwargs: pytest.fail("unbound Scene-B candidate must not execute"),
+        lambda *args, **kwargs: pytest.fail(
+            "unbound Scene-B candidate must not execute"
+        ),
     )
 
-    rc = cli.main([
-        "backtest",
-        "--candidate-id", "factor-x-1",
-        "--expected-digest", "a" * 64,
-        "--symbol", "SPY",
-        "--start", "2020-01-01",
-        "--end", "2024-12-31",
-        "--config-out", str(config_out),
-    ])
+    rc = cli.main(
+        [
+            "backtest",
+            "--candidate-id",
+            "factor-x-1",
+            "--expected-digest",
+            "a" * 64,
+            "--symbol",
+            "SPY",
+            "--start",
+            "2020-01-01",
+            "--end",
+            "2024-12-31",
+            "--config-out",
+            str(config_out),
+        ]
+    )
 
     assert rc == 2
     assert "Gate 1 binding missing" in capsys.readouterr().err
@@ -1746,7 +2009,9 @@ def test_backtest_passes_the_human_candidate_binding_to_the_platform(
             ),
         )
 
-    monkeypatch.setattr(cli.quant_cli, "run_experiment_config", fake_run_experiment_config)
+    monkeypatch.setattr(
+        cli.quant_cli, "run_experiment_config", fake_run_experiment_config
+    )
     monkeypatch.setattr(cli.config, "LOG_DIR", tmp_path)
     config_out = tmp_path / "candidate-exp.json"
 
@@ -1857,12 +2122,18 @@ def test_backtest_rejects_malformed_agent_summary_without_traceback(
     rc = cli.main(
         [
             "backtest",
-            "--candidate-id", "cand-corrupt-summary",
-            "--expected-digest", digest,
-            "--symbol", "SPY",
-            "--start", "2020-01-02",
-            "--end", "2026-06-30",
-            "--config-out", str(tmp_path / "corrupt-summary.json"),
+            "--candidate-id",
+            "cand-corrupt-summary",
+            "--expected-digest",
+            digest,
+            "--symbol",
+            "SPY",
+            "--start",
+            "2020-01-02",
+            "--end",
+            "2026-06-30",
+            "--config-out",
+            str(tmp_path / "corrupt-summary.json"),
         ]
     )
 
@@ -1887,12 +2158,18 @@ def test_backtest_timeout_records_no_trial_or_final_authority(
     rc = cli.main(
         [
             "backtest",
-            "--candidate-id", "cand-timeout",
-            "--expected-digest", "f" * 64,
-            "--symbol", "SPY",
-            "--start", "2020-01-02",
-            "--end", "2026-06-30",
-            "--config-out", str(tmp_path / "timeout.json"),
+            "--candidate-id",
+            "cand-timeout",
+            "--expected-digest",
+            "f" * 64,
+            "--symbol",
+            "SPY",
+            "--start",
+            "2020-01-02",
+            "--end",
+            "2026-06-30",
+            "--config-out",
+            str(tmp_path / "timeout.json"),
             "--final",
         ]
     )
@@ -1929,19 +2206,29 @@ def _fake_experiment_receipt(
     )
 
 
-def test_backtest_non_final_writes_cut_end_and_prints_holdout(monkeypatch, capsys, tmp_path):
-    monkeypatch.setattr(cli.quant_cli, "run_experiment_config", _fake_experiment_receipt)
+def test_backtest_non_final_writes_cut_end_and_prints_holdout(
+    monkeypatch, capsys, tmp_path
+):
+    monkeypatch.setattr(
+        cli.quant_cli, "run_experiment_config", _fake_experiment_receipt
+    )
     monkeypatch.setattr(cli.config, "LOG_DIR", tmp_path)
     config_out = tmp_path / "exp.json"
     rc = cli.main(
         [
             "backtest",
-            "--candidate-id", "cand-holdout_factor",
-            "--expected-digest", "2" * 64,
-            "--symbol", "SPY",
-            "--start", "2020-01-02",
-            "--end", "2026-06-30",
-            "--config-out", str(config_out),
+            "--candidate-id",
+            "cand-holdout_factor",
+            "--expected-digest",
+            "2" * 64,
+            "--symbol",
+            "SPY",
+            "--start",
+            "2020-01-02",
+            "--end",
+            "2026-06-30",
+            "--config-out",
+            str(config_out),
         ]
     )
     assert rc == 0
@@ -1953,19 +2240,29 @@ def test_backtest_non_final_writes_cut_end_and_prints_holdout(monkeypatch, capsy
     assert not (cli.config.FACTOR_GATE1_DIR / "backtests").exists()
 
 
-def test_backtest_final_writes_full_end_and_no_holdout_note(monkeypatch, capsys, tmp_path):
-    monkeypatch.setattr(cli.quant_cli, "run_experiment_config", _fake_experiment_receipt)
+def test_backtest_final_writes_full_end_and_no_holdout_note(
+    monkeypatch, capsys, tmp_path
+):
+    monkeypatch.setattr(
+        cli.quant_cli, "run_experiment_config", _fake_experiment_receipt
+    )
     monkeypatch.setattr(cli.config, "LOG_DIR", tmp_path)
     config_out = tmp_path / "exp.json"
     rc = cli.main(
         [
             "backtest",
-            "--candidate-id", "cand-holdout_factor",
-            "--expected-digest", "2" * 64,
-            "--symbol", "SPY",
-            "--start", "2020-01-02",
-            "--end", "2026-06-30",
-            "--config-out", str(config_out),
+            "--candidate-id",
+            "cand-holdout_factor",
+            "--expected-digest",
+            "2" * 64,
+            "--symbol",
+            "SPY",
+            "--start",
+            "2020-01-02",
+            "--end",
+            "2026-06-30",
+            "--config-out",
+            str(config_out),
             "--final",
         ]
     )
@@ -1984,22 +2281,31 @@ def test_backtest_final_writes_full_end_and_no_holdout_note(monkeypatch, capsys,
 
 
 def test_backtest_records_trial_and_final_flag(monkeypatch, capsys, tmp_path):
-    monkeypatch.setattr(cli.quant_cli, "run_experiment_config", _fake_experiment_receipt)
+    monkeypatch.setattr(
+        cli.quant_cli, "run_experiment_config", _fake_experiment_receipt
+    )
     monkeypatch.setattr(cli.config, "LOG_DIR", tmp_path)
     config_out = tmp_path / "exp.json"
     cli.main(
         [
             "backtest",
-            "--candidate-id", "cand-rec_factor",
-            "--expected-digest", "3" * 64,
-            "--symbol", "SPY",
-            "--start", "2020-01-02",
-            "--end", "2026-06-30",
-            "--config-out", str(config_out),
+            "--candidate-id",
+            "cand-rec_factor",
+            "--expected-digest",
+            "3" * 64,
+            "--symbol",
+            "SPY",
+            "--start",
+            "2020-01-02",
+            "--end",
+            "2026-06-30",
+            "--config-out",
+            str(config_out),
             "--final",
         ]
     )
     from hqa import trials
+
     log = tmp_path / "factor_trials.jsonl"
     assert trials.count_trials("rec_factor", log) == 1
     record = json.loads(log.read_text(encoding="utf-8").strip())
@@ -2008,17 +2314,25 @@ def test_backtest_records_trial_and_final_flag(monkeypatch, capsys, tmp_path):
 
 
 def test_backtest_third_run_prints_overfit_warning(monkeypatch, capsys, tmp_path):
-    monkeypatch.setattr(cli.quant_cli, "run_experiment_config", _fake_experiment_receipt)
+    monkeypatch.setattr(
+        cli.quant_cli, "run_experiment_config", _fake_experiment_receipt
+    )
     monkeypatch.setattr(cli.config, "LOG_DIR", tmp_path)
     for index in range(3):
         argv = [
             "backtest",
-            "--candidate-id", "cand-iter_factor",
-            "--expected-digest", "4" * 64,
-            "--symbol", "SPY",
-            "--start", "2020-01-02",
-            "--end", "2026-06-30",
-            "--config-out", str(tmp_path / f"exp-{index}.json"),
+            "--candidate-id",
+            "cand-iter_factor",
+            "--expected-digest",
+            "4" * 64,
+            "--symbol",
+            "SPY",
+            "--start",
+            "2020-01-02",
+            "--end",
+            "2026-06-30",
+            "--config-out",
+            str(tmp_path / f"exp-{index}.json"),
         ]
         assert cli.main(argv) == 0
         out = capsys.readouterr().out
@@ -2029,18 +2343,26 @@ def test_backtest_third_run_prints_overfit_warning(monkeypatch, capsys, tmp_path
 
 
 def test_backtest_window_too_short_returns_error(monkeypatch, capsys, tmp_path):
-    monkeypatch.setattr(cli.quant_cli, "run_experiment_config", _fake_experiment_receipt)
+    monkeypatch.setattr(
+        cli.quant_cli, "run_experiment_config", _fake_experiment_receipt
+    )
     monkeypatch.setattr(cli.config, "LOG_DIR", tmp_path)
     config_out = tmp_path / "exp.json"
     rc = cli.main(
         [
             "backtest",
-            "--candidate-id", "cand-short_factor",
-            "--expected-digest", "5" * 64,
-            "--symbol", "SPY",
-            "--start", "2026-01-01",
-            "--end", "2026-06-30",
-            "--config-out", str(config_out),
+            "--candidate-id",
+            "cand-short_factor",
+            "--expected-digest",
+            "5" * 64,
+            "--symbol",
+            "SPY",
+            "--start",
+            "2026-01-01",
+            "--end",
+            "2026-06-30",
+            "--config-out",
+            str(config_out),
         ]
     )
     assert rc == 1

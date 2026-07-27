@@ -33,7 +33,7 @@ Rules for AI agents working in this repository.
     review, sealed candidate evidence, and PostgreSQL-only release/cutover
     authority. Bind evidence to the actual clean three-repo
     HEADs; dated commit anchors below are historical only.
-  - Migrations 016 through 026 are the additive release-candidate ladder after
+  - Migrations 016 through 027 are the additive release-candidate ladder after
     the live 006–015 baseline. Never infer their live state from source or this
     file: inspect PostgreSQL migration metadata, schema readiness, role grants,
     and the runtime health projection in the current operator window. Schema
@@ -46,7 +46,10 @@ Rules for AI agents working in this repository.
     invalidates the stale release path. Migration 026 seals the HQA research
     claim plus start/continue payload digests across Gate 1/2/3 and requires
     exact v2 completion replay while preserving only the explicitly claim-less
-    historical v1 envelope.
+    historical v1 envelope. Migration 027 raises the bounded candidate TTL
+    ceiling from 30 minutes to two hours so an operator can complete the
+    supervised browser, restart and paper flow without racing expiry; it adds
+    no release, public-write or trading authority.
   - HQA's research claim body (paper title plus ordered universe) remains only
     in the encrypted Intent Payload Store; workflow, PostgreSQL and public
     completion projections carry digests. Claim binding is limited to Attempt
@@ -54,7 +57,8 @@ Rules for AI agents working in this repository.
     Task/Attempt lineage, and the Platform completion response is a closed
     42-key contract with no passthrough extras. This claim/completion hardening
     is source + isolated-review **APPROVE**; it is not evidence that migrations
-    025/026 have been applied to live PostgreSQL or that release/cutover is open.
+    025/026/027 have been applied to live PostgreSQL or that release/cutover is
+    open.
   - The real paper-factor path completed exact Gate 1, Gate 2 CAS, Futu final
     receipt `backtest-32a022e60947473be481a2404d85646d`, human Gate 3 commit
     `7ad6a92`, registry promotion and cleanup. It is an operational US ETF proxy
@@ -86,12 +90,12 @@ Rules for AI agents working in this repository.
 - V4–V8 M1–M6 details remain dated delivery evidence. The current order is:
   finish the final UI/contract; refresh full/focused suites and explicitly
   inspect the live schema; in one controlled window perform
-  **backup -> migration 025 -> migration 026 -> service restart**
+  **backup -> migration 025 -> migration 026 -> migration 027 -> service restart**
   (applying any missing earlier ladder entries in order before 025); seal the
   exact test-only preflight; open a bounded
   **private candidate admission**; start and verify connector liveness; execute
   complete candidate browser E2E and seal its real-flow facts. Thus the
-  data-plane order is always **backup -> 025 -> 026 -> restart -> live E2E**.
+  data-plane order is always **backup -> 025 -> 026 -> 027 -> restart -> live E2E**.
   Accept the exact
   candidate; only then open the final runtime-bound release stamp/public
   cutover, exercise rollback, and run a final public smoke. Authoritative status
@@ -124,7 +128,7 @@ Rules for AI agents working in this repository.
   and not Plan-V6 full-UI acceptance. A fake Hermes adapter is for hermetic
   tests only, never a temporary public user path.
 - Migrations 006 through 015 were applied to live `quantplatform` under
-  explicit authorization. Migrations 016 through 026 form one ordered additive
+  explicit authorization. Migrations 016 through 027 form one ordered additive
   release-candidate upgrade and must be applied only by the explicit migration
   command after backup, isolated replay and current live inspection. Do not
   re-apply the obsolete `UNIQUE(task_id)`-only 006 or treat an old replay plan
@@ -136,7 +140,8 @@ Rules for AI agents working in this repository.
   binds managed Session/Command writes to the current paper epoch plus the
   active candidate or accepted release; 026 seals research claim/start/continue
   digests through Gate 1/2/3 and splits completion into claim-less v1 versus
-  exact-lineage v2.
+  exact-lineage v2; 027 expands only the bounded candidate TTL ceiling to two
+  hours and grants no new capability.
   Schema readiness and the constrained-role canary are not public write
   authorization.
 - Treat the local `~/.hermes/hermes-agent` checkout as a third owned dependency

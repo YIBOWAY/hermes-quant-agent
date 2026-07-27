@@ -9,6 +9,7 @@ if [ "$#" -ne 0 ]; then
 fi
 
 export HQA_AIQP_DIR="__HQA_PLATFORM_DIR__"
-cd "__HQA_PLATFORM_DIR__"
-exec "__HQA_PLATFORM_DIR__/ai-quant/bin/quant-system" \
+unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT
+export PYTHONNOUSERSITE=1
+exec /usr/bin/python3 -s "__HERMES_SCRIPTS_DIR__/hqa-paper-gate-show.py" \
   hermes vertical-a execute-from-hermes

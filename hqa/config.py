@@ -14,6 +14,18 @@ QUANT_SYSTEM_BIN = Path(
         "HQA_QUANT_SYSTEM_BIN", str(AIQP_DIR / "ai-quant" / "bin" / "quant-system")
     )
 )
+FACTOR_REPRO_BIN = Path(
+    os.environ.get(
+        "HQA_FACTOR_REPRO_BIN",
+        str(Path.home() / ".hermes" / "scripts" / "hqa-factor-repro.sh"),
+    )
+)
+PAPER_GATE_PORT_BIN = Path(
+    os.environ.get(
+        "HQA_PAPER_GATE_PORT_BIN",
+        str(Path.home() / ".hermes" / "scripts" / "hqa-paper-gate-show.py"),
+    )
+)
 LOG_DIR = Path(os.environ.get("HQA_LOG_DIR", str(REPO_DIR / "logs")))
 REVIEW_DIR = Path(os.environ.get("HQA_REVIEW_DIR", str(REPO_DIR / "review")))
 PREDICTION_DIR = Path(
@@ -54,9 +66,7 @@ WEEKLY_REVIEW_PROJECTION_PATH = FULL9H_PROJECTION_DIR / "weekly-review.v1.json"
 OPPORTUNITY_SUMMARY_PROJECTION_PATH = (
     FULL9H_PROJECTION_DIR / "opportunity-summary.v1.json"
 )
-AUTOMATION_STATUS_PROJECTION_PATH = (
-    FULL9H_PROJECTION_DIR / "automation-status.v1.json"
-)
+AUTOMATION_STATUS_PROJECTION_PATH = FULL9H_PROJECTION_DIR / "automation-status.v1.json"
 FULL9H_NOTIFY_TARGET = os.environ.get("HQA_FULL9H_NOTIFY_TARGET", "local")
 OPTIONS_SCAN_DIR = Path(
     os.environ.get("HQA_OPTIONS_SCAN_DIR", str(AIQP_DIR / "data" / "options_scans"))
@@ -75,9 +85,7 @@ RESEARCH_WORKFLOW_DIR = Path(
 # the generic HQA_RUNTIME_DIR test seam. The four explicit HQA_* overrides
 # below remain available for hermetic direct-CLI tests; installed Hermes
 # wrappers overwrite them with these canonical values before Python starts.
-CANONICAL_INTENT_PAYLOAD_DIR = (
-    REPO_DIR / "data" / "_runtime" / "intent-payloads-v2"
-)
+CANONICAL_INTENT_PAYLOAD_DIR = REPO_DIR / "data" / "_runtime" / "intent-payloads-v2"
 CANONICAL_WORKFLOW_AUTHORITY_DIR = (
     REPO_DIR / "data" / "_runtime" / "workflow-authority-v2"
 )

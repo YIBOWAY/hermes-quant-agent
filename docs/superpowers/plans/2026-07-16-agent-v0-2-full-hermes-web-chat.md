@@ -16,15 +16,21 @@
 > registry promotion 和 cleanup；它是论文的 **US ETF operational proxy**，不是全球国家样本
 > 完整复现。该 backend/CLI 事实不替代 `/hermes` browser vertical。
 >
-> 016–026 是 live 006–015 baseline 之后的有序 additive migration ladder。025 将每个新
+> 016–027 是 live 006–015 baseline 之后的有序 additive migration ladder。025 将每个新
 > managed Session/Command 围栏到 current paper-authority epoch 以及 active candidate 或 exact
 > accepted release；026 只持久化 HQA research claim/start/continue digest，在 Gate 1/2 传递
 > claim+start、Gate 3 再加入 continue，并将历史 claim-less v1 completion 与 exact-lineage v2
 > completion 明确分流。HQA claim 明文（论文标题 + 有序 universe）只存在 encrypted Intent
 > Payload Store，workflow/Platform/public completion 只投影 digest；claim 仅可绑定 Attempt 1，
 > terminal completion 前重验 pre-terminal exact lineage，Platform completion response 为
-> closed 42-key contract。该增量已 source + isolated review **APPROVE**；这不证明 025/026
-> 已 live apply，也不证明 candidate、release stamp 或 public cutover 已打开。
+> closed 42-key contract。027 只把 candidate admission 的硬 TTL ceiling 从 30 分钟扩到
+> 两小时，避免真实 browser/restart/paper review 在人工验收中途过期；它不增加 release、
+> public-write 或 trading authority。HQA 的 Hermes-facing 论文入口同时改为固定安装路径的
+> runtime ports，控制 ID/plan digest 从已验证的 durable facts 确定性派生，reviewed source
+> 只经 bounded stdin 暂存到 ignored、owner-only、content-addressed 路径，用户不再需要猜
+> hidden IDs 或把源码写入 tracked worktree。该增量已 source + isolated review
+> **APPROVE**；这不证明 025/026/027 已 live apply，也不证明 candidate、release stamp 或
+> public cutover 已打开。
 >
 > 这些 migration、connector、candidate、release stamp/cutover 与 E2E 结果都是当前
 > PostgreSQL/health/evidence
@@ -1087,7 +1093,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 | V1 Stop-the-line baseline | DONE；restricted live role ACCEPT | 旧 `live_role_unprovisioned` 是历史；006–015 已 live，015 constrained-role canary 已通过；schema ≠ release |
 | V2 Hermes DurableRunAuthority | MANAGED SOURCE ACCEPTED / FINAL RUNTIME STAMP PENDING | managed Session/Run、resume、provider evidence、approval/stop 与 exact fork 已进入 candidate；final clean Hermes identity + capability/browser recovery 仍待 release gate |
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
-| V4 PG schema/BFF saga/security | LIVE 006–015 + 016–026 FINAL SOURCE LADDER | 015 constrained canary 是历史 live evidence；016–026 的 current live apply 必须现场查询，025/026 source + isolated review APPROVE 不等于 live |
+| V4 PG schema/BFF saga/security | LIVE 006–015 + 016–027 FINAL SOURCE LADDER | 015 constrained canary 是历史 live evidence；016–027 的 current live apply 必须现场查询，025/026 research lineage 与 027 bounded-TTL source + isolated review APPROVE 不等于 live |
 | V5 supervised dispatch worker | RELEASE-CANDIDATE CODE ACCEPTED / DAEMON PENDING | supervised connector/provisioning/recovery source ready；final service install、fresh heartbeat/liveness pending |
 | V6 final workspace UI | **SOURCE COMPLETE / LIVE E2E PENDING** | managed composer/transcript/spine、external exact-message fork UI、Web Run-stop control 与 same-action retry 均已进入 final source；仍须真实 browser acceptance |
 | V7 decisions/results/vertical slices | **PARTIAL / REAL PAPER BACKEND DONE** | exact Gate 1/2/Futu final/Gate 3 commit+cleanup complete as US ETF proxy；Vertical A + paper flow via final `/hermes` browser still pending |
@@ -1100,14 +1106,14 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 2. 读取 final Platform/HQA/Hermes HEAD，刷新 Platform/HQA full、Hermes focused、
    frontend test/typecheck/lint/build；不运行 Hermes 40k suite。
 3. 备份、隔离恢复演练；若 016–024 有缺失则先按顺序补齐，随后严格执行
-   **backup → migration 025 → migration 026 → service restart**；复核 schema
+   **backup → migration 025 → migration 026 → migration 027 → service restart**；复核 schema
    fingerprint、exact grants、constrained-role provisioning canary、root/tip、run-control
    outcome、current paper epoch fencing 与 sealed research lineage readiness。
 4. 封存可重算 test-only preflight，打开短时、exact-runtime/schema 绑定的私有 candidate
    admission；public release 与 public cutover 仍保持关闭。
 5. 在 candidate admission 下启动 connector，验证 fresh heartbeat/liveness、空队列零
    provider；在 `/hermes` 完成 multi-turn/restart/fork/Vertical A/paper Gate browser E2E。
-   数据面顺序始终是 **backup → 025 → 026 → restart → live E2E**；步骤 4 是 restart 后、
+   数据面顺序始终是 **backup → 025 → 026 → 027 → restart → live E2E**；步骤 4 是 restart 后、
    E2E 前的 candidate/preflight 准入控制。
 6. 校验五条 canonical flow 与 zero-orders snapshot，封存 final evidence 并接受同一 exact
    candidate；任何失败都 revoke candidate，不能转去 public release 绕过。

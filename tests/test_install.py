@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -26,7 +27,7 @@ def _codesign_identity(helper: Path) -> tuple[str, str]:
     return identifier.group(1), cdhash.group(1)
 
 
-def _install(tmp_path):
+def _install(tmp_path, *, platform_dir: Path | None = None):
     fake_home = tmp_path / "home"
     fake_home.mkdir(mode=0o700)
     hermes_home = fake_home / ".hermes"
@@ -41,6 +42,8 @@ def _install(tmp_path):
         HERMES_HOME=str(hermes_home),
         HQA_SKIP_NATIVE_BUILD="1",
     )
+    if platform_dir is not None:
+        env["HQA_AIQP_DIR"] = str(platform_dir)
     result = subprocess.run(
         ["bash", str(REPO / "scripts" / "install.sh")],
         env=env,
@@ -339,6 +342,7 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
         "hqa-aihot-alerts.sh",
         "hqa-artifacts.sh",
         "hqa-doctor-watchdog.sh",
+        "hqa-factor-repro.sh",
         "hqa-full-9h-daily-close.sh",
         "hqa-full-9h-freshness.sh",
         "hqa-full-9h-notification-drain.sh",
@@ -366,10 +370,14 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
         assert os.access(wrapper, os.X_OK)  # executable
         body = wrapper.read_text()
         # Every wrapper launches a real program — an hqa Python module
-        # (digest/watchdog), the platform quant-system CLI (collect/gate), or
-        # the hermes messaging CLI (notify). No stubs.
+        # (digest/watchdog), the private Platform runtime launcher, the
+        # platform quant-system CLI (collect/gate), or the Hermes messaging
+        # CLI (notify). No stubs.
         assert (
-            "python3 -m hqa." in body or "quant-system" in body or "hermes send" in body
+            "python3 -m hqa." in body
+            or "hqa-paper-gate-show.py" in body
+            or "quant-system" in body
+            or "hermes send" in body
         )
 
 
@@ -420,6 +428,7 @@ def test_wrappers_pass_hermes_escape_check(tmp_path):
         "hqa-full-9h-freshness.sh",
         "hqa-full-9h-notification-drain.sh",
         "hqa-full-9h-weekly.sh",
+        "hqa-factor-repro.sh",
         "hqa-hermes-command-worker.sh",
         "hqa-hermes-compatibility-watch.sh",
         "hqa-intent-payload-reconcile.sh",
@@ -472,6 +481,154 @@ def test_deployed_wrappers_have_no_unsubstituted_placeholders(tmp_path):
         assert "__HQA_PLATFORM_DIR__" not in body, (
             f"{wrapper.name}: unsubstituted __HQA_PLATFORM_DIR__ placeholder remains"
         )
+
+
+def test_installed_factor_repro_wrapper_freezes_identity_and_exact_allowlist(
+    tmp_path,
+) -> None:
+    platform_dir = tmp_path / "release-platform"
+    platform_dir.mkdir()
+    scripts_dest = _install(tmp_path, platform_dir=platform_dir)
+    wrapper = scripts_dest / "hqa-factor-repro.sh"
+    stub_dir = tmp_path / "stub-bin"
+    stub_dir.mkdir()
+    path_marker = tmp_path / "path-python-executed"
+    stub = stub_dir / "python3"
+    stub.write_text(
+        "#!/bin/bash\n"
+        f"printf 'executed\\n' > \"{path_marker}\"\n"
+        "exit 99\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o700)
+    injection_marker = tmp_path / "python-injection-executed"
+    injected = tmp_path / "injected"
+    injected.mkdir()
+    injected_hook = (
+        "from pathlib import Path\n"
+        f"Path({str(injection_marker)!r}).write_text('executed')\n"
+    )
+    (injected / "sitecustomize.py").write_text(injected_hook, encoding="utf-8")
+    startup = tmp_path / "python-startup.py"
+    startup.write_text(injected_hook, encoding="utf-8")
+    user_base = tmp_path / "python-user-base"
+    for version in ("3.8", "3.9", "3.10", "3.11", "3.12", "3.13"):
+        site_packages = user_base / "lib" / f"python{version}" / "site-packages"
+        site_packages.mkdir(parents=True)
+        (site_packages / "sitecustomize.py").write_text(
+            injected_hook,
+            encoding="utf-8",
+        )
+    env = dict(
+        os.environ,
+        PATH=f"{stub_dir}:/usr/bin:/bin",
+        HQA_AIQP_DIR="/tmp/escaped-platform",
+        HQA_QUANT_SYSTEM_BIN="/tmp/escaped-quant-system",
+        HQA_FACTOR_REPRO_BIN="/tmp/escaped-factor-wrapper",
+        PYTHONHOME="/tmp/escaped-python-home",
+        PYTHONINSPECT="1",
+        PYTHONNOUSERSITE="0",
+        PYTHONPATH=str(injected),
+        PYTHONSTARTUP=str(startup),
+        PYTHONUSERBASE=str(user_base),
+    )
+
+    assert wrapper.is_file()
+    assert not wrapper.is_symlink()
+    assert wrapper.stat().st_mode & 0o777 == 0o700
+    body = wrapper.read_text(encoding="utf-8")
+    assert "__HQA_REPO_DIR__" not in body
+    assert "__HQA_PLATFORM_DIR__" not in body
+    assert "__HERMES_SCRIPTS_DIR__" not in body
+    assert "agent-v0.2-backend.env" not in body
+    assert "\nsource " not in body
+    assert "unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT" in body
+    assert "export PYTHONNOUSERSITE=1" in body
+    assert "exec /usr/bin/python3 -s -m hqa.factor_repro_cli" in body
+
+    for operation in ("propose", "list", "detail", "approve", "backtest", "promote"):
+        result = subprocess.run(
+            [str(wrapper), operation, "--help"],
+            env=env,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert f"usage: hqa-factor-repro {operation}" in result.stdout
+        assert not path_marker.exists()
+        assert not injection_marker.exists()
+
+    for argv in ([], ["propose-extra"], ["promotion-status"]):
+        refused = subprocess.run(
+            [str(wrapper), *argv],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert refused.returncode == 2
+        assert refused.stdout == ""
+        assert "factor_repro_operation_not_allowed" in refused.stderr
+        assert "cwd=" not in refused.stderr
+
+    paper_wrapper = scripts_dest / "hqa-paper-research.sh"
+    paper_result = subprocess.run(
+        [str(paper_wrapper), "prepare-intent"],
+        input="",
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert paper_result.returncode == 2
+    assert "paper_research_" in paper_result.stdout + paper_result.stderr
+    assert not path_marker.exists()
+    assert not injection_marker.exists()
+
+    options_wrapper = scripts_dest / "hqa-options-research.sh"
+    options_result = subprocess.run(
+        [str(options_wrapper)],
+        input="",
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert options_result.returncode == 78
+    assert "paper_gate_env_error=runtime_env_missing" in options_result.stderr
+    assert not path_marker.exists()
+    assert not injection_marker.exists()
+
+    readonly_wrapper = scripts_dest / "hqa-quant-readonly.sh"
+    readonly_body = readonly_wrapper.read_text(encoding="utf-8")
+    assert "unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT" in readonly_body
+    assert "export PYTHONNOUSERSITE=1" in readonly_body
+    assert 'exec /usr/bin/python3 -s "$SCRIPT_DIR/hqa-paper-gate-show.py"' in (
+        readonly_body
+    )
+    readonly_result = subprocess.run(
+        [
+            str(readonly_wrapper),
+            "hermes",
+            "paper-gate",
+            "show",
+            "--gate-id",
+            "paper-gate-python-boundary",
+            "--workspace-id",
+            "ws-local-main",
+            "--platform-session-id",
+            "platform-session-python-boundary",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert readonly_result.returncode == 78
+    assert "paper_gate_env_error=runtime_env_missing" in readonly_result.stderr
+    assert not path_marker.exists()
+    assert not injection_marker.exists()
 
 
 def test_python_wrappers_use_install_time_repo_placeholder():
@@ -613,6 +770,272 @@ def test_hermes_compatibility_wrapper_rejects_forwarded_arguments(tmp_path) -> N
 
 READONLY_SRC = REPO / "scripts" / "hermes" / "hqa-quant-readonly.sh"
 PAPER_GATE_SHOW_SRC = REPO / "scripts" / "hermes" / "hqa-paper-gate-show.py"
+PAPER_SOURCE_STAGE_SRC = REPO / "scripts" / "hermes" / "hqa-paper-source-stage.py"
+
+
+def _build_paper_source_stager(
+    tmp_path: Path,
+) -> tuple[Path, Path]:
+    repo = tmp_path / "release-hqa"
+    repo.mkdir(mode=0o700)
+    (repo / ".gitignore").write_text(
+        "data/_runtime/*\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["/usr/bin/git", "init", "-q", str(repo)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "add", ".gitignore"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=HQA Test",
+            "-c",
+            "user.email=hqa-test@example.invalid",
+            "commit",
+            "-qm",
+            "test fixture",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    launcher = tmp_path / "hqa-paper-source-stage.py"
+    launcher.write_text(
+        PAPER_SOURCE_STAGE_SRC.read_text(encoding="utf-8").replace(
+            "__HQA_REPO_DIR__",
+            str(repo),
+        ),
+        encoding="utf-8",
+    )
+    launcher.chmod(0o700)
+    return launcher, repo
+
+
+def _run_paper_source_stager(
+    launcher: Path,
+    source: bytes,
+    *arguments: str,
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [str(launcher), *arguments],
+        input=source,
+        capture_output=True,
+        timeout=10,
+    )
+
+
+def test_paper_source_stage_content_addresses_private_ignored_source(
+    tmp_path: Path,
+) -> None:
+    launcher, repo = _build_paper_source_stager(tmp_path)
+    source = (
+        b"from quant_system.factors.base import BaseFactor\n"
+        b"\n"
+        b"class PaperFactor(BaseFactor):\n"
+        b"    factor_id = 'paper_factor_v3'\n"
+    )
+
+    result = _run_paper_source_stager(launcher, source)
+
+    assert result.returncode == 0, result.stderr.decode()
+    assert result.stderr == b""
+    receipt = json.loads(result.stdout)
+    assert set(receipt) == {
+        "source_file_ref",
+        "reviewed_source_sha256",
+    }
+    digest = receipt["reviewed_source_sha256"]
+    assert re.fullmatch(r"[0-9a-f]{64}", digest)
+    staged = Path(receipt["source_file_ref"])
+    assert staged == (
+        repo / "data" / "_runtime" / "factor-gate1" / "sources" / f"source-{digest}.py"
+    )
+    assert staged.read_bytes() == source
+    assert staged.stat().st_mode & 0o777 == 0o600
+    assert staged.parent.stat().st_mode & 0o777 == 0o700
+    ignored = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "check-ignore", "-q", str(staged)],
+        capture_output=True,
+    )
+    assert ignored.returncode == 0
+    status = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "status", "--porcelain=v1"],
+        check=True,
+        capture_output=True,
+    )
+    assert status.stdout == b""
+
+
+def test_paper_source_stage_replays_exact_source_without_replacing_it(
+    tmp_path: Path,
+) -> None:
+    launcher, _repo = _build_paper_source_stager(tmp_path)
+    source = b"FACTOR_ID = 'same-reviewed-source'\n"
+
+    first = _run_paper_source_stager(launcher, source)
+    assert first.returncode == 0, first.stderr.decode()
+    first_receipt = json.loads(first.stdout)
+    staged = Path(first_receipt["source_file_ref"])
+    first_inode = staged.stat().st_ino
+
+    second = _run_paper_source_stager(launcher, source)
+
+    assert second.returncode == 0, second.stderr.decode()
+    assert second.stderr == b""
+    assert second.stdout == first.stdout
+    assert staged.stat().st_ino == first_inode
+    assert staged.read_bytes() == source
+    assert list(staged.parent.glob(".*.tmp")) == []
+
+
+def test_paper_source_stage_concurrent_replay_publishes_one_complete_file(
+    tmp_path: Path,
+) -> None:
+    launcher, _repo = _build_paper_source_stager(tmp_path)
+    source = b"FACTOR_ID = 'concurrent-reviewed-source'\n"
+    processes = [
+        subprocess.Popen(
+            [str(launcher)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for _ in range(6)
+    ]
+    for process in processes:
+        assert process.stdin is not None
+        process.stdin.write(source)
+        process.stdin.close()
+
+    results: list[tuple[int, bytes, bytes]] = []
+    for process in processes:
+        assert process.stdout is not None
+        assert process.stderr is not None
+        returncode = process.wait(timeout=10)
+        results.append((returncode, process.stdout.read(), process.stderr.read()))
+
+    assert {returncode for returncode, _stdout, _stderr in results} == {0}
+    assert {stderr for _returncode, _stdout, stderr in results} == {b""}
+    receipts = {stdout for _returncode, stdout, _stderr in results}
+    assert len(receipts) == 1
+    receipt = json.loads(receipts.pop())
+    staged = Path(receipt["source_file_ref"])
+    assert staged.read_bytes() == source
+    assert staged.stat().st_nlink == 1
+    assert sorted(path.name for path in staged.parent.iterdir()) == [staged.name]
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_error"),
+    [
+        (b"", b"paper_source_stage_error=source_empty\n"),
+        (b"\xff\n", b"paper_source_stage_error=source_not_utf8\n"),
+        (b"def broken(:\n", b"paper_source_stage_error=source_not_python\n"),
+        (
+            b"value = 'embedded\\x00'\x00\n",
+            b"paper_source_stage_error=source_not_python\n",
+        ),
+    ],
+)
+def test_paper_source_stage_rejects_non_python_input_without_receipt(
+    tmp_path: Path,
+    source: bytes,
+    expected_error: bytes,
+) -> None:
+    launcher, repo = _build_paper_source_stager(tmp_path)
+
+    result = _run_paper_source_stager(launcher, source)
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert result.stderr == expected_error
+    assert not (repo / "data").exists()
+
+
+def test_paper_source_stage_rejects_arguments_without_reading_source(
+    tmp_path: Path,
+) -> None:
+    launcher, repo = _build_paper_source_stager(tmp_path)
+
+    result = _run_paper_source_stager(
+        launcher,
+        b"SECRET_SOURCE = True\n",
+        "--source",
+        "do-not-accept.py",
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert result.stderr == b"paper_source_stage_error=arguments_not_allowed\n"
+    assert not (repo / "data").exists()
+
+
+def test_paper_source_stage_rejects_source_larger_than_256_kib(
+    tmp_path: Path,
+) -> None:
+    launcher, repo = _build_paper_source_stager(tmp_path)
+    source = b"#" * (256 * 1024 + 1)
+
+    result = _run_paper_source_stager(launcher, source)
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert result.stderr == b"paper_source_stage_error=source_too_large\n"
+    assert not (repo / "data").exists()
+
+
+def test_paper_source_stage_rejects_symlink_at_content_address(
+    tmp_path: Path,
+) -> None:
+    launcher, repo = _build_paper_source_stager(tmp_path)
+    source = b"FACTOR_ID = 'must-not-follow-link'\n"
+    digest = hashlib.sha256(source).hexdigest()
+    sources = repo / "data" / "_runtime" / "factor-gate1" / "sources"
+    sources.mkdir(parents=True, mode=0o700)
+    (sources.parent).chmod(0o700)
+    sources.chmod(0o700)
+    victim = tmp_path / "victim.py"
+    victim.write_bytes(b"ORIGINAL = True\n")
+    staged = sources / f"source-{digest}.py"
+    staged.symlink_to(victim)
+
+    result = _run_paper_source_stager(launcher, source)
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert result.stderr == b"paper_source_stage_error=source_conflict\n"
+    assert victim.read_bytes() == b"ORIGINAL = True\n"
+    assert staged.is_symlink()
+
+
+def test_paper_source_stage_rejects_non_private_sources_directory(
+    tmp_path: Path,
+) -> None:
+    launcher, repo = _build_paper_source_stager(tmp_path)
+    gate = repo / "data" / "_runtime" / "factor-gate1"
+    gate.mkdir(parents=True, mode=0o700)
+    gate.chmod(0o700)
+    sources = gate / "sources"
+    sources.mkdir(mode=0o755)
+    sources.chmod(0o755)
+
+    result = _run_paper_source_stager(launcher, b"FACTOR_ID = 'unsafe-dir'\n")
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert result.stderr == b"paper_source_stage_error=runtime_directory_unsafe\n"
+    assert list(sources.iterdir()) == []
+
+
 _TEST_DATABASE_URL = "postgresql://unit:secret@127.0.0.1:5432/quantplatform"
 _EXACT_GATE_ARGS = [
     "hermes",
@@ -643,14 +1066,42 @@ def _build_gate(
     stub.write_text(
         "#!/bin/bash\nprintf 'ARGV'\nfor a in \"$@\"; do printf '|%s' \"$a\"; done\n"
         "printf '\\n'\n"
-        'if [ "${1:-}" = hermes ] && [ "${2:-}" = paper-gate ] '
-        '&& [ "${3:-}" = show ]; then\n'
+        'if [ "${1:-}" = hermes ] && [ "${2:-}" = paper-gate ]; then\n'
         "  printf 'DBENV|%s|%s|%s|%s|%s\\n' "
         '"${QS_DATABASE_ENABLED-unset}" '
         '"${QS_DATABASE_AUTO_MIGRATE-unset}" '
         '"${QS_DATABASE_CONNECT_TIMEOUT_SECONDS-unset}" '
         '"${QS_DATABASE_URL-unset}" '
         '"${QS_DATABASE_SECRET_SENTINEL-unset}"\n'
+        '  if [ "${3:-}" = attest-run ]; then\n'
+        "    printf 'HERMESENV|%s|%s|%s|%s|%s|%s\\n' "
+        '"${QS_HERMES_GATEWAY_ENABLED-unset}" '
+        '"${QS_HERMES_GATEWAY_BASE_URL-unset}" '
+        '"${QS_HERMES_GATEWAY_API_KEY_FILE-unset}" '
+        '"${OPENAI_API_KEY-unset}" '
+        '"${FUTU_API_SECRET-unset}" '
+        '"${QS_AGENT_V02_CANDIDATE_ENABLED-unset}"\n'
+        "  fi\n"
+        "  input=''\n  IFS= read -r input || true\n"
+        '  [ -z "$input" ] || printf \'STDIN|%s\\n\' "$input"\n'
+        'elif [ "${1:-}" = hermes ] && [ "${2:-}" = vertical-a ]; then\n'
+        "  printf 'VERTICALENV|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\\n' "
+        '"${QS_DATABASE_ENABLED-unset}" '
+        '"${QS_DATABASE_AUTO_MIGRATE-unset}" '
+        '"${QS_AGENT_V02_CANDIDATE_ENABLED-unset}" '
+        '"${QS_AGENT_V02_RELEASE_WORKSPACE_ID-unset}" '
+        '"${QS_LOCAL_MUTATION_ENABLED-unset}" '
+        '"${QS_DRY_RUN-unset}" '
+        '"${QS_PAPER_TRADING-unset}" '
+        '"${QS_LIVE_TRADING_ENABLED-unset}" '
+        '"${QS_KILL_SWITCH-unset}" '
+        '"${QS_PAPER_ACCOUNT_AUTO_PROCESS_PENDING_ORDERS_ENABLED-unset}" '
+        '"${HERMES_PLATFORM_COMMAND_ID-unset}" '
+        '"${HERMES_PLATFORM_SESSION_ID-unset}" '
+        '"${HERMES_PLATFORM_RUN_ID-unset}" '
+        '"${HERMES_PLATFORM_MANAGED_SESSION_ID-unset}" '
+        '"${OPENAI_API_KEY-unset}" '
+        '"${FUTU_API_SECRET-unset}"\n'
         "  input=''\n  IFS= read -r input || true\n"
         '  [ -z "$input" ] || printf \'STDIN|%s\\n\' "$input"\n'
         "fi\n"
@@ -937,6 +1388,166 @@ def test_exact_gate_loader_scrubs_inherited_database_env_and_forces_rails(
 
 
 @pytest.mark.parametrize(
+    "operation",
+    ("attest-run", "register", "show", "complete", "list"),
+)
+def test_fixed_runtime_port_forwards_only_exact_paper_gate_operations(
+    tmp_path,
+    operation,
+) -> None:
+    _build_gate(
+        tmp_path,
+        runtime_env=(
+            "QS_DATABASE_ENABLED=true\n"
+            f"QS_DATABASE_URL={_TEST_DATABASE_URL}\n"
+            "QS_DATABASE_AUTO_MIGRATE=false\n"
+            "QS_HERMES_GATEWAY_ENABLED=true\n"
+            "QS_HERMES_GATEWAY_BASE_URL=http://127.0.0.1:8642\n"
+            "QS_HERMES_GATEWAY_API_KEY_FILE=/private/hermes-api-key\n"
+            "QS_AGENT_V02_CANDIDATE_ENABLED=true\n"
+        ),
+    )
+    launcher = tmp_path / "hqa-paper-gate-show.py"
+    inherited = dict(
+        os.environ,
+        OPENAI_API_KEY="must-not-cross",
+        FUTU_API_SECRET="must-not-cross",
+        QS_AGENT_V02_CANDIDATE_ENABLED="attacker-value",
+        QS_DATABASE_URL="postgresql://attacker:wrong@127.0.0.1:1/wrong",
+        QS_HERMES_GATEWAY_BASE_URL="http://attacker.invalid",
+    )
+    request = '{"operation":"fixed-runtime-port-test"}\n'
+
+    result = subprocess.run(
+        [str(launcher), "hermes", "paper-gate", operation],
+        input=request,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=inherited,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"ARGV|hermes|paper-gate|{operation}" in result.stdout
+    assert f"DBENV|true|false|unset|{_TEST_DATABASE_URL}|unset" in result.stdout
+    if operation == "attest-run":
+        assert (
+            "HERMESENV|true|http://127.0.0.1:8642|"
+            "/private/hermes-api-key|unset|unset|unset"
+        ) in result.stdout
+    else:
+        assert "HERMESENV" not in result.stdout
+    assert "STDIN|" + request.strip() in result.stdout
+    assert "must-not-cross" not in result.stdout + result.stderr
+    assert "attacker.invalid" not in result.stdout + result.stderr
+
+
+def test_fixed_runtime_port_vertical_a_loads_only_bounded_backend_profile(
+    tmp_path,
+) -> None:
+    _build_gate(
+        tmp_path,
+        runtime_env=(
+            "QS_ENVIRONMENT=local\n"
+            "QS_DATABASE_ENABLED=true\n"
+            f"QS_DATABASE_URL={_TEST_DATABASE_URL}\n"
+            "QS_DATABASE_AUTO_MIGRATE=false\n"
+            "QS_HERMES_GATEWAY_ENABLED=true\n"
+            "QS_HERMES_GATEWAY_BASE_URL=http://127.0.0.1:8642\n"
+            "QS_AGENT_V02_CANDIDATE_ENABLED=true\n"
+            "QS_AGENT_V02_RELEASE_WORKSPACE_ID=ws-local-main\n"
+            "QS_LOCAL_MUTATION_ENABLED=true\n"
+            "QS_DRY_RUN=false\n"
+            "QS_PAPER_TRADING=false\n"
+            "QS_LIVE_TRADING_ENABLED=true\n"
+            "QS_KILL_SWITCH=false\n"
+            "QS_PAPER_ACCOUNT_AUTO_PROCESS_PENDING_ORDERS_ENABLED=true\n"
+            "FUTU_API_SECRET=backend-provider-secret-must-not-load\n"
+        ),
+    )
+    launcher = tmp_path / "hqa-paper-gate-show.py"
+    inherited = dict(
+        os.environ,
+        HERMES_PLATFORM_COMMAND_ID="command-one",
+        HERMES_PLATFORM_SESSION_ID="platform-session-one",
+        HERMES_PLATFORM_RUN_ID="run-one",
+        HERMES_PLATFORM_MANAGED_SESSION_ID="managed-session-one",
+        HERMES_PLATFORM_UNRELATED="must-not-cross",
+        OPENAI_API_KEY="must-not-cross",
+        FUTU_API_SECRET="must-not-cross",
+    )
+    request = (
+        '{"ticker":"AAPL","expiry":"2026-08-21","strike":220.0,"goal_note":"bounded"}\n'
+    )
+
+    result = subprocess.run(
+        [str(launcher), "hermes", "vertical-a", "execute-from-hermes"],
+        input=request,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=inherited,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "ARGV|hermes|vertical-a|execute-from-hermes" in result.stdout
+    assert (
+        "VERTICALENV|true|false|true|ws-local-main|true|"
+        "true|true|false|true|false|command-one|platform-session-one|"
+        "run-one|managed-session-one|unset|unset"
+    ) in result.stdout
+    assert "STDIN|" + request.strip() in result.stdout
+    assert "must-not-cross" not in result.stdout + result.stderr
+    assert "backend-provider-secret" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["hermes", "paper-gate", "delete"],
+        ["hermes", "paper-gate", "show", "extra"],
+        ["hermes", "vertical-a", "execute-from-hermes", "extra"],
+        ["hermes", "vertical-b", "execute-from-hermes"],
+    ],
+)
+def test_fixed_runtime_port_refuses_non_exact_argv_without_exec(
+    tmp_path,
+    arguments,
+) -> None:
+    _build_gate(tmp_path)
+    launcher = tmp_path / "hqa-paper-gate-show.py"
+
+    result = subprocess.run(
+        [str(launcher), *arguments],
+        input="{}\n",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "REFUSED: invalid fixed runtime port invocation" in result.stderr
+    assert "ARGV" not in result.stdout
+
+
+def test_fixed_runtime_port_rejects_oversized_stdin_before_exec(tmp_path) -> None:
+    _build_gate(tmp_path)
+    launcher = tmp_path / "hqa-paper-gate-show.py"
+
+    result = subprocess.run(
+        [str(launcher), "hermes", "paper-gate", "register"],
+        input="x" * (256 * 1024 + 1),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    assert result.returncode == 78
+    assert "paper_gate_env_error=request_too_large" in result.stderr
+    assert "ARGV" not in result.stdout
+
+
+@pytest.mark.parametrize(
     ("mutation", "expected_error"),
     [
         ("missing", "runtime_env_missing"),
@@ -1026,6 +1637,21 @@ def test_install_deploys_private_exact_gate_env_launcher(tmp_path) -> None:
     ).read_text(encoding="utf-8")
 
 
+def test_install_deploys_private_paper_source_stager(tmp_path) -> None:
+    scripts_dest = _install(tmp_path)
+    launcher = scripts_dest / "hqa-paper-source-stage.py"
+
+    assert launcher.is_file()
+    assert not launcher.is_symlink()
+    assert launcher.stat().st_mode & 0o777 == 0o700
+    body = launcher.read_text(encoding="utf-8")
+    assert body.startswith("#!/usr/bin/python3\n")
+    assert "__HQA_REPO_DIR__" not in body
+    assert "__HQA_PLATFORM_DIR__" not in body
+    assert "__HERMES_SCRIPTS_DIR__" not in body
+    assert str(REPO) in body
+
+
 # --- D-25 HQA skill card ----------------------------------------------------
 
 SKILL_SRC = REPO / "skills" / "hermes" / "hqa-quant" / "SKILL.md"
@@ -1063,6 +1689,7 @@ def test_install_deploys_skill_card_with_substitution(tmp_path):
     assert str(scripts_dest / "hqa-portfolio-risk.sh") in body
     assert str(scripts_dest / "hqa-prediction.sh") in body
     assert str(scripts_dest / "hqa-opportunities.sh") in body
+    assert str(scripts_dest / "hqa-factor-repro.sh") in body
 
 
 def test_install_deploys_v3_research_authority_skill_and_wrapper(tmp_path) -> None:
@@ -1137,7 +1764,7 @@ def test_skill_card_frontmatter_mirrors_hermes_contract():
 def test_installed_skill_documents_exact_gate2_cas_command(tmp_path) -> None:
     scripts_dest = _install(tmp_path)
     body = (scripts_dest.parent / "skills" / "hqa-quant" / "SKILL.md").read_text()
-    assert "version: 1.18.1" in body
+    assert "version: 1.18.3" in body
     assert "--expected-source-digest <reviewed-source-sha256>" in body
     assert '--confirmation-note "<formula-and-translation-review>"' in body
     assert (
@@ -1147,7 +1774,7 @@ def test_installed_skill_documents_exact_gate2_cas_command(tmp_path) -> None:
     assert "never refetch" in body.lower()
     # Source card must match the installed card for the Gate 2 surface.
     source = SKILL_SRC.read_text(encoding="utf-8")
-    assert "version: 1.18.1" in source
+    assert "version: 1.18.3" in source
     assert (
         "approve --candidate-id <id> --expected-digest <sha256> "
         '--expected-status pending --note "<translation-review>"'
@@ -1159,10 +1786,12 @@ def test_skill_uses_exact_candidate_backtest_and_unambiguous_platform_commands(
     tmp_path,
 ) -> None:
     source = SKILL_SRC.read_text(encoding="utf-8")
-    assert "version: 1.18.1" in source
+    assert "version: 1.18.3" in source
     assert ("backtest --candidate-id <id> --expected-digest <sha256>") in source
     assert "backtest --factor-id" not in source
-    assert ("python3 -m hqa.factor_repro_cli promote") in source
+    for operation in ("propose", "list", "detail", "approve", "backtest", "promote"):
+        assert f"__HERMES_SCRIPTS_DIR__/hqa-factor-repro.sh {operation}" in source
+    assert "python3 -m hqa.factor_repro_cli" not in source
     assert "--final-backtest-receipt <backtest-id>" in source
     assert (
         "__HQA_PLATFORM_DIR__/ai-quant/bin/quant-system agent promote-candidate"
@@ -1173,8 +1802,10 @@ def test_skill_uses_exact_candidate_backtest_and_unambiguous_platform_commands(
     installed = (scripts_dest.parent / "skills" / "hqa-quant" / "SKILL.md").read_text(
         encoding="utf-8"
     )
-    assert "version: 1.18.1" in installed
-    assert "python3 -m hqa.factor_repro_cli promote" in installed
+    assert "version: 1.18.3" in installed
+    for operation in ("propose", "list", "detail", "approve", "backtest", "promote"):
+        assert f"{scripts_dest / 'hqa-factor-repro.sh'} {operation}" in installed
+    assert "python3 -m hqa.factor_repro_cli" not in installed
     assert "__HQA_PLATFORM_DIR__" not in installed
 
 
@@ -1227,7 +1858,15 @@ def test_skill_routes_natural_language_papers_through_two_attempt_coordinator(
     )
     assert wrapper.is_file()
     assert wrapper.stat().st_mode & 0o111
-    assert "prepare-intent|start-plan" in wrapper.read_text(encoding="utf-8")
+    wrapper_body = wrapper.read_text(encoding="utf-8")
+    assert "prepare-intent|start-plan" in wrapper_body
+    assert (
+        f'HQA_PAPER_GATE_PORT_BIN="{scripts_dest / "hqa-paper-gate-show.py"}"'
+        in wrapper_body
+    )
+    assert "unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT" in wrapper_body
+    assert "export PYTHONNOUSERSITE=1" in wrapper_body
+    assert "exec /usr/bin/python3 -s -m hqa.paper_research_cli" in wrapper_body
     assert str(wrapper) in installed
     assert "__HERMES_SCRIPTS_DIR__" not in installed
     assert "**next managed Hermes turn**" in installed
@@ -1271,6 +1910,11 @@ def test_skill_routes_natural_language_options_through_exact_managed_run(
     assert wrapper.is_file()
     assert wrapper.stat().st_mode & 0o111
     assert "hermes vertical-a execute-from-hermes" in body
+    assert "unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT" in body
+    assert "export PYTHONNOUSERSITE=1" in body
+    assert "exec /usr/bin/python3 -s" in body
+    assert str(scripts_dest / "hqa-paper-gate-show.py") in body
+    assert "quant-system" not in body
     assert "__HQA_PLATFORM_DIR__" not in body
     assert str(wrapper) in installed
     assert "__HERMES_SCRIPTS_DIR__" not in installed
@@ -1285,7 +1929,7 @@ def test_skill_card_documents_strict_portfolio_risk_v2() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.18.1" in body
+    assert "version: 1.18.3" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-portfolio-risk.sh" in body
     assert "logs/portfolio_risk.jsonl" in body
     assert "current snapshot" in lower
@@ -1301,7 +1945,7 @@ def test_skill_card_documents_prediction_ledger_contract() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.18.1" in body
+    assert "version: 1.18.3" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-prediction.sh" in body
     assert "create" in lower and "list" in lower and "reconcile" in lower
     assert "predictions/entries.jsonl" in body
@@ -1315,7 +1959,7 @@ def test_skill_card_documents_market_foresight_and_artifact_shelf() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.18.1" in body
+    assert "version: 1.18.3" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-market-foresight.sh" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-artifacts.sh" in body
     assert "artifacts/hermes-feed/manifest.v1.json" in body
@@ -1328,7 +1972,7 @@ def test_skill_card_documents_opportunity_ledger_contract() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.18.1" in body
+    assert "version: 1.18.3" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-opportunities.sh" in body
     assert "opportunities/entries.jsonl" in body
     assert "sync-signals" in lower and "record-action" in lower
@@ -1342,7 +1986,7 @@ def test_skill_card_documents_full_9h_automation_contract() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.18.1" in body
+    assert "version: 1.18.3" in body
     for wrapper in (
         "hqa-full-9h-daily-close.sh",
         "hqa-full-9h-freshness.sh",

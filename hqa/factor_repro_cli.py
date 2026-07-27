@@ -18,11 +18,9 @@ from hqa import config, factor_repro, holdout, quant_cli, trials
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _CANDIDATE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
-_PROMOTION_ID_RE = re.compile(
-    r"^promo-[0-9a-f]{32}(?:-r(?:[2-9]|[1-9][0-9]+))?$"
-)
+_PROMOTION_ID_RE = re.compile(r"^promo-[0-9a-f]{32}(?:-r(?:[2-9]|[1-9][0-9]+))?$")
 _APPROVE_ARGS_TEMPLATE = (
-    '--candidate-id {candidate_id} --expected-digest {digest} '
+    "--candidate-id {candidate_id} --expected-digest {digest} "
     '--expected-status pending --note "<translation-review>"'
 )
 
@@ -74,8 +72,7 @@ def _print_verified_pending(
 
 def _approval_command(candidate_id: str, manifest_digest: str) -> str:
     return (
-        f"cd {shlex.quote(str(config.REPO_DIR))} && "
-        "python3 -m hqa.factor_repro_cli approve "
+        f"{shlex.quote(str(config.FACTOR_REPRO_BIN))} approve "
         + _APPROVE_ARGS_TEMPLATE.format(
             candidate_id=candidate_id,
             digest=manifest_digest,
@@ -150,7 +147,9 @@ def _print_list_item(fields: dict[str, str], *, gate1_bound: bool = False) -> No
     candidate_id = fields.get("candidate_id", "?")
     integrity = fields.get("integrity", fields.get("integrity_state", ""))
     status = fields.get("status", "")
-    print(f"candidate_id={candidate_id} integrity={integrity or '?'} status={status or '?'}")
+    print(
+        f"candidate_id={candidate_id} integrity={integrity or '?'} status={status or '?'}"
+    )
     if integrity == "verified":
         digest = fields.get("manifest_digest", "")
         if digest:
@@ -345,8 +344,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             or not str(args.confirmation_note).strip()
         ):
             print(
-                "ERROR: fresh Gate 1 proposal requires --goal and "
-                "--confirmation-note",
+                "ERROR: fresh Gate 1 proposal requires --goal and --confirmation-note",
                 file=sys.stderr,
             )
             return 2
@@ -447,7 +445,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 manifest_digest=str(digest),
                 status="pending",
             )
-            print("HUMAN GATE 2: inspect the bound candidate and decide whether to approve it.")
+            print(
+                "HUMAN GATE 2: inspect the bound candidate and decide whether to approve it."
+            )
             print(
                 "Copy the approve_cmd values above; Gate 2 never refetches digest/status."
             )
@@ -576,13 +576,22 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.cmd == "promote":
         if _CANDIDATE_ID_RE.fullmatch(args.candidate_id) is None:
-            print("ERROR: candidate-id must be a safe lowercase identifier", file=sys.stderr)
+            print(
+                "ERROR: candidate-id must be a safe lowercase identifier",
+                file=sys.stderr,
+            )
             return 2
         if _DIGEST_RE.fullmatch(args.expected_digest) is None:
-            print("ERROR: expected-digest must be a lowercase 64-char hex sha256", file=sys.stderr)
+            print(
+                "ERROR: expected-digest must be a lowercase 64-char hex sha256",
+                file=sys.stderr,
+            )
             return 2
         if _GIT_COMMIT_RE.fullmatch(args.base_commit) is None:
-            print("ERROR: base-commit must be the exact lowercase 40-char commit SHA", file=sys.stderr)
+            print(
+                "ERROR: base-commit must be the exact lowercase 40-char commit SHA",
+                file=sys.stderr,
+            )
             return 2
         try:
             factor_repro.require_gate1_candidate_binding(
@@ -614,9 +623,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 base_commit=args.base_commit,
             )
         except subprocess.TimeoutExpired as exc:
-            partial_receipt = factor_repro.parse_json_payload(
-                _exception_output(exc)
-            )
+            partial_receipt = factor_repro.parse_json_payload(_exception_output(exc))
             print(
                 "ERROR: Gate 3 platform outcome is unknown after timeout; "
                 "never retry or abandon blindly",
@@ -652,11 +659,17 @@ def main(argv: Optional[list[str]] = None) -> int:
             code != 0
             or receipt is None
             or set(receipt) != expected_fields
-            or any(not isinstance(receipt[field], str) or not receipt[field] for field in expected_fields)
+            or any(
+                not isinstance(receipt[field], str) or not receipt[field]
+                for field in expected_fields
+            )
         ):
             if out.strip():
                 print("platform_output_withheld=invalid_gate3_receipt", file=sys.stderr)
-            print("ERROR: Gate 3 preparation failed; exact four-field machine receipt required", file=sys.stderr)
+            print(
+                "ERROR: Gate 3 preparation failed; exact four-field machine receipt required",
+                file=sys.stderr,
+            )
             _print_gate3_recovery(receipt)
             return 1
         try:
@@ -724,7 +737,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                     )
                 )
             ):
-                raise ValueError("platform promotion status is not awaiting_human_commit")
+                raise ValueError(
+                    "platform promotion status is not awaiting_human_commit"
+                )
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             print(f"ERROR: Gate 3 receipt verification failed: {exc}", file=sys.stderr)
             _print_gate3_recovery(receipt)
@@ -829,7 +844,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                 end=effective_end,
             )
         except (OSError, ValueError, TypeError) as exc:
-            print(f"ERROR: experiment evidence verification failed: {exc}", file=sys.stderr)
+            print(
+                f"ERROR: experiment evidence verification failed: {exc}",
+                file=sys.stderr,
+            )
             return 1
         metrics = evidence["metrics"]
         print(
@@ -857,7 +875,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             },
             log_path,
         )
-        warning = trials.overfit_warning(factor_id, trials.count_trials(factor_id, log_path))
+        warning = trials.overfit_warning(
+            factor_id, trials.count_trials(factor_id, log_path)
+        )
         if warning:
             print(warning)
         if args.final:

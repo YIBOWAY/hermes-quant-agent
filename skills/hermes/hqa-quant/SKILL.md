@@ -1,7 +1,7 @@
 ---
 name: hqa-quant
 description: "HQA quant ops from Hermes — read-only market/signal/radar queries, local prediction and opportunity ledgers, human-gated research/account writes, artifact-first answers, and 30s async triage for long jobs."
-version: 1.18.1
+version: 1.18.3
 platforms: [macos]
 metadata:
   hermes:
@@ -338,10 +338,24 @@ In particular:
   reference-and-digest pairs. Terminal
   evidence also repeats the confirmed `plan_version`/`plan_digest` and subject
   command/Run IDs, so a later reader can verify the whole lineage.
-- Reuse one caller-stable `operation_id` for an interrupted logical step.
-  Reusing it with different input is a conflict. A registration timeout is
-  `paper_research_platform_outcome_unknown`: inspect the same `gate_id`; do not
-  create another Gate or rerun a provider/backtest.
+- Hermes must omit `operation_id`, every new `gate_id`, every
+  `hqa_gate_ref`, and the `start-plan` `plan_digest`. The coordinator derives
+  them content-addressedly from authoritative stable inputs and returns every
+  effective ID/digest in its receipt. A new coordinator command/Run replay
+  therefore derives the same controls without model memory or invention.
+  Supplying `operation_id`, a new `gate_id`, or `hqa_gate_ref` is a
+  closed-schema error. Carry `parent_gate_id` and the terminal Gate 3
+  `gate_id` only from the immediately preceding receipt/show response.
+- Gate 1 and Gate 2 share the returned formula
+  `hqa_gate_lineage_ref == hqa_gate_ref`. Gate 3 keeps that same
+  `hqa_gate_lineage_ref` but receives the deterministic
+  `<lineage-ref>-g3` domain `hqa_gate_ref`, because WorkflowAuthority binds one
+  gate ref to exactly one Task/Attempt/role. Never substitute one for the
+  other.
+- A registration timeout is `paper_research_platform_outcome_unknown`: replay
+  the same logical request with derived controls and inspect the exact returned
+  or previously preserved `gate_id`; do not create another Gate or rerun a
+  provider/backtest.
 - `dry_run=true`, `paper_trading=true`, `live_trading_enabled=false`, and
   `kill_switch=true` remain fixed. This workflow creates zero orders.
 
@@ -360,11 +374,12 @@ The only legal sequence is:
 2. **Next-turn capture (Attempt 1).** In the **next managed Hermes turn**,
    invoke `start-plan`; its injected current command/Run prove the coordinator
    invocation while the preserved IDs identify the subject:
-   `operation_id, workspace_id, platform_session_id, payload_ref,
-   command_id, hermes_run_id, subject_command_id, subject_hermes_run_id,
-   plan_version, plan_digest, research_claim_digest`.
-   `plan_digest` must equal the independently attested subject output digest,
-   and `payload_ref` must name an active `research_start` payload.
+   `workspace_id, platform_session_id, payload_ref, subject_command_id,
+   subject_hermes_run_id, plan_version, research_claim_digest`. Omit
+   `operation_id` and `plan_digest`: the coordinator derives the former from
+   stable bindings and the latter only from the independently attested subject
+   output. A legacy supplied `plan_digest` is accepted only when it equals that
+   attestation. `payload_ref` must name an active `research_start` payload.
    The coordinator records
    `StartResearch → ObserveSubmission → ObserveRun →
    ObserveProviderEvidence → ProposePlan → RequestPlanConfirmation →
@@ -372,16 +387,28 @@ The only legal sequence is:
 
 3. **Independent plan confirmation.** Show the exact plan card/digest to the
    human. Only after a clear confirmation invoke `confirm-plan` with
-   `operation_id, task_ref, expected_task_version, plan_version, plan_digest,
-   confirmation_note`. Formula confirmation is not implied by plan
+   `task_ref, expected_task_version, plan_version, plan_digest,
+   confirmation_note`, carrying the digest from the `start-plan` receipt and
+   omitting `operation_id`. Formula confirmation is not implied by plan
    confirmation.
 
-4. **Gate 1 — exact formula/source.** Generate or stage the candidate source,
-   show the formula, plain-language translation, universe, exact file and
-   SHA-256 to the human, then invoke `open-gate1` with
-   `operation_id, gate_id, workspace_id, platform_session_id, task_ref,
-   expected_task_version, attempt_ref, command_id, hermes_run_id, hqa_gate_ref,
-   source_file_ref, reviewed_source_sha256, research_claim_digest`.
+4. **Gate 1 — exact formula/source.** Generate the candidate source in memory,
+   then pipe its exact raw Python bytes only on stdin (no argv/env/log copy) to
+   `__HERMES_SCRIPTS_DIR__/hqa-paper-research.sh stage-source`; pass no other
+   arguments. The wrapper alone execs its installed internal
+   `hqa-paper-source-stage.py` with no arguments under isolated Python; never
+   invoke that internal launcher directly.
+   Require its unique strict JSON receipt to contain exactly
+   `{source_file_ref,reviewed_source_sha256}`. The helper alone stages mode-0600
+   bytes beneath the configured ignored `HQA_FACTOR_GATE1_DIR`
+   (`__HQA_REPO_DIR__/data/_runtime/factor-gate1/sources`); never write source
+   to a tracked repository path, `/tmp`, or another caller-chosen location.
+   Show the formula, plain-language translation, universe, and the exact helper
+   receipt to the human, then invoke `open-gate1` with
+   `workspace_id, platform_session_id, task_ref, expected_task_version,
+   attempt_ref, source_file_ref, reviewed_source_sha256,
+   research_claim_digest`, omitting `operation_id`, `gate_id`, and
+   `hqa_gate_ref` and consuming only the helper-returned source fields.
    A claimed workflow must not send `paper_title` or `universe` again. HQA
    decrypts the Attempt 1 payload only in process, re-hashes the sealed claim,
    and writes only `research-claim:sha256:<research_claim_digest>` to the
@@ -401,7 +428,7 @@ The only legal sequence is:
    preserve its `gate1_confirmation_id` plus post-action `task_version`; do not
    ask the human to copy either value and do not recreate their confirmation
    from a remembered note. Reuse that content-addressed decision with:
-   `factor_repro_cli propose --gate1-confirmation-id
+   `__HERMES_SCRIPTS_DIR__/hqa-factor-repro.sh propose --gate1-confirmation-id
    <gate1_confirmation_id> --task-ref <task_ref>
    --source-file <same-source-file>
    --expected-source-digest <reviewed_source_sha256>`.
@@ -412,10 +439,10 @@ The only legal sequence is:
    supplied source before any Platform call. Show the resulting exact source
    and manifest. Invoke
    `open-gate2` with
-   `operation_id, gate_id, parent_gate_id, workspace_id, platform_session_id,
-   task_ref, expected_task_version, attempt_ref, command_id, hermes_run_id,
-   hqa_gate_ref, reviewed_source_sha256, gate1_confirmation_id, candidate_id,
-   expected_digest, expected_status`. `expected_status` is literally
+   `parent_gate_id, workspace_id, platform_session_id, task_ref,
+   expected_task_version, attempt_ref, reviewed_source_sha256,
+   gate1_confirmation_id, candidate_id, expected_digest, expected_status`,
+   omitting all derived IDs. `expected_status` is literally
    `pending`; Gate 1 and Gate 2 must share Task, Attempt 1, source lineage and
    HQA Gate ref. The human's independent `ReviewCandidateCAS` action supplies
    the exact candidate/digest/status/note without a refetch.
@@ -429,15 +456,16 @@ The only legal sequence is:
    paper_title:<same exact title>, universe:[<same ordered symbols>]}`.
    Require its returned `research_claim_digest` to equal Attempt 1 and preserve
    that new `payload_ref`. Then run the approved candidate's one-shot
-   backtest with `factor_repro_cli backtest ... --provider futu --final`. Do not
+   backtest with `__HERMES_SCRIPTS_DIR__/hqa-factor-repro.sh backtest ... --provider futu --final`. Do not
    substitute sample/local/Tiingo evidence. Preserve the succeeded
    final-research command/Run IDs and content-addressed `backtest-…` result. In
    the **next managed Hermes turn**, invoke `open-gate3` with
-   `operation_id, gate_id, parent_gate_id, workspace_id, platform_session_id,
-   task_ref, expected_task_version, payload_ref, command_id, hermes_run_id,
-   subject_command_id, subject_hermes_run_id, result_ref, hqa_gate_ref,
+   `parent_gate_id, workspace_id, platform_session_id, task_ref,
+   expected_task_version, payload_ref, subject_command_id,
+   subject_hermes_run_id, result_ref,
    reviewed_source_sha256, gate1_confirmation_id, candidate_id, expected_digest,
-   final_backtest_receipt_id, base_commit, research_claim_digest`.
+   final_backtest_receipt_id, base_commit, research_claim_digest`, omitting
+   `operation_id`, `gate_id`, and `hqa_gate_ref`.
    `payload_ref` must name an active `research_continue` payload. Platform
    independently derives the subject Run/provider evidence, and HQA
    read-verifies that the canonical receipt says `provider=futu` and binds the
@@ -461,8 +489,9 @@ The only legal sequence is:
    reviews `git diff` and creates exactly one scoped commit in the named
    worktree. HQA must not type or run that commit for them. After they supply
    the exact 40-character commit, invoke `complete-after-human-commit` with
-   `operation_id, gate_id, workspace_id, task_ref, expected_task_version,
-   attempt_ref, reviewed_commit, research_claim_digest`.
+   `gate_id, workspace_id, task_ref, expected_task_version, attempt_ref,
+   reviewed_commit, research_claim_digest`, carrying `gate_id` only from the
+   exact prepared Gate 3 receipt and omitting `operation_id`.
    The coordinator calls the read-only promotion-status seam, re-attests the
    exact candidate/digest/final receipt/base/patch and reviewed commit, then
    records `CompleteAttempt → CompleteTask`, reverse-audits the Workflow
@@ -492,13 +521,13 @@ not be presented as the normal natural-language user journey.
 
 | Operation | Command |
 |---|---|
-| Propose factor from an already confirmed Browser Gate 1 | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli propose --gate1-confirmation-id <gate1-id> --task-ref <task-ref> --source-file <factor.py> --expected-source-digest <reviewed-source-sha256>` |
-| Create a standalone low-level Gate 1 and propose (diagnostic only) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli propose --goal "<hypothesis>" --source-file <factor.py> --expected-source-digest <reviewed-source-sha256> --confirmation-note "<formula-and-translation-review>" --universe SPY,QQQ` |
-| List candidates (Gate 2 inspect) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli list` |
-| Detail one candidate | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli detail --candidate-id <id>` |
-| Approve translation (gate 2, human-only) | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli approve --candidate-id <id> --expected-digest <sha256> --expected-status pending --note "<translation-review>"` |
-| Backtest an approved factor | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli backtest --candidate-id <id> --expected-digest <sha256> --symbol SPY --start 2020-01-01 --end 2024-12-31` |
-| Prepare Gate 3 review workspace | `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli promote --candidate-id <id> --expected-digest <sha256> --final-backtest-receipt <backtest-id> --base-commit <40-char-HEAD>` |
+| Propose factor from an already confirmed Browser Gate 1 | `__HERMES_SCRIPTS_DIR__/hqa-factor-repro.sh propose --gate1-confirmation-id <gate1-id> --task-ref <task-ref> --source-file <factor.py> --expected-source-digest <reviewed-source-sha256>` |
+| Create a standalone low-level Gate 1 and propose (diagnostic only) | `__HERMES_SCRIPTS_DIR__/hqa-factor-repro.sh propose --goal "<hypothesis>" --source-file <factor.py> --expected-source-digest <reviewed-source-sha256> --confirmation-note "<formula-and-translation-review>" --universe SPY,QQQ` |
+| List candidates (Gate 2 inspect) | `__HERMES_SCRIPTS_DIR__/hqa-factor-repro.sh list` |
+| Detail one candidate | `__HERMES_SCRIPTS_DIR__/hqa-factor-repro.sh detail --candidate-id <id>` |
+| Approve translation (gate 2, human-only) | `__HERMES_SCRIPTS_DIR__/hqa-factor-repro.sh approve --candidate-id <id> --expected-digest <sha256> --expected-status pending --note "<translation-review>"` |
+| Backtest an approved factor | `__HERMES_SCRIPTS_DIR__/hqa-factor-repro.sh backtest --candidate-id <id> --expected-digest <sha256> --symbol SPY --start 2020-01-01 --end 2024-12-31` |
+| Prepare Gate 3 review workspace | `__HERMES_SCRIPTS_DIR__/hqa-factor-repro.sh promote --candidate-id <id> --expected-digest <sha256> --final-backtest-receipt <backtest-id> --base-commit <40-char-HEAD>` |
 | Review draft (post-mortem) | `cd __HQA_REPO_DIR__ && python3 -m hqa.review_cli draft --event "<what happened>" --kind note` |
 | Review confirm | `cd __HQA_REPO_DIR__ && python3 -m hqa.review_cli confirm <id> --judgment "<call>" --basis "<why>"` |
 
@@ -547,7 +576,7 @@ Notes on the write path:
   Promotion must consume that exact receipt ID and revalidates it both before
   and after preparing the review workspace.
 - Promotion (Gate 3) is always a separate human decision through the HQA wrapper:
-  `cd __HQA_REPO_DIR__ && python3 -m hqa.factor_repro_cli promote
+  `__HERMES_SCRIPTS_DIR__/hqa-factor-repro.sh promote
   --candidate-id <id> --expected-digest <sha256>
   --final-backtest-receipt <backtest-id> --base-commit <40-char-HEAD>`
   revalidates the exact Gate 1 binding and successful final one-shot receipt, then prepares

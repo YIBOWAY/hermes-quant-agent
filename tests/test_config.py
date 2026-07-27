@@ -17,6 +17,10 @@ def test_repo_and_platform_paths():
     assert (
         config.QUANT_SYSTEM_BIN == config.AIQP_DIR / "ai-quant" / "bin" / "quant-system"
     )
+    assert (
+        config.FACTOR_REPRO_BIN
+        == Path.home() / ".hermes" / "scripts" / "hqa-factor-repro.sh"
+    )
     assert config.LOG_DIR == config.REPO_DIR / "logs"
     assert config.PREDICTION_DIR == config.REPO_DIR / "predictions"
     assert config.OPPORTUNITY_DIR == config.REPO_DIR / "opportunities"
@@ -49,10 +53,7 @@ def test_generic_runtime_override_does_not_redirect_v3_canonical_roots(
         importlib.reload(config)
         assert config.RUNTIME_DIR == tmp_path / "escaped-runtime"
         assert config.INTENT_PAYLOAD_DIR == config.CANONICAL_INTENT_PAYLOAD_DIR
-        assert (
-            config.WORKFLOW_AUTHORITY_DIR
-            == config.CANONICAL_WORKFLOW_AUTHORITY_DIR
-        )
+        assert config.WORKFLOW_AUTHORITY_DIR == config.CANONICAL_WORKFLOW_AUTHORITY_DIR
     finally:
         monkeypatch.undo()
         importlib.reload(config)

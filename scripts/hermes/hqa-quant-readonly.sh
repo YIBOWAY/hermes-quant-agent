@@ -19,7 +19,8 @@
 # removed — they write under data/options_scans/ and burn Futu quota. Full scans
 # stay behind approval (or the dedicated collect cron wrapper).
 set -euo pipefail
-unset PYTHONPATH PYTHONHOME
+unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT
+export PYTHONNOUSERSITE=1
 
 PLATFORM_DIR="__HQA_PLATFORM_DIR__"
 
@@ -55,7 +56,7 @@ if [ "$#" -eq 9 ] \
   && [ "$8" = "--platform-session-id" ] \
   && [[ "$9" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$ ]]; then
   SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  exec /usr/bin/python3 "$SCRIPT_DIR/hqa-paper-gate-show.py" "$5" "$7" "$9"
+  exec /usr/bin/python3 -s "$SCRIPT_DIR/hqa-paper-gate-show.py" "$5" "$7" "$9"
 fi
 
 one="$1"

@@ -34,6 +34,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -72,11 +73,24 @@ from hqa.workflow_contract import (
 
 _CONTRACT = "agent-v0.2-paper-research-cli/v1"
 _PLATFORM_CONTRACT = "agent-v0.2-paper-gate-cli/v1"
+_RETRYABLE_PLATFORM_ERROR_CODES = frozenset(
+    {
+        "paper_gate_authority_unavailable",
+        "paper_gate_cli_unavailable",
+        "paper_run_attestation_unavailable",
+    }
+)
 _STDIN_LIMIT = 64_000
 _PREPARE_STDIN_LIMIT = 2_000_000
 _STDOUT_LIMIT = 256_000
 _MAX_PREPARE_PROMPT_BYTES = 262_144
-_PLATFORM_TIMEOUT_SECONDS = 30.0
+_MAX_GATE1_SOURCE_BYTES = 256 * 1024
+_GATE1_SOURCE_MODE = 0o600
+# The fixed runtime port enforces a 30-second paper-Gate child timeout and
+# spends a bounded interval terminating its entire process group. Keep this
+# outer client deadline visibly larger so the inner launcher owns cleanup and
+# returns the existing unknown/unavailable evidence instead of being orphaned.
+_PLATFORM_TIMEOUT_SECONDS = 45.0
 _SAFE_PLATFORM_BASE_ENV = frozenset(
     {
         "HOME",
@@ -345,7 +359,13 @@ class PaperGateRegistryPort(Protocol):
 
     def register(self, document: Mapping[str, Any]) -> dict[str, Any]: ...
 
-    def show(self, gate_id: str) -> dict[str, Any]: ...
+    def show(
+        self,
+        gate_id: str,
+        *,
+        workspace_id: str,
+        platform_session_id: str,
+    ) -> dict[str, Any]: ...
 
     def list(self, workspace_id: str) -> list[dict[str, Any]]: ...
 
@@ -575,15 +595,13 @@ def _payload_research_claim(
     has_claim = type(envelope) is dict and "research_claim" in envelope
     if (
         type(envelope) is not dict
-        or set(envelope)
-        != (base_fields | ({"research_claim"} if has_claim else set()))
+        or set(envelope) != (base_fields | ({"research_claim"} if has_claim else set()))
         or envelope.get("schema_version") != "2.0"
         or envelope.get("kind") != payload.get("kind")
         or envelope.get("owner_id") != payload.get("owner_id")
         or envelope.get("workspace_id") != payload.get("workspace_id")
         or envelope.get("session_id") != payload.get("session_id")
-        or envelope.get("client_intent_id")
-        != payload.get("client_intent_id")
+        or envelope.get("client_intent_id") != payload.get("client_intent_id")
         or envelope.get("ttl_days") != payload.get("ttl_days")
         or envelope.get("created_at") != payload.get("created_at")
         or envelope.get("expires_at") != payload.get("expires_at")
@@ -603,15 +621,9 @@ def _payload_research_claim(
         )
     try:
         claim = (
-            normalize_research_claim(envelope["research_claim"])
-            if has_claim
-            else None
+            normalize_research_claim(envelope["research_claim"]) if has_claim else None
         )
-        actual_digest = (
-            research_claim_digest(claim)
-            if claim is not None
-            else None
-        )
+        actual_digest = research_claim_digest(claim) if claim is not None else None
     except ResearchClaimError as exc:
         raise _OperationError(
             "paper_research_claim_binding_mismatch",
@@ -652,15 +664,8 @@ def _require_payload_consumer_replay(
     consumer_ref = payload.get("consumer_ref")
     if consumer_ref is not None:
         operation_reader = getattr(authority, "operation_receipt", None)
-        receipt = (
-            operation_reader(operation_id)
-            if callable(operation_reader)
-            else None
-        )
-        if (
-            receipt is None
-            or getattr(receipt, "attempt_ref", None) != consumer_ref
-        ):
+        receipt = operation_reader(operation_id) if callable(operation_reader) else None
+        if receipt is None or getattr(receipt, "attempt_ref", None) != consumer_ref:
             raise _OperationError(
                 "paper_research_payload_already_consumed",
                 retryable=False,
@@ -810,6 +815,25 @@ def _require_fields_with_optional_group(
     optional_group: set[str],
 ) -> None:
     if set(document) not in {frozenset(fields), frozenset(fields | optional_group)}:
+        raise _InputError("request fields do not match operation schema")
+
+
+def _require_fields_with_optionals(
+    document: Mapping[str, Any],
+    *,
+    required: set[str],
+    optional: set[str],
+    optional_group: Optional[set[str]] = None,
+) -> None:
+    """Require one exact schema with bounded optional evidence fields."""
+
+    fields = set(document)
+    group = optional_group or set()
+    if (
+        not required.issubset(fields)
+        or fields - required - optional - group
+        or (fields & group and not group.issubset(fields))
+    ):
         raise _InputError("request fields do not match operation schema")
 
 
@@ -986,6 +1010,113 @@ def _absolute_path(document: Mapping[str, Any], field: str) -> str:
     return value
 
 
+def _read_exact_gate1_source(
+    *,
+    source_file_ref: str,
+    reviewed_source_sha256: str,
+) -> bytes:
+    """Read the sole content-addressed Gate 1 source through physical FDs."""
+
+    expected = (
+        config.FACTOR_GATE1_DIR
+        / "sources"
+        / f"source-{reviewed_source_sha256}.py"
+    )
+    if (
+        not expected.is_absolute()
+        or source_file_ref != os.fspath(expected)
+        or any(component in {"", ".", ".."} for component in expected.parts[1:])
+        or not hasattr(os, "O_NOFOLLOW")
+        or not hasattr(os, "O_DIRECTORY")
+    ):
+        raise _InputError("source_file_ref is invalid")
+
+    directory_flags = (
+        os.O_RDONLY
+        | os.O_DIRECTORY
+        | os.O_NOFOLLOW
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    leaf_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    directory_fd = -1
+    leaf_fd = -1
+    try:
+        directory_fd = os.open(expected.anchor, directory_flags)
+        for component in expected.parts[1:-1]:
+            next_fd = os.open(
+                component,
+                directory_flags,
+                dir_fd=directory_fd,
+            )
+            os.close(directory_fd)
+            directory_fd = next_fd
+        leaf_fd = os.open(expected.name, leaf_flags, dir_fd=directory_fd)
+        before = os.fstat(leaf_fd)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) != _GATE1_SOURCE_MODE
+            or before.st_nlink != 1
+            or not 1 <= before.st_size <= _MAX_GATE1_SOURCE_BYTES
+        ):
+            raise _InputError("source_file_ref is invalid")
+
+        chunks: list[bytes] = []
+        remaining = _MAX_GATE1_SOURCE_BYTES + 1
+        while remaining:
+            chunk = os.read(leaf_fd, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        after = os.fstat(leaf_fd)
+        current = os.stat(
+            expected.name,
+            dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+    except _InputError:
+        raise
+    except OSError as exc:
+        raise _InputError("source_file_ref is invalid") from exc
+    finally:
+        if leaf_fd >= 0:
+            os.close(leaf_fd)
+        if directory_fd >= 0:
+            os.close(directory_fd)
+
+    stable_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns")
+    if (
+        len(payload) != before.st_size
+        or len(payload) > _MAX_GATE1_SOURCE_BYTES
+        or any(getattr(before, field) != getattr(after, field) for field in stable_fields)
+        or any(getattr(before, field) != getattr(current, field) for field in stable_fields)
+        or not stat.S_ISREG(current.st_mode)
+        or current.st_uid != os.geteuid()
+        or stat.S_IMODE(current.st_mode) != _GATE1_SOURCE_MODE
+        or current.st_nlink != 1
+        or hashlib.sha256(payload).hexdigest() != reviewed_source_sha256
+    ):
+        raise _InputError("source_file_ref is invalid")
+    try:
+        source_utf8 = payload.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise _InputError("source_file_ref is invalid") from exc
+    if "\x00" in source_utf8 or not source_utf8.strip():
+        raise _InputError("source_file_ref is invalid")
+    try:
+        compile(
+            source_utf8,
+            "<reviewed-paper-source>",
+            "exec",
+            dont_inherit=True,
+        )
+    except (SyntaxError, ValueError, TypeError) as exc:
+        raise _InputError("source_file_ref is invalid") from exc
+    return payload
+
+
 def _commit(document: Mapping[str, Any], field: str) -> str:
     value = document.get(field)
     if type(value) is not str or _COMMIT_RE.fullmatch(value) is None:
@@ -1015,6 +1146,79 @@ def _operation_id(
         )
     ).hexdigest()
     return f"paper-flow-{phase}-{digest[:32]}"
+
+
+def _content_addressed_control_id(
+    prefix: str,
+    *,
+    purpose: str,
+    binding: Mapping[str, Any],
+) -> str:
+    digest = hashlib.sha256(
+        _canonical_bytes(
+            {
+                "binding": dict(binding),
+                "contract": _CONTRACT,
+                "purpose": purpose,
+            }
+        )
+    ).hexdigest()
+    return f"{prefix}-{digest[:32]}"
+
+
+def _derived_operation_id(
+    *,
+    operation: str,
+    binding: Mapping[str, Any],
+) -> str:
+    return _content_addressed_control_id(
+        f"paper-{operation}-op",
+        purpose=f"{operation}:operation",
+        binding=binding,
+    )
+
+
+def _derived_gate_id(
+    *,
+    gate_kind: str,
+    binding: Mapping[str, Any],
+) -> str:
+    return _content_addressed_control_id(
+        f"paper-{gate_kind}",
+        purpose=f"{gate_kind}:platform-gate",
+        binding=binding,
+    )
+
+
+def _hqa_gate_lineage_ref(
+    *,
+    workspace_id: str,
+    platform_session_id: str,
+    task_ref: str,
+) -> str:
+    suffix = _content_addressed_control_id(
+        "paper",
+        purpose="paper-workflow:hqa-gate-lineage",
+        binding={
+            "platform_session_id": platform_session_id,
+            "task_ref": task_ref,
+            "workspace_id": workspace_id,
+        },
+    )
+    return f"gate:{suffix}"
+
+
+def _derived_hqa_gate_ref(
+    *,
+    gate_kind: str,
+    lineage_ref: str,
+) -> str:
+    # Formula and candidate review are one Attempt-1 decision lineage. Gate 3
+    # is a distinct Attempt-2 domain gate because WorkflowAuthority globally
+    # binds every gate ref to exactly one task/attempt/role. The deterministic
+    # suffix makes that relationship explicit without asking the caller to
+    # invent either ref.
+    return f"{lineage_ref}-g3" if gate_kind == "gate3" else lineage_ref
 
 
 def _receipt(value: object) -> dict[str, Any]:
@@ -1209,6 +1413,14 @@ def _attest_run(
             "paper_research_run_attestation_invalid",
             retryable=False,
         )
+    if (
+        type(attestation.get("schema_version")) is not int
+        or attestation["schema_version"] != 1
+    ):
+        raise _OperationError(
+            "paper_research_run_attestation_invalid",
+            retryable=False,
+        )
     for field, expected in request.items():
         if attestation.get(field) != expected:
             raise _OperationError(
@@ -1238,28 +1450,24 @@ def _attest_run(
             )
         ).hexdigest()
         != digest
-        or attestation.get("attestation_ref")
-        != f"paper-run-attestation:{digest}"
+        or attestation.get("attestation_ref") != f"paper-run-attestation:{digest}"
     ):
         raise _OperationError(
             "paper_research_run_attestation_invalid",
             retryable=False,
         )
     if mode == "invocation":
-        if (
-            attestation.get("command_state") not in {"delivered", "succeeded"}
-            or any(
-                attestation.get(field) is not None
-                for field in (
-                    "hqa_run_ref",
-                    "actual_model",
-                    "actual_provider",
-                    "output_digest",
-                    "hermes_runtime_instance_id",
-                    "hermes_runtime_started_at",
-                    "terminal_event_ref",
-                    "provider_evidence_ref",
-                )
+        if attestation.get("command_state") not in {"delivered", "succeeded"} or any(
+            attestation.get(field) is not None
+            for field in (
+                "hqa_run_ref",
+                "actual_model",
+                "actual_provider",
+                "output_digest",
+                "hermes_runtime_instance_id",
+                "hermes_runtime_started_at",
+                "terminal_event_ref",
+                "provider_evidence_ref",
             )
         ):
             raise _OperationError(
@@ -1270,8 +1478,7 @@ def _attest_run(
         mode != "subject"
         or attestation.get("command_state") != "succeeded"
         or type(attestation.get("hqa_run_ref")) is not str
-        or _REF_PATTERNS["hqa_run_ref"].fullmatch(attestation["hqa_run_ref"])
-        is None
+        or _REF_PATTERNS["hqa_run_ref"].fullmatch(attestation["hqa_run_ref"]) is None
         or type(attestation.get("provider_evidence_ref")) is not str
         or _REF_PATTERNS["provider_evidence_ref"].fullmatch(
             attestation["provider_evidence_ref"]
@@ -1322,13 +1529,10 @@ def _attest_subject(
     *,
     workspace_id: str,
 ) -> dict[str, Any]:
-    subject_command_id = _command_id(
-        {"command_id": request.get("subject_command_id")}
-    )
+    subject_command_id = _command_id({"command_id": request.get("subject_command_id")})
     subject_run_id = _identifier(request, "subject_hermes_run_id")
-    if (
-        subject_command_id == request.get("command_id")
-        or subject_run_id == request.get("hermes_run_id")
+    if subject_command_id == request.get("command_id") or subject_run_id == request.get(
+        "hermes_run_id"
     ):
         raise _OperationError(
             "paper_research_subject_is_current_invocation",
@@ -1374,10 +1578,7 @@ def _read_final_backtest_evidence(
         "final_backtest_report_ref": record.get("report"),
         "final_backtest_report_digest": record.get("report_sha256"),
     }
-    if any(
-        type(value) is not str or not value
-        for value in evidence.values()
-    ) or any(
+    if any(type(value) is not str or not value for value in evidence.values()) or any(
         _DIGEST_RE.fullmatch(str(evidence[field])) is None
         for field in (
             "final_backtest_receipt_digest",
@@ -1424,11 +1625,11 @@ class SubprocessPaperGateRegistry:
     def __init__(
         self,
         *,
-        executable: Path = config.QUANT_SYSTEM_BIN,
+        executable: Path | None = None,
         cwd: Path = config.AIQP_DIR,
         timeout_seconds: float = _PLATFORM_TIMEOUT_SECONDS,
     ) -> None:
-        self._executable = Path(executable)
+        self._executable = Path(executable or config.PAPER_GATE_PORT_BIN)
         self._cwd = Path(cwd)
         self._timeout_seconds = float(timeout_seconds)
 
@@ -1450,9 +1651,12 @@ class SubprocessPaperGateRegistry:
         # This metadata-only registrar must never inherit provider/model/API
         # credentials and must never turn a CLI call into schema mutation.
         child_env["QS_DATABASE_AUTO_MIGRATE"] = "false"
+        child_env["PYTHONNOUSERSITE"] = "1"
         try:
             completed = subprocess.run(
                 [
+                    "/usr/bin/python3",
+                    "-s",
                     str(self._executable),
                     "hermes",
                     "paper-gate",
@@ -1537,9 +1741,20 @@ class SubprocessPaperGateRegistry:
                     "paper_research_platform_invalid_response",
                     retryable=False,
                 )
+            retryable = (
+                not mutation
+                and completed.returncode == 1
+                and error_code in _RETRYABLE_PLATFORM_ERROR_CODES
+            )
+            expected_returncode = 1 if retryable else 2
+            if completed.returncode != expected_returncode:
+                raise _RegistryError(
+                    "paper_research_platform_invalid_response",
+                    retryable=False,
+                )
             raise _RegistryError(
                 error_code,
-                retryable=False,
+                retryable=retryable,
                 not_found=error_code
                 in {
                     "paper_gate_not_found",
@@ -1587,8 +1802,22 @@ class SubprocessPaperGateRegistry:
             )
         return gate
 
-    def show(self, gate_id: str) -> dict[str, Any]:
-        response = self._call("show", {"gate_id": gate_id}, mutation=False)
+    def show(
+        self,
+        gate_id: str,
+        *,
+        workspace_id: str,
+        platform_session_id: str,
+    ) -> dict[str, Any]:
+        response = self._call(
+            "show",
+            {
+                "gate_id": gate_id,
+                "platform_session_id": platform_session_id,
+                "workspace_id": workspace_id,
+            },
+            mutation=False,
+        )
         gate = response["gate"]
         if not isinstance(gate, dict):
             raise _RegistryError(
@@ -1657,8 +1886,7 @@ def _stored_registration(gate: Mapping[str, Any]) -> dict[str, Any]:
     return {
         field: (
             gate.get("registered_expected_status")
-            if field == "expected_status"
-            and "registered_expected_status" in gate
+            if field == "expected_status" and "registered_expected_status" in gate
             else gate.get(field)
         )
         for field in _REGISTER_FIELDS
@@ -1668,9 +1896,16 @@ def _stored_registration(gate: Mapping[str, Any]) -> dict[str, Any]:
 def _show_or_none(
     port: PaperGateRegistryPort,
     gate_id: str,
+    *,
+    workspace_id: str,
+    platform_session_id: str,
 ) -> Optional[dict[str, Any]]:
     try:
-        return port.show(gate_id)
+        return port.show(
+            gate_id,
+            workspace_id=workspace_id,
+            platform_session_id=platform_session_id,
+        )
     except _RegistryError as exc:
         if exc.not_found:
             return None
@@ -1681,7 +1916,12 @@ def _register_or_recover(
     port: PaperGateRegistryPort,
     registration: Mapping[str, Any],
 ) -> tuple[dict[str, Any], bool]:
-    existing = _show_or_none(port, str(registration["gate_id"]))
+    existing = _show_or_none(
+        port,
+        str(registration["gate_id"]),
+        workspace_id=str(registration["workspace_id"]),
+        platform_session_id=str(registration["platform_session_id"]),
+    )
     if existing is not None:
         return (
             _verify_gate(
@@ -1706,6 +1946,8 @@ def _register_or_recover(
 def _gate_output(
     *,
     operation: str,
+    operation_id: str,
+    hqa_gate_lineage_ref: str,
     gate: Mapping[str, Any],
     replayed: bool,
     snapshot: object,
@@ -1713,7 +1955,11 @@ def _gate_output(
     output = {
         "contract": _CONTRACT,
         "operation": operation,
+        "operation_id": operation_id,
         "ok": True,
+        "gate_id": gate.get("gate_id"),
+        "hqa_gate_ref": gate.get("hqa_gate_ref"),
+        "hqa_gate_lineage_ref": hqa_gate_lineage_ref,
         "gate": dict(gate),
         "platform_registration_replayed": replayed,
         "task_ref": getattr(snapshot, "task_ref"),
@@ -1742,10 +1988,7 @@ def _prepare_intent(
     claim_fields = {"paper_title", "universe"}
     request = _runtime_request(
         request,
-        operation_fields=(
-            fields | claim_fields
-        )
-        - set(_RUNTIME_SELECTORS),
+        operation_fields=(fields | claim_fields) - set(_RUNTIME_SELECTORS),
     )
     _require_fields_with_optional_group(request, fields, claim_fields)
     workspace_id = _identifier(request, "workspace_id")
@@ -1890,9 +2133,7 @@ def _prepare_intent(
         "status": "active",
     }
     if research_claim is not None:
-        output["research_claim_digest"] = research_claim_digest(
-            research_claim
-        )
+        output["research_claim_digest"] = research_claim_digest(research_claim)
     return output
 
 
@@ -1904,7 +2145,6 @@ def _start_plan(
     payload_store: IntentPayloadMetadataPort,
 ) -> dict[str, Any]:
     fields = {
-        "operation_id",
         "workspace_id",
         "platform_session_id",
         "payload_ref",
@@ -1921,15 +2161,18 @@ def _start_plan(
         request,
         operation_fields=(fields | claim_fields) - set(_RUNTIME_SELECTORS),
     )
-    _require_fields_with_optional_group(request, fields, claim_fields)
-    outer = _identifier(request, "operation_id", workflow=True)
+    _require_fields_with_optionals(
+        request,
+        required=fields - {"plan_digest"},
+        optional={"plan_digest"},
+        optional_group=claim_fields,
+    )
     workspace_id = _identifier(request, "workspace_id")
     platform_session_id = _identifier(request, "platform_session_id")
     payload_ref = _ref(request, "payload_ref")
     _command_id(request)
     _identifier(request, "hermes_run_id")
     plan_version = _plan_version(request)
-    plan_digest = _digest(request, "plan_digest")
     expected_claim_digest = _optional_research_claim_digest(request)
     _attest_invocation(
         registry,
@@ -1941,9 +2184,20 @@ def _start_plan(
         request,
         workspace_id=workspace_id,
     )
+    subject_output_digest = str(subject["output_digest"])
+    if _DIGEST_RE.fullmatch(subject_output_digest) is None:
+        raise _OperationError(
+            "paper_research_plan_digest_not_subject_output",
+            retryable=False,
+        )
+    plan_digest = (
+        _digest(request, "plan_digest")
+        if "plan_digest" in request
+        else subject_output_digest
+    )
     run_ref = str(subject["hqa_run_ref"])
     provider_ref = str(subject["provider_evidence_ref"])
-    if subject["output_digest"] != plan_digest:
+    if subject_output_digest != plan_digest:
         raise _OperationError(
             "paper_research_plan_digest_not_subject_output",
             retryable=False,
@@ -1983,6 +2237,10 @@ def _start_plan(
     }
     if claim_digest is not None:
         binding["research_claim_digest"] = claim_digest
+    outer = _derived_operation_id(
+        operation="start-plan",
+        binding=binding,
+    )
     start_operation_id = _operation_id(outer, "start", binding)
     _require_payload_consumer_replay(
         authority,
@@ -2108,6 +2366,7 @@ def _start_plan(
     output = {
         "contract": _CONTRACT,
         "operation": "start-plan",
+        "operation_id": outer,
         "ok": True,
         "task_ref": task_ref,
         "attempt_ref": attempt_ref,
@@ -2133,7 +2392,6 @@ def _confirm_plan(
     registry: PaperGateRegistryPort,
 ) -> dict[str, Any]:
     fields = {
-        "operation_id",
         "task_ref",
         "expected_task_version",
         "plan_version",
@@ -2146,7 +2404,6 @@ def _confirm_plan(
         operation_fields=fields - set(_RUNTIME_SELECTORS),
     )
     _require_fields(request, fields)
-    outer = _identifier(request, "operation_id", workflow=True)
     task_ref = _ref(request, "task_ref")
     expected = _positive_version(request)
     plan_version = _plan_version(request)
@@ -2155,10 +2412,7 @@ def _confirm_plan(
     authority = authority_factory()
     before = authority.snapshot(task_ref)  # type: ignore[attr-defined]
     workspace_ref = getattr(before, "workspace_ref", None)
-    if (
-        type(workspace_ref) is not str
-        or not workspace_ref.startswith("workspace:")
-    ):
+    if type(workspace_ref) is not str or not workspace_ref.startswith("workspace:"):
         raise _OperationError(
             "paper_research_task_binding_mismatch",
             retryable=False,
@@ -2176,6 +2430,10 @@ def _confirm_plan(
         "plan_digest": plan_digest,
         "confirmation_note_digest": hashlib.sha256(note.encode("utf-8")).hexdigest(),
     }
+    outer = _derived_operation_id(
+        operation="confirm-plan",
+        binding=binding,
+    )
     receipt = authority.apply(  # type: ignore[attr-defined]
         ConfirmPlan(
             _operation_id(outer, "confirm-plan", binding),
@@ -2201,6 +2459,7 @@ def _confirm_plan(
     return {
         "contract": _CONTRACT,
         "operation": "confirm-plan",
+        "operation_id": outer,
         "ok": True,
         "task_ref": task_ref,
         "task_version": snapshot.version,
@@ -2220,8 +2479,6 @@ def _open_gate1(
     payload_store: IntentPayloadMetadataPort,
 ) -> dict[str, Any]:
     fields = {
-        "operation_id",
-        "gate_id",
         "workspace_id",
         "platform_session_id",
         "hermes_session_id",
@@ -2230,7 +2487,6 @@ def _open_gate1(
         "attempt_ref",
         "command_id",
         "hermes_run_id",
-        "hqa_gate_ref",
         "source_file_ref",
         "reviewed_source_sha256",
     }
@@ -2246,8 +2502,6 @@ def _open_gate1(
         frozenset(fields | claim_fields),
     }:
         raise _InputError("request fields do not match operation schema")
-    _identifier(request, "operation_id", workflow=True)
-    gate_id = _identifier(request, "gate_id", workflow=True)
     workspace_id = _identifier(request, "workspace_id")
     platform_session_id = _identifier(request, "platform_session_id")
     task_ref = _ref(request, "task_ref")
@@ -2255,10 +2509,13 @@ def _open_gate1(
     attempt_ref = _ref(request, "attempt_ref")
     command_id = _command_id(request)
     hermes_run_id = _identifier(request, "hermes_run_id")
-    hqa_gate_ref = _ref(request, "hqa_gate_ref")
     source_file_ref = _absolute_path(request, "source_file_ref")
     expected_claim_digest = _optional_research_claim_digest(request)
     source_digest = _digest(request, "reviewed_source_sha256")
+    _read_exact_gate1_source(
+        source_file_ref=source_file_ref,
+        reviewed_source_sha256=source_digest,
+    )
     _attest_invocation(registry, request, workspace_id=workspace_id)
     authority = authority_factory()
     snapshot = authority.snapshot(task_ref)  # type: ignore[attr-defined]
@@ -2306,9 +2563,35 @@ def _open_gate1(
                 retryable=False,
             )
         universe = f"research-claim:sha256:{task_claim_digest}"
-        research_start_payload_digest = str(
-            getattr(attempt, "payload_digest")
-        )
+        research_start_payload_digest = str(getattr(attempt, "payload_digest"))
+    control_binding = {
+        "attempt_ref": attempt_ref,
+        "expected_task_version": expected,
+        "platform_session_id": platform_session_id,
+        "research_claim_digest": task_claim_digest,
+        "reviewed_source_sha256": source_digest,
+        "source_file_ref": source_file_ref,
+        "task_ref": task_ref,
+        "universe": universe,
+        "workspace_id": workspace_id,
+    }
+    operation_id = _derived_operation_id(
+        operation="open-gate1",
+        binding=control_binding,
+    )
+    gate_id = _derived_gate_id(
+        gate_kind="gate1",
+        binding=control_binding,
+    )
+    hqa_gate_lineage_ref = _hqa_gate_lineage_ref(
+        workspace_id=workspace_id,
+        platform_session_id=platform_session_id,
+        task_ref=task_ref,
+    )
+    hqa_gate_ref = _derived_hqa_gate_ref(
+        gate_kind="gate1",
+        lineage_ref=hqa_gate_lineage_ref,
+    )
     registration = _registration(
         gate_id=gate_id,
         gate_kind="gate1",
@@ -2349,7 +2632,12 @@ def _open_gate1(
         final_backtest_receipt_id=None,
         base_commit=None,
     )
-    existing = _show_or_none(registry, gate_id)
+    existing = _show_or_none(
+        registry,
+        gate_id,
+        workspace_id=workspace_id,
+        platform_session_id=platform_session_id,
+    )
     if existing is None:
         if (
             snapshot.version != expected
@@ -2373,8 +2661,7 @@ def _open_gate1(
             "gate1_confirmation_id",
         }
         if any(
-            stored_registration[field] != registration[field]
-            for field in replay_fields
+            stored_registration[field] != registration[field] for field in replay_fields
         ):
             raise _OperationError(
                 "paper_research_platform_gate_binding_mismatch",
@@ -2388,6 +2675,8 @@ def _open_gate1(
         replayed = True
     return _gate_output(
         operation="open-gate1",
+        operation_id=operation_id,
+        hqa_gate_lineage_ref=hqa_gate_lineage_ref,
         gate=gate,
         replayed=replayed,
         snapshot=snapshot,
@@ -2402,7 +2691,18 @@ def _parent_gate(
     expected_status: str,
     exact: Mapping[str, Any],
 ) -> dict[str, Any]:
-    gate = registry.show(parent_gate_id)
+    workspace_id = exact.get("workspace_id")
+    platform_session_id = exact.get("platform_session_id")
+    if type(workspace_id) is not str or type(platform_session_id) is not str:
+        raise _OperationError(
+            "paper_research_parent_gate_mismatch",
+            retryable=False,
+        )
+    gate = registry.show(
+        parent_gate_id,
+        workspace_id=workspace_id,
+        platform_session_id=platform_session_id,
+    )
     if (
         gate.get("gate_id") != parent_gate_id
         or gate.get("gate_kind") != expected_kind
@@ -2423,8 +2723,6 @@ def _open_gate2(
     registry: PaperGateRegistryPort,
 ) -> dict[str, Any]:
     fields = {
-        "operation_id",
-        "gate_id",
         "parent_gate_id",
         "workspace_id",
         "platform_session_id",
@@ -2434,7 +2732,6 @@ def _open_gate2(
         "attempt_ref",
         "command_id",
         "hermes_run_id",
-        "hqa_gate_ref",
         "reviewed_source_sha256",
         "gate1_confirmation_id",
         "candidate_id",
@@ -2446,8 +2743,6 @@ def _open_gate2(
         operation_fields=fields - set(_RUNTIME_SELECTORS),
     )
     _require_fields(request, fields)
-    _identifier(request, "operation_id", workflow=True)
-    gate_id = _identifier(request, "gate_id", workflow=True)
     parent_gate_id = _identifier(request, "parent_gate_id", workflow=True)
     workspace_id = _identifier(request, "workspace_id")
     platform_session_id = _identifier(request, "platform_session_id")
@@ -2456,7 +2751,6 @@ def _open_gate2(
     attempt_ref = _ref(request, "attempt_ref")
     command_id = _command_id(request)
     hermes_run_id = _identifier(request, "hermes_run_id")
-    hqa_gate_ref = _ref(request, "hqa_gate_ref")
     source_digest = _digest(request, "reviewed_source_sha256")
     confirmation_id = request.get("gate1_confirmation_id")
     if (
@@ -2468,6 +2762,35 @@ def _open_gate2(
     candidate_digest = _digest(request, "expected_digest")
     if request.get("expected_status") != "pending":
         raise _InputError("expected_status must be pending")
+    control_binding = {
+        "attempt_ref": attempt_ref,
+        "candidate_id": candidate_id,
+        "expected_digest": candidate_digest,
+        "expected_task_version": expected,
+        "gate1_confirmation_id": confirmation_id,
+        "parent_gate_id": parent_gate_id,
+        "platform_session_id": platform_session_id,
+        "reviewed_source_sha256": source_digest,
+        "task_ref": task_ref,
+        "workspace_id": workspace_id,
+    }
+    operation_id = _derived_operation_id(
+        operation="open-gate2",
+        binding=control_binding,
+    )
+    gate_id = _derived_gate_id(
+        gate_kind="gate2",
+        binding=control_binding,
+    )
+    hqa_gate_lineage_ref = _hqa_gate_lineage_ref(
+        workspace_id=workspace_id,
+        platform_session_id=platform_session_id,
+        task_ref=task_ref,
+    )
+    hqa_gate_ref = _derived_hqa_gate_ref(
+        gate_kind="gate2",
+        lineage_ref=hqa_gate_lineage_ref,
+    )
     _attest_invocation(registry, request, workspace_id=workspace_id)
     parent = _parent_gate(
         registry,
@@ -2496,9 +2819,7 @@ def _open_gate2(
     attempt = _attempt(snapshot, attempt_ref)
     claim_digest = getattr(snapshot, "research_claim_digest", None)
     research_start_payload_digest = (
-        str(getattr(attempt, "payload_digest"))
-        if claim_digest is not None
-        else None
+        str(getattr(attempt, "payload_digest")) if claim_digest is not None else None
     )
     if any(
         parent.get(field) != value
@@ -2552,7 +2873,12 @@ def _open_gate2(
         final_backtest_receipt_id=None,
         base_commit=None,
     )
-    existing = _show_or_none(registry, gate_id)
+    existing = _show_or_none(
+        registry,
+        gate_id,
+        workspace_id=workspace_id,
+        platform_session_id=platform_session_id,
+    )
     if existing is None:
         if (
             snapshot.version != expected
@@ -2573,8 +2899,7 @@ def _open_gate2(
         stored_registration = _stored_registration(existing)
         replay_fields = _REGISTER_FIELDS - {"command_id", "hermes_run_id"}
         if any(
-            stored_registration[field] != registration[field]
-            for field in replay_fields
+            stored_registration[field] != registration[field] for field in replay_fields
         ):
             raise _OperationError(
                 "paper_research_platform_gate_binding_mismatch",
@@ -2588,6 +2913,8 @@ def _open_gate2(
         replayed = True
     return _gate_output(
         operation="open-gate2",
+        operation_id=operation_id,
+        hqa_gate_lineage_ref=hqa_gate_lineage_ref,
         gate=gate,
         replayed=replayed,
         snapshot=snapshot,
@@ -2603,8 +2930,6 @@ def _open_gate3(
     payload_store: IntentPayloadMetadataPort,
 ) -> dict[str, Any]:
     fields = {
-        "operation_id",
-        "gate_id",
         "parent_gate_id",
         "workspace_id",
         "platform_session_id",
@@ -2617,7 +2942,6 @@ def _open_gate3(
         "subject_command_id",
         "subject_hermes_run_id",
         "result_ref",
-        "hqa_gate_ref",
         "reviewed_source_sha256",
         "gate1_confirmation_id",
         "candidate_id",
@@ -2631,8 +2955,6 @@ def _open_gate3(
         operation_fields=(fields | claim_fields) - set(_RUNTIME_SELECTORS),
     )
     _require_fields_with_optional_group(request, fields, claim_fields)
-    outer = _identifier(request, "operation_id", workflow=True)
-    gate_id = _identifier(request, "gate_id", workflow=True)
     parent_gate_id = _identifier(request, "parent_gate_id", workflow=True)
     workspace_id = _identifier(request, "workspace_id")
     platform_session_id = _identifier(request, "platform_session_id")
@@ -2642,7 +2964,6 @@ def _open_gate3(
     command_id = _command_id(request)
     hermes_run_id = _identifier(request, "hermes_run_id")
     result_ref = _ref(request, "result_ref")
-    hqa_gate_ref = _ref(request, "hqa_gate_ref")
     source_digest = _digest(request, "reviewed_source_sha256")
     confirmation_id = request.get("gate1_confirmation_id")
     if (
@@ -2662,6 +2983,37 @@ def _open_gate3(
         raise _InputError("result_ref must bind the final backtest receipt")
     base_commit = _commit(request, "base_commit")
     expected_claim_digest = _optional_research_claim_digest(request)
+    control_binding = {
+        "base_commit": base_commit,
+        "candidate_id": candidate_id,
+        "expected_digest": candidate_digest,
+        "expected_task_version": expected,
+        "final_backtest_receipt_id": final_receipt_id,
+        "gate1_confirmation_id": confirmation_id,
+        "parent_gate_id": parent_gate_id,
+        "payload_ref": payload_ref,
+        "platform_session_id": platform_session_id,
+        "research_claim_digest": expected_claim_digest,
+        "result_ref": result_ref,
+        "reviewed_source_sha256": source_digest,
+        "subject_command_id": request["subject_command_id"],
+        "subject_hermes_run_id": request["subject_hermes_run_id"],
+        "task_ref": task_ref,
+        "workspace_id": workspace_id,
+    }
+    gate_id = _derived_gate_id(
+        gate_kind="gate3",
+        binding=control_binding,
+    )
+    hqa_gate_lineage_ref = _hqa_gate_lineage_ref(
+        workspace_id=workspace_id,
+        platform_session_id=platform_session_id,
+        task_ref=task_ref,
+    )
+    hqa_gate_ref = _derived_hqa_gate_ref(
+        gate_kind="gate3",
+        lineage_ref=hqa_gate_lineage_ref,
+    )
     _attest_invocation(
         registry,
         request,
@@ -2733,9 +3085,7 @@ def _open_gate3(
         else None
     )
     research_continue_payload_digest = (
-        str(payload["payload_digest"])
-        if claim_digest is not None
-        else None
+        str(payload["payload_digest"]) if claim_digest is not None else None
     )
     if any(
         parent.get(field) != value
@@ -2773,6 +3123,10 @@ def _open_gate3(
     }
     if claim_digest is not None:
         binding["research_claim_digest"] = claim_digest
+    outer = _derived_operation_id(
+        operation="open-gate3",
+        binding=binding,
+    )
     continue_operation_id = _operation_id(
         outer,
         "research-continue",
@@ -2783,7 +3137,12 @@ def _open_gate3(
         payload,
         operation_id=continue_operation_id,
     )
-    existing = _show_or_none(registry, gate_id)
+    existing = _show_or_none(
+        registry,
+        gate_id,
+        workspace_id=workspace_id,
+        platform_session_id=platform_session_id,
+    )
     if existing is not None:
         registration = _stored_registration(existing)
         # Reconstructing from the stored exact Gate avoids inventing the
@@ -2804,9 +3163,7 @@ def _open_gate3(
             "subject_run_attestation_digest": subject["evidence_digest"],
             "research_claim_digest": claim_digest,
             "research_start_payload_digest": research_start_payload_digest,
-            "research_continue_payload_digest": (
-                research_continue_payload_digest
-            ),
+            "research_continue_payload_digest": (research_continue_payload_digest),
             **final_backtest,
             "parent_gate_id": parent_gate_id,
             "source_file_ref": None,
@@ -2844,10 +3201,8 @@ def _open_gate3(
             or provider_ref not in getattr(stored_attempt, "provider_evidence_refs")
             or result_ref not in getattr(stored_attempt, "result_refs")
             or getattr(stored_attempt, "domain_gate_ref") != hqa_gate_ref
-            or getattr(stored_attempt, "research_claim_digest", None)
-            != claim_digest
-            or getattr(before, "research_claim_digest", None)
-            != claim_digest
+            or getattr(stored_attempt, "research_claim_digest", None) != claim_digest
+            or getattr(before, "research_claim_digest", None) != claim_digest
         ):
             raise _OperationError(
                 "paper_research_gate3_evidence_mismatch",
@@ -2861,6 +3216,8 @@ def _open_gate3(
         snapshot = authority.snapshot(task_ref)  # type: ignore[attr-defined]
         return _gate_output(
             operation="open-gate3",
+            operation_id=outer,
+            hqa_gate_lineage_ref=hqa_gate_lineage_ref,
             gate=gate,
             replayed=True,
             snapshot=snapshot,
@@ -2999,6 +3356,8 @@ def _open_gate3(
     gate = _verify_gate(gate, registration, allowed_statuses={"pending"})
     return _gate_output(
         operation="open-gate3",
+        operation_id=outer,
+        hqa_gate_lineage_ref=hqa_gate_lineage_ref,
         gate=gate,
         replayed=False,
         snapshot=snapshot,
@@ -3059,7 +3418,6 @@ def _complete_after_human_commit(
     final_backtest_reader: Callable[[str, str, str], Mapping[str, Any]],
 ) -> dict[str, Any]:
     fields = {
-        "operation_id",
         "gate_id",
         "workspace_id",
         "task_ref",
@@ -3074,7 +3432,6 @@ def _complete_after_human_commit(
         operation_fields=(fields | claim_fields) - set(_RUNTIME_SELECTORS),
     )
     _require_fields_with_optional_group(request, fields, claim_fields)
-    outer = _identifier(request, "operation_id", workflow=True)
     gate_id = _identifier(request, "gate_id", workflow=True)
     workspace_id = _identifier(request, "workspace_id")
     task_ref = _ref(request, "task_ref")
@@ -3083,7 +3440,11 @@ def _complete_after_human_commit(
     reviewed_commit = _commit(request, "reviewed_commit")
     expected_claim_digest = _optional_research_claim_digest(request)
     _attest_invocation(registry, request, workspace_id=workspace_id)
-    gate = registry.show(gate_id)
+    gate = registry.show(
+        gate_id,
+        workspace_id=workspace_id,
+        platform_session_id=str(request["platform_session_id"]),
+    )
     run_ref = gate.get("hqa_run_ref")
     provider_ref = gate.get("provider_evidence_ref")
     promotion_id = gate.get("promotion_id")
@@ -3166,9 +3527,7 @@ def _complete_after_human_commit(
         ),
         error_code="paper_research_final_receipt_binding_mismatch",
     )
-    if (
-        any(gate.get(field) != value for field, value in final_backtest.items())
-    ):
+    if any(gate.get(field) != value for field, value in final_backtest.items()):
         raise _OperationError(
             "paper_research_final_receipt_binding_mismatch",
             retryable=False,
@@ -3210,11 +3569,9 @@ def _complete_after_human_commit(
     attempts = tuple(getattr(snapshot, "attempts", ()))
     if (
         len(attempts) != 2
-        or getattr(snapshot, "research_claim_digest", None)
-        != expected_claim_digest
+        or getattr(snapshot, "research_claim_digest", None) != expected_claim_digest
         or any(
-            getattr(item, "research_claim_digest", None)
-            != expected_claim_digest
+            getattr(item, "research_claim_digest", None) != expected_claim_digest
             for item in attempts
         )
     ):
@@ -3235,10 +3592,7 @@ def _complete_after_human_commit(
             else None
         ),
     }
-    if any(
-        gate.get(field) != value
-        for field, value in expected_gate_lineage.items()
-    ):
+    if any(gate.get(field) != value for field, value in expected_gate_lineage.items()):
         raise _OperationError(
             "paper_research_claim_binding_mismatch",
             retryable=False,
@@ -3280,6 +3634,10 @@ def _complete_after_human_commit(
         "subject_run_attestation_digest": subject_run_attestation_digest,
         **final_backtest,
     }
+    outer = _derived_operation_id(
+        operation="complete-after-human-commit",
+        binding=binding,
+    )
     attempt_completion = authority.apply(  # type: ignore[attr-defined]
         CompleteAttempt(
             _operation_id(outer, "research-complete", binding),
@@ -3331,9 +3689,7 @@ def _complete_after_human_commit(
         "task_terminal_outcome": final.terminal_outcome,
         "plan_version": final.plan_version,
         "plan_digest": final.plan_digest,
-        "plan_confirmation_note_digest": (
-            final.plan_confirmation_note_digest
-        ),
+        "plan_confirmation_note_digest": (final.plan_confirmation_note_digest),
         "attempt_ref": attempt_ref,
         "attempt_status": "completed",
         "attempt_terminal_outcome": getattr(
@@ -3436,8 +3792,7 @@ def _complete_after_human_commit(
         or platform_completion.get("hqa_completion_receipt_ref") != completion_ref
         or platform_completion.get("hqa_completion_receipt_digest") != completion_digest
         or platform_completion.get("reviewed_commit") != reviewed_commit
-        or platform_completion.get("completion_evidence")
-        != completion_evidence
+        or platform_completion.get("completion_evidence") != completion_evidence
         or type(platform_completion.get("created_at")) is not str
         or not str(platform_completion["created_at"]).endswith("Z")
         or any(
@@ -3456,6 +3811,7 @@ def _complete_after_human_commit(
     return {
         "contract": _CONTRACT,
         "operation": "complete-after-human-commit",
+        "operation_id": outer,
         "ok": True,
         "task_ref": task_ref,
         "task_version": final.version,
@@ -3566,9 +3922,7 @@ def main(
     try:
         request = _read_request(
             maximum=(
-                _PREPARE_STDIN_LIMIT
-                if operation == "prepare-intent"
-                else _STDIN_LIMIT
+                _PREPARE_STDIN_LIMIT if operation == "prepare-intent" else _STDIN_LIMIT
             )
         )
         port = registry if registry is not None else SubprocessPaperGateRegistry()
