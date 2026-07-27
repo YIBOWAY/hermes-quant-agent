@@ -185,10 +185,50 @@ Ops note (2026-07-09 audit): missing same-day scan meta surfaces as
 `DEGRADED: no scan artifact for <date>` in premarket/options-radar digests
 rather than silent empty options.
 
-Logic lives in `hqa/` (Python 3.9, stdlib only). Hermes cron runs thin wrappers
+Logic lives in `hqa/` (Python 3.11+, stdlib-only runtime). Hermes cron runs thin wrappers
 copied into `~/.hermes/scripts/` by `scripts/install.sh`.
 
-Tests: `./.venv/bin/pytest`
+Build a clean, non-editable test environment from the exact current commit
+(not from uncommitted working-tree bytes):
+
+```bash
+source_checkout="$(pwd -P)"
+source_commit="$(git rev-parse HEAD)"
+fresh_checkout="$(mktemp -d "$(dirname "$source_checkout")/hqa-committed.XXXXXX")"
+git archive --format=tar "$source_commit" | tar -xf - -C "$fresh_checkout"
+cd "$fresh_checkout"
+env -u PYTHONHOME -u PYTHONPATH uv sync --frozen --extra dev --no-editable --python 3.11
+env -u PYTHONHOME -u PYTHONPATH .venv/bin/python -I - <<'PY'
+import importlib.metadata as metadata
+import os
+from pathlib import Path
+import hqa
+
+root = Path.cwd().resolve()
+package = Path(hqa.__file__).resolve()
+distribution = Path(
+    metadata.distribution("hermes-quant-agent").locate_file("")
+).resolve()
+assert os.environ.get("PYTHONPATH") is None
+assert root / ".venv" in package.parents
+assert root / ".venv" in distribution.parents
+print(package)
+print(distribution)
+PY
+test_pycache="$fresh_checkout/.test-pycache"
+env -u PYTHONHOME -u PYTHONPATH PYTHONPYCACHEPREFIX="$test_pycache" .venv/bin/python -X int_max_str_digits=0 -I -m pytest --import-mode=importlib
+cd "$source_checkout"
+rm -R "$fresh_checkout"
+```
+
+The committed `uv.lock` is the dependency authority. Runtime dependencies are
+empty; the `dev` extra pins the verified test runner exactly. The test-only
+`int_max_str_digits=0` setting lets the existing adversarial fixture serialize
+its intentional 10,000-digit integer so application-level rejection is still
+exercised on Python 3.11. `PYTHONPYCACHEPREFIX` keeps Python 3.11 subprocess
+bytecode out of disposable Git fixtures, matching the clean-tree behavior of
+the former macOS system-Python runner. Both settings are test-process-only and
+are not runtime defaults.
 
 Install/update Hermes script wrappers:
 
