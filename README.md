@@ -236,6 +236,34 @@ Install/update Hermes script wrappers:
 bash scripts/install.sh
 ```
 
+Repository recovery packages and detached evidence roots are also repository
+tools. Restore receipts intentionally live outside the package they validate,
+so each receipt can bind the exact final `recovery-files.json` bytes without a
+self-referential or stale pre-receipt digest:
+
+```bash
+python -m hqa.repository_recovery_cli capture \
+  --repository /absolute/path/to/repository \
+  --package /absolute/path/to/evidence/package
+python -m hqa.repository_recovery_cli drill \
+  --package /absolute/path/to/evidence/package \
+  --destination /absolute/path/to/disposable/restore-1 \
+  --receipt /absolute/path/to/evidence/receipts/restore-1.json
+python -m hqa.repository_recovery_cli verify-receipt \
+  --package /absolute/path/to/evidence/package \
+  --receipt /absolute/path/to/evidence/receipts/restore-1.json
+python -m hqa.repository_recovery_cli build-detached-manifest \
+  --root /absolute/path/to/sealed-evidence-tree
+python -m hqa.repository_recovery_cli verify-detached-manifest \
+  --root /absolute/path/to/sealed-evidence-tree
+```
+
+Run two independent `drill` destinations/receipts before relying on a package.
+The tools reject existing destinations, symlinks, hard-linked or special
+artifacts, path escapes, non-canonical indexes, file-set drift, and digest
+changes. A detached `manifest.sha256` covers every other regular file under its
+root and never covers itself.
+
 See `docs/README.md` first, then
 `docs/design/2026-07-01-roadmap-phases-0b-4.md` for product decisions and
 `docs/design/hermes_quant_agent_plan.md` for the original system design.
