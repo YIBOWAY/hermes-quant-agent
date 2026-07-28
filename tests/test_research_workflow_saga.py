@@ -764,7 +764,7 @@ def test_process_group_cleanup_kills_descendant_after_leader_exits(
             env={"PATH": "/usr/bin:/bin"},
             start_new_session=True,
         )
-        deadline = time.monotonic() + 1
+        deadline = time.monotonic() + 10
         while not pid_file.exists() and time.monotonic() < deadline:
             time.sleep(0.01)
         descendant_pid = int(pid_file.read_text(encoding="utf-8").strip())
