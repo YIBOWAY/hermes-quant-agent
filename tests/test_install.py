@@ -330,6 +330,7 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
         "hqa-full-9h-weekly.sh",
         "hqa-hermes-command-worker.sh",
         "hqa-hermes-compatibility-watch.sh",
+        "hqa-hermes-update.sh",
         "hqa-intent-payload-reconcile.sh",
         "hqa-market-foresight.sh",
         "hqa-notify.sh",
