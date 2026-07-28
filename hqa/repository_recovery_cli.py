@@ -49,8 +49,15 @@ def main() -> int:
     closure.add_argument("--package", required=True)
     closure.add_argument("--first-destination", required=True)
     closure.add_argument("--second-destination", required=True)
-    closure.add_argument("--rehearsal-patch", required=True)
-    closure.add_argument("--rehearsal-patch-sha256", required=True)
+    closure.add_argument(
+        "--rehearsal-rebuild",
+        action="store_true",
+        required=True,
+        help=(
+            "run the implementation-owned offline, frozen, non-editable "
+            "uv rebuild contract"
+        ),
+    )
 
     verify_closure = commands.add_parser("verify-closure-v2")
     verify_closure.add_argument("--package", required=True)
@@ -82,8 +89,9 @@ def main() -> int:
             Path(args.package),
             Path(args.first_destination),
             Path(args.second_destination),
-            Path(args.rehearsal_patch),
-            rehearsal_patch_sha256=args.rehearsal_patch_sha256,
+            None,
+            rehearsal_patch_sha256=None,
+            rehearsal_rebuild=True,
             repository_id=args.repository_id,
             publication_url=args.publication_url,
             publication_remote_name=args.publication_remote_name,
