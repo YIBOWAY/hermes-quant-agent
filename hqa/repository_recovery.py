@@ -12,6 +12,7 @@ import shutil
 import stat
 import subprocess
 import tarfile
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Sequence
 from urllib.parse import urlsplit, urlunsplit
@@ -38,6 +39,21 @@ _PACKAGE_FILES = (
     "index.bin",
     "tracked-worktree.tar",
     "untracked-worktree.tar",
+)
+_CLOSURE_PACKAGE_FILES = (
+    "identity.json",
+    "refs.txt",
+    "pseudo-refs.txt",
+    "status-v2-z.bin",
+    "index.bin",
+    "index-stages.txt",
+    "staged.patch",
+    "unstaged.patch",
+    "untracked.tar",
+    "worktree-list.txt",
+    "submodules.txt",
+    "bundle.bundle",
+    "restore-receipt.json",
 )
 _HEX_OBJECT = re.compile(rb"(?<![0-9a-f])(?:[0-9a-f]{40}|[0-9a-f]{64})(?![0-9a-f])")
 _IDENTITY_KEYS = {
@@ -1118,12 +1134,900 @@ def verify_receipt(package: Path, receipt: Path) -> dict[str, object]:
     }
 
 
+def _closure_observation(payload: bytes) -> dict[str, object]:
+    return {"bytes": len(payload), "sha256": _sha256(payload)}
+
+
+def _closure_refs_text(repository: Path) -> bytes:
+    return _git(
+        repository,
+        "for-each-ref",
+        "--sort=refname",
+        "--format=%(refname)%09%(objectname)%09%(objecttype)%09%(*objectname)%09%(symref)",
+    )
+
+
+def _closure_index_stages_text(repository: Path) -> bytes:
+    return _git(repository, "ls-files", "--stage")
+
+
+def _closure_staged_patch(repository: Path) -> bytes:
+    return _git(
+        repository,
+        "diff",
+        "--cached",
+        "--binary",
+        "--full-index",
+        "--no-ext-diff",
+        "--no-color",
+    )
+
+
+def _closure_unstaged_patch(repository: Path) -> bytes:
+    return _git(
+        repository,
+        "diff",
+        "--binary",
+        "--full-index",
+        "--no-ext-diff",
+        "--no-color",
+    )
+
+
+def _closure_worktree_list(repository: Path) -> bytes:
+    return _git(repository, "worktree", "list", "--porcelain")
+
+
+def _closure_submodules(repository: Path) -> tuple[bytes, int, str]:
+    result = _run(
+        ["git", "submodule", "status", "--recursive"],
+        cwd=repository,
+        check=False,
+    )
+    return result.stdout, result.returncode, _sha256(result.stderr)
+
+
+def _closure_upstream(repository: Path) -> str | None:
+    result = _run(
+        [
+            "git",
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+        cwd=repository,
+        check=False,
+    )
+    if result.returncode:
+        return None
+    return result.stdout.decode("utf-8", "strict").strip()
+
+
+def _closure_package_index(package: Path) -> tuple[bytes, dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for name in _CLOSURE_PACKAGE_FILES:
+        path = package / name
+        payload = _read_regular(path)
+        mode = stat.S_IMODE(path.lstat().st_mode)
+        if mode != 0o600:
+            raise RepositoryRecoveryError("closure recovery artifact mode is not 0600")
+        entries.append(
+            {
+                "bytes": len(payload),
+                "mode": mode,
+                "path": name,
+                "sha256": _sha256(payload),
+            }
+        )
+    document = {
+        "entries": entries,
+        "entry_count": len(entries),
+        "schema_version": "hqa.repository-recovery-files.v2",
+        "self_digest_policy": (
+            "recovery-files.json is excluded; its digest is supplied by the "
+            "enclosing closure manifest"
+        ),
+    }
+    return canonical_json_bytes(document), document
+
+
+def _load_closure_identity(package: Path) -> dict[str, object]:
+    payload = _read_regular(package / "identity.json")
+    try:
+        identity = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RepositoryRecoveryError("invalid closure recovery identity") from exc
+    required = {
+        "absolute_checkout_path",
+        "branch",
+        "capture_observations",
+        "capture_time",
+        "deliberate_exclusions",
+        "git_version",
+        "head",
+        "mutable_identity",
+        "object_format",
+        "operator_identity",
+        "publication_remote_name",
+        "publication_url",
+        "repository_id",
+        "schema_version",
+        "submodule_capture",
+        "upstream",
+    }
+    mutable = identity.get("mutable_identity") if isinstance(identity, dict) else None
+    if (
+        not isinstance(identity, dict)
+        or set(identity) != required
+        or identity.get("schema_version")
+        != "hqa.repository-recovery-identity.v2"
+        or canonical_json_bytes(identity) != payload
+        or not isinstance(mutable, dict)
+        or set(mutable) != _IDENTITY_KEYS
+        or mutable.get("schema_version")
+        != "hqa.repository-recovery-identity.v1"
+        or identity.get("head") != mutable.get("head_object_id")
+        or identity.get("object_format") != mutable.get("object_format")
+        or not isinstance(identity.get("repository_id"), str)
+        or not identity["repository_id"]
+        or not isinstance(identity.get("operator_identity"), str)
+        or not identity["operator_identity"]
+        or not isinstance(identity.get("absolute_checkout_path"), str)
+        or not Path(identity["absolute_checkout_path"]).is_absolute()
+    ):
+        raise RepositoryRecoveryError("invalid closure recovery identity")
+    _normalize_remote(str(identity["publication_url"]))
+    return identity
+
+
+def verify_closure_package(package: Path) -> dict[str, object]:
+    """Verify an exact Section 4.1 package and its non-recursive index."""
+
+    package = _validate_existing_chain(Path(package), final_directory=True)
+    if stat.S_IMODE(package.lstat().st_mode) != 0o700:
+        raise RepositoryRecoveryError("closure recovery package mode is not 0700")
+    observed_names: list[str] = []
+    for child in package.iterdir():
+        if child.is_symlink() or not child.is_file():
+            raise RepositoryRecoveryError("unsafe closure recovery package member")
+        if stat.S_IMODE(child.lstat().st_mode) != 0o600:
+            raise RepositoryRecoveryError(
+                "closure recovery package member mode is not 0600"
+            )
+        observed_names.append(child.name)
+    expected_names = [*_CLOSURE_PACKAGE_FILES, _INDEX_NAME]
+    if sorted(observed_names) != sorted(expected_names) or len(
+        observed_names
+    ) != len(set(observed_names)):
+        raise RepositoryRecoveryError("closure recovery package file-set mismatch")
+    index_bytes = _read_regular(package / _INDEX_NAME)
+    try:
+        document = json.loads(index_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RepositoryRecoveryError(
+            "invalid closure recovery-files JSON"
+        ) from exc
+    if canonical_json_bytes(document) != index_bytes:
+        raise RepositoryRecoveryError(
+            "closure recovery-files JSON is not canonical"
+        )
+    entries = document.get("entries") if isinstance(document, dict) else None
+    if (
+        not isinstance(document, dict)
+        or set(document)
+        != {
+            "entries",
+            "entry_count",
+            "schema_version",
+            "self_digest_policy",
+        }
+        or document.get("schema_version")
+        != "hqa.repository-recovery-files.v2"
+        or document.get("entry_count") != len(_CLOSURE_PACKAGE_FILES)
+        or not isinstance(entries, list)
+        or len(entries) != len(_CLOSURE_PACKAGE_FILES)
+    ):
+        raise RepositoryRecoveryError("invalid closure recovery-files entries")
+    for expected_name, entry in zip(_CLOSURE_PACKAGE_FILES, entries):
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != {"bytes", "mode", "path", "sha256"}
+            or entry.get("path") != expected_name
+            or entry.get("mode") != 0o600
+        ):
+            raise RepositoryRecoveryError(
+                "invalid closure recovery-files entry"
+            )
+        payload = _read_regular(package / expected_name)
+        if (
+            entry.get("bytes") != len(payload)
+            or entry.get("sha256") != _sha256(payload)
+        ):
+            raise RepositoryRecoveryError(
+                "closure recovery package digest mismatch"
+            )
+    identity = _load_closure_identity(package)
+    receipt_bytes = _read_regular(package / "restore-receipt.json")
+    try:
+        receipt = json.loads(receipt_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RepositoryRecoveryError("invalid closure restore receipt") from exc
+    if (
+        canonical_json_bytes(receipt) != receipt_bytes
+        or not isinstance(receipt, dict)
+        or receipt.get("schema_version")
+        != "hqa.repository-restore-receipt.v2"
+        or receipt.get("package") != str(package)
+        or not isinstance(receipt.get("restore_verified"), bool)
+    ):
+        raise RepositoryRecoveryError("invalid closure restore receipt")
+    return {
+        "entry_count": len(entries),
+        "head": identity["head"],
+        "recovery_files_bytes": len(index_bytes),
+        "recovery_files_sha256": _sha256(index_bytes),
+        "restore_receipt_sha256": _sha256(receipt_bytes),
+        "restore_verified": receipt["restore_verified"],
+        "verified": True,
+    }
+
+
+def _closure_recorded_run(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    records: list[dict[str, object]],
+    check: bool = True,
+) -> subprocess.CompletedProcess[bytes]:
+    result = _run(argv, cwd=cwd, check=False)
+    records.append(
+        {
+            "argv": list(argv),
+            "exit_code": result.returncode,
+            "stderr_sha256": _sha256(result.stderr),
+            "stdout_sha256": _sha256(result.stdout),
+        }
+    )
+    if check and result.returncode:
+        raise RepositoryRecoveryError(
+            "closure restore command failed "
+            f"exit={result.returncode} "
+            f"argv_sha256={_sha256(canonical_json_bytes(list(argv)))} "
+            f"stderr_sha256={_sha256(result.stderr)}"
+        )
+    return result
+
+
+def _closure_restore_modes(
+    repository: Path, mutable_identity: dict[str, object]
+) -> None:
+    for category in ("tracked", "untracked"):
+        entries = mutable_identity.get(category)
+        if not isinstance(entries, list):
+            raise RepositoryRecoveryError("invalid closure worktree inventory")
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(
+                entry.get("path"), str
+            ):
+                raise RepositoryRecoveryError(
+                    "invalid closure worktree inventory"
+                )
+            target = repository / _safe_relative(entry["path"])
+            if entry.get("exists") is not True:
+                if target.exists() or target.is_symlink():
+                    raise RepositoryRecoveryError(
+                        "closure restore retained a deleted path"
+                    )
+                continue
+            if target.is_symlink() or not target.is_file():
+                raise RepositoryRecoveryError(
+                    "closure restore worktree member is unsafe"
+                )
+            mode = entry.get("mode")
+            if not isinstance(mode, int):
+                raise RepositoryRecoveryError(
+                    "invalid closure worktree inventory mode"
+                )
+            target.chmod(mode)
+
+
+def _closure_compare(
+    expected: dict[str, object], observed: dict[str, object]
+) -> tuple[list[dict[str, object]], list[str]]:
+    compared_fields: list[dict[str, object]] = []
+    mismatches: list[str] = []
+    fields = (
+        "admin_files",
+        "config",
+        "head_object_id",
+        "head_symbolic_ref",
+        "index",
+        "object_format",
+        "refs",
+        "required_objects",
+        "stages",
+        "status",
+        "tracked",
+        "untracked",
+    )
+    for field in fields:
+        expected_bytes = canonical_json_bytes(expected.get(field))
+        observed_bytes = canonical_json_bytes(observed.get(field))
+        matches = expected.get(field) == observed.get(field)
+        compared_fields.append(
+            {
+                "expected_sha256": _sha256(expected_bytes),
+                "field": field,
+                "match": matches,
+                "observed_sha256": _sha256(observed_bytes),
+            }
+        )
+        if not matches:
+            mismatches.append(field)
+    return compared_fields, mismatches
+
+
+def _closure_compare_artifacts(
+    package: Path, repository: Path, mutable_identity: dict[str, object]
+) -> tuple[list[dict[str, object]], list[str]]:
+    untracked_tar = _tar_bytes(
+        repository,
+        list(mutable_identity["untracked"]),  # type: ignore[arg-type]
+    )
+    submodules, submodule_exit, submodule_stderr = _closure_submodules(repository)
+    observed = {
+        "refs.txt": _closure_refs_text(repository),
+        "status-v2-z.bin": _git(
+            repository,
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "-z",
+            "--untracked-files=all",
+        ),
+        "index-stages.txt": _closure_index_stages_text(repository),
+        "staged.patch": _closure_staged_patch(repository),
+        "unstaged.patch": _closure_unstaged_patch(repository),
+        "untracked.tar": untracked_tar,
+        "submodules.txt": submodules,
+    }
+    compared: list[dict[str, object]] = []
+    mismatches: list[str] = []
+    for name, payload in observed.items():
+        expected = _read_regular(package / name)
+        matches = payload == expected
+        compared.append(
+            {
+                "expected_sha256": _sha256(expected),
+                "field": name,
+                "match": matches,
+                "observed_sha256": _sha256(payload),
+            }
+        )
+        if not matches:
+            mismatches.append(name)
+    compared.append(
+        {
+            "expected_sha256": _sha256(b"0"),
+            "field": "submodule-command-exit",
+            "match": submodule_exit == 0,
+            "observed_sha256": _sha256(str(submodule_exit).encode("ascii")),
+            "stderr_sha256": submodule_stderr,
+        }
+    )
+    if submodule_exit:
+        mismatches.append("submodule-command-exit")
+    return compared, mismatches
+
+
+def _materialize_closure_restore(
+    package: Path,
+    destination: Path,
+    identity: dict[str, object],
+) -> dict[str, object]:
+    destination = _validate_new_path(destination)
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    mutable = identity["mutable_identity"]
+    if not isinstance(mutable, dict):
+        raise RepositoryRecoveryError("invalid closure mutable identity")
+    records: list[dict[str, object]] = []
+    _closure_recorded_run(
+        [
+            "git",
+            "init",
+            f"--object-format={identity['object_format']}",
+            str(destination),
+        ],
+        cwd=destination.parent,
+        records=records,
+    )
+    _closure_recorded_run(
+        ["git", "bundle", "unbundle", str(package / "bundle.bundle")],
+        cwd=destination,
+        records=records,
+    )
+    refs = mutable.get("refs")
+    if not isinstance(refs, list):
+        raise RepositoryRecoveryError("invalid closure refs")
+    for ref in refs:
+        if ref["symref"]:
+            continue
+        _closure_recorded_run(
+            ["git", "update-ref", ref["refname"], ref["object_id"]],
+            cwd=destination,
+            records=records,
+        )
+    for ref in refs:
+        if not ref["symref"]:
+            continue
+        _closure_recorded_run(
+            ["git", "symbolic-ref", ref["refname"], ref["symref"]],
+            cwd=destination,
+            records=records,
+        )
+    symbolic = mutable["head_symbolic_ref"]
+    if symbolic is None:
+        _closure_recorded_run(
+            [
+                "git",
+                "update-ref",
+                "--no-deref",
+                "HEAD",
+                str(mutable["head_object_id"]),
+            ],
+            cwd=destination,
+            records=records,
+        )
+    else:
+        _closure_recorded_run(
+            ["git", "symbolic-ref", "HEAD", str(symbolic)],
+            cwd=destination,
+            records=records,
+        )
+    config = mutable.get("config")
+    if not isinstance(config, list):
+        raise RepositoryRecoveryError("invalid closure config")
+    for record in config:
+        _closure_recorded_run(
+            [
+                "git",
+                "config",
+                "--local",
+                "--add",
+                record["key"],
+                record["value"],
+            ],
+            cwd=destination,
+            records=records,
+        )
+    _closure_recorded_run(
+        ["git", "reset", "--hard", str(mutable["head_object_id"])],
+        cwd=destination,
+        records=records,
+    )
+    staged = _read_regular(package / "staged.patch")
+    if staged:
+        _closure_recorded_run(
+            [
+                "git",
+                "apply",
+                "--binary",
+                "--index",
+                "--whitespace=nowarn",
+                "--",
+                str(package / "staged.patch"),
+            ],
+            cwd=destination,
+            records=records,
+        )
+    unstaged = _read_regular(package / "unstaged.patch")
+    if unstaged:
+        _closure_recorded_run(
+            [
+                "git",
+                "apply",
+                "--binary",
+                "--whitespace=nowarn",
+                "--",
+                str(package / "unstaged.patch"),
+            ],
+            cwd=destination,
+            records=records,
+        )
+    _extract_tar(_read_regular(package / "untracked.tar"), destination)
+    index_path = Path(
+        _git(
+            destination,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "index",
+        )
+        .decode("utf-8", "strict")
+        .strip()
+    )
+    _replace_file(index_path, _read_regular(package / "index.bin"))
+    admin_files = mutable.get("admin_files")
+    if not isinstance(admin_files, list):
+        raise RepositoryRecoveryError("invalid closure admin files")
+    _restore_admin_files(destination, admin_files)
+    _closure_restore_modes(destination, mutable)
+    observed = repository_identity(destination)
+    compared_fields, mismatches = _closure_compare(mutable, observed)
+    artifact_fields, artifact_mismatches = _closure_compare_artifacts(
+        package, destination, mutable
+    )
+    mismatches.extend(artifact_mismatches)
+    expected_index = _read_regular(package / "index.bin")
+    _replace_file(index_path, expected_index)
+    final_index = _read_regular(index_path)
+    final_index_matches = final_index == expected_index
+    artifact_fields.append(
+        {
+            "expected_sha256": _sha256(expected_index),
+            "field": "index.bin-final",
+            "match": final_index_matches,
+            "observed_sha256": _sha256(final_index),
+        }
+    )
+    if not final_index_matches:
+        mismatches.append("index.bin-final")
+    return {
+        "command_exits": records,
+        "compared_fields": [*compared_fields, *artifact_fields],
+        "comparison_mismatches": sorted(mismatches),
+        "destination": str(destination),
+        "restore_exit_code": 0,
+        "restore_verified": not mismatches,
+    }
+
+
+def _closure_restore_attempt(
+    package: Path,
+    destination: Path,
+    identity: dict[str, object],
+) -> dict[str, object]:
+    try:
+        return _materialize_closure_restore(package, destination, identity)
+    except RepositoryRecoveryError as exc:
+        return {
+            "command_exits": [],
+            "compared_fields": [],
+            "comparison_mismatches": ["restore-error"],
+            "destination": str(destination),
+            "error": str(exc),
+            "restore_exit_code": 1,
+            "restore_verified": False,
+        }
+
+
+def _closure_rehearse_patch(
+    destination: Path,
+    patch: Path,
+    expected_sha256: str,
+    *,
+    enabled: bool,
+) -> dict[str, object]:
+    patch_payload = _read_regular(patch)
+    observed_sha256 = _sha256(patch_payload)
+    if observed_sha256 != expected_sha256:
+        raise RepositoryRecoveryError("rehearsal patch digest mismatch")
+    if not patch_payload.startswith(b"diff --git "):
+        raise RepositoryRecoveryError(
+            "rehearsal patch must be a non-empty Git patch"
+        )
+    if not enabled:
+        return {
+            "apply_exit_code": None,
+            "check_exit_code": None,
+            "enabled": False,
+            "input_bytes": len(patch_payload),
+            "input_path": str(patch),
+            "input_sha256": observed_sha256,
+            "state_changed": False,
+        }
+    before = repository_identity(destination)
+    check_result = _run(
+        [
+            "git",
+            "apply",
+            "--check",
+            "--binary",
+            "--whitespace=nowarn",
+            "--",
+            str(patch),
+        ],
+        cwd=destination,
+        check=False,
+    )
+    apply_exit: int | None = None
+    apply_stdout = b""
+    apply_stderr = b""
+    if check_result.returncode == 0:
+        apply_result = _run(
+            [
+                "git",
+                "apply",
+                "--binary",
+                "--whitespace=nowarn",
+                "--",
+                str(patch),
+            ],
+            cwd=destination,
+            check=False,
+        )
+        apply_exit = apply_result.returncode
+        apply_stdout = apply_result.stdout
+        apply_stderr = apply_result.stderr
+    after = repository_identity(destination)
+    state_changed = before != after
+    return {
+        "apply_exit_code": apply_exit,
+        "apply_stderr_sha256": _sha256(apply_stderr),
+        "apply_stdout_sha256": _sha256(apply_stdout),
+        "check_exit_code": check_result.returncode,
+        "check_stderr_sha256": _sha256(check_result.stderr),
+        "check_stdout_sha256": _sha256(check_result.stdout),
+        "enabled": True,
+        "input_bytes": len(patch_payload),
+        "input_path": str(patch),
+        "input_sha256": observed_sha256,
+        "state_after_sha256": _sha256(canonical_json_bytes(after)),
+        "state_before_sha256": _sha256(canonical_json_bytes(before)),
+        "state_changed": state_changed,
+    }
+
+
+def capture_and_drill_closure_repository(
+    repository: Path,
+    package: Path,
+    first_destination: Path,
+    second_destination: Path,
+    rehearsal_patch: Path,
+    *,
+    rehearsal_patch_sha256: str,
+    repository_id: str,
+    publication_url: str,
+    publication_remote_name: str,
+    operator_identity: str,
+) -> dict[str, object]:
+    """Capture Section 4.1 artifacts, rehearse a patch, and restore twice."""
+
+    repository = _validate_existing_chain(Path(repository), final_directory=True)
+    package = _validate_new_path(Path(package))
+    first_destination = _validate_new_path(Path(first_destination))
+    second_destination = _validate_new_path(Path(second_destination))
+    rehearsal_patch = _validate_existing_chain(
+        Path(rehearsal_patch), final_directory=False
+    )
+    if first_destination == second_destination:
+        raise RepositoryRecoveryError(
+            "closure restore destinations must be independent"
+        )
+    if (
+        first_destination in second_destination.parents
+        or second_destination in first_destination.parents
+    ):
+        raise RepositoryRecoveryError(
+            "closure restore destinations must not overlap"
+        )
+    roots = _repository_roots(repository)
+    for path, label in (
+        (package, "closure recovery package"),
+        (first_destination, "first closure restore"),
+        (second_destination, "second closure restore"),
+    ):
+        _assert_disjoint(path, roots, label=label)
+    if (
+        rehearsal_patch == package
+        or package in rehearsal_patch.parents
+        or rehearsal_patch == first_destination
+        or first_destination in rehearsal_patch.parents
+        or rehearsal_patch == second_destination
+        or second_destination in rehearsal_patch.parents
+    ):
+        raise RepositoryRecoveryError(
+            "rehearsal patch must be outside package and restore destinations"
+        )
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", repository_id):
+        raise RepositoryRecoveryError("invalid closure repository ID")
+    if (
+        not operator_identity.strip()
+        or operator_identity != operator_identity.strip()
+        or any(ord(character) < 32 for character in operator_identity)
+    ):
+        raise RepositoryRecoveryError("invalid closure operator identity")
+    if not re.fullmatch(r"[0-9a-f]{64}", rehearsal_patch_sha256):
+        raise RepositoryRecoveryError("invalid rehearsal patch digest")
+    rehearsal_payload = _read_regular(rehearsal_patch)
+    if _sha256(rehearsal_payload) != rehearsal_patch_sha256:
+        raise RepositoryRecoveryError("rehearsal patch digest mismatch")
+    expected_publication_url = _normalize_remote(publication_url)
+    if not publication_remote_name or any(
+        ord(character) < 32 for character in publication_remote_name
+    ):
+        raise RepositoryRecoveryError("invalid publication remote name")
+    observed_publication_url = (
+        _git(repository, "remote", "get-url", publication_remote_name)
+        .decode("utf-8", "strict")
+        .strip()
+    )
+    if (
+        _normalize_remote(observed_publication_url) != expected_publication_url
+        or observed_publication_url != expected_publication_url
+    ):
+        raise RepositoryRecoveryError("publication remote URL mismatch")
+    branch = (
+        _git(repository, "symbolic-ref", "--short", "-q", "HEAD", check=False)
+        .decode("utf-8", "strict")
+        .strip()
+    )
+    if not branch:
+        raise RepositoryRecoveryError("closure capture requires an attached HEAD")
+    package.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    package.parent.chmod(0o700)
+    first_destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    second_destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    staging = package.with_name(f".{package.name}.staging")
+    _assert_disjoint(staging, roots, label="closure recovery staging path")
+    _restricted_directory(staging)
+    try:
+        before = repository_identity(repository)
+        _create_bundle(repository, staging, before)
+        refs = _closure_refs_text(repository)
+        pseudo_refs = canonical_json_bytes(before["admin_files"])
+        status = _git(
+            repository,
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "-z",
+            "--untracked-files=all",
+        )
+        index_path = Path(
+            _git(
+                repository,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                "index",
+            )
+            .decode("utf-8", "strict")
+            .strip()
+        )
+        index = _read_regular(index_path)
+        stages = _closure_index_stages_text(repository)
+        staged = _closure_staged_patch(repository)
+        unstaged = _closure_unstaged_patch(repository)
+        untracked = _tar_bytes(
+            repository,
+            list(before["untracked"]),  # type: ignore[arg-type]
+        )
+        worktrees = _closure_worktree_list(repository)
+        submodules, submodule_exit, submodule_stderr = _closure_submodules(
+            repository
+        )
+        artifacts = {
+            "refs.txt": refs,
+            "pseudo-refs.txt": pseudo_refs,
+            "status-v2-z.bin": status,
+            "index.bin": index,
+            "index-stages.txt": stages,
+            "staged.patch": staged,
+            "unstaged.patch": unstaged,
+            "untracked.tar": untracked,
+            "worktree-list.txt": worktrees,
+            "submodules.txt": submodules,
+        }
+        for name, payload in artifacts.items():
+            _write_once(staging / name, payload)
+        bundle_payload = _read_regular(staging / "bundle.bundle")
+        identity = {
+            "absolute_checkout_path": str(repository),
+            "branch": branch,
+            "capture_observations": {
+                **{
+                    name: _closure_observation(payload)
+                    for name, payload in artifacts.items()
+                },
+                "bundle.bundle": _closure_observation(bundle_payload),
+            },
+            "capture_time": datetime.now(timezone.utc)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z"),
+            "deliberate_exclusions": before["deliberate_exclusions"],
+            "git_version": _run(
+                ["git", "--version"], cwd=repository
+            ).stdout.decode("utf-8", "strict").strip(),
+            "head": before["head_object_id"],
+            "mutable_identity": before,
+            "object_format": before["object_format"],
+            "operator_identity": operator_identity,
+            "publication_remote_name": publication_remote_name,
+            "publication_url": expected_publication_url,
+            "repository_id": repository_id,
+            "schema_version": "hqa.repository-recovery-identity.v2",
+            "submodule_capture": {
+                "exit_code": submodule_exit,
+                "stderr_sha256": submodule_stderr,
+            },
+            "upstream": _closure_upstream(repository),
+        }
+        _write_once(staging / "identity.json", canonical_json_bytes(identity))
+        after_capture = repository_identity(repository)
+        if after_capture != before:
+            raise RepositoryRecoveryError(
+                "repository changed during closure capture"
+            )
+        first = _closure_restore_attempt(
+            staging, first_destination, identity
+        )
+        rehearsal = _closure_rehearse_patch(
+            first_destination,
+            rehearsal_patch,
+            rehearsal_patch_sha256,
+            enabled=first["restore_verified"] is True,
+        )
+        second = _closure_restore_attempt(
+            staging, second_destination, identity
+        )
+        after_drills = repository_identity(repository)
+        if after_drills != before:
+            raise RepositoryRecoveryError(
+                "source repository changed during closure restore drills"
+            )
+        restore_verified = (
+            first["restore_verified"] is True
+            and rehearsal["check_exit_code"] == 0
+            and rehearsal["apply_exit_code"] == 0
+            and rehearsal["state_changed"] is True
+            and second["restore_verified"] is True
+        )
+        receipt = {
+            "first_restore": first,
+            "package": str(package),
+            "rehearsal": rehearsal,
+            "restore_verified": restore_verified,
+            "schema_version": "hqa.repository-restore-receipt.v2",
+            "second_restore": second,
+            "source_after_drills_sha256": _sha256(
+                canonical_json_bytes(after_drills)
+            ),
+            "source_before_sha256": _sha256(canonical_json_bytes(before)),
+        }
+        _write_once(
+            staging / "restore-receipt.json", canonical_json_bytes(receipt)
+        )
+        index_bytes, index_document = _closure_package_index(staging)
+        _write_once(staging / _INDEX_NAME, index_bytes)
+        os.replace(staging, package)
+        validation = verify_closure_package(package)
+        return {
+            "entry_count": index_document["entry_count"],
+            "head": before["head_object_id"],
+            "package": str(package),
+            "recovery_files_bytes": len(index_bytes),
+            "recovery_files_sha256": _sha256(index_bytes),
+            "restore_receipt_sha256": validation[
+                "restore_receipt_sha256"
+            ],
+            "restore_verified": restore_verified,
+        }
+    except Exception:
+        if staging.exists() and not staging.is_symlink():
+            shutil.rmtree(staging)
+        raise
+
+
 __all__ = [
     "RepositoryRecoveryError",
+    "capture_and_drill_closure_repository",
     "canonical_json_bytes",
     "capture_repository",
     "repository_identity",
     "restore_drill",
+    "verify_closure_package",
     "verify_package",
     "verify_receipt",
 ]
