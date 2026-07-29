@@ -556,6 +556,100 @@ def test_section_4_1_restore_ignores_ignored_bytecode_in_source_inventory(
     assert verification["verification_rebuild_verified"] is True
 
 
+def test_platform_nested_source_package_rebuilds_and_verifies(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    _git(repository, "reset", "--hard", "HEAD")
+    (repository / "untracked.bin").unlink()
+    package_source = repository / "src" / "quant_system"
+    package_source.mkdir(parents=True)
+    (repository / "hqa" / "__init__.py").replace(
+        package_source / "__init__.py"
+    )
+    (repository / "hqa").rmdir()
+    for name in ("pyproject.toml", "uv.lock"):
+        path = repository / name
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "hermes-quant-agent", "quant-system"
+            ),
+            encoding="utf-8",
+        )
+    build_backend = repository / "build_backend.py"
+    build_backend.write_text(
+        build_backend.read_text(encoding="utf-8")
+        .replace("hermes_quant_agent-0.0.0", "quant_system-0.0.0")
+        .replace(
+            "'hqa/__init__.py': Path('hqa/__init__.py').read_bytes(),",
+            (
+                "'quant_system/__init__.py': "
+                "Path('src/quant_system/__init__.py').read_bytes(),"
+            ),
+        )
+        .replace("Name: hermes-quant-agent", "Name: quant-system"),
+        encoding="utf-8",
+    )
+    (repository / ".gitignore").write_text(
+        ".venv/\n__pycache__/\n*.pyc\n",
+        encoding="utf-8",
+    )
+    _git(repository, "add", ".")
+    _git(repository, "commit", "-m", "platform nested-source fixture")
+    (repository / "value.txt").write_text("staged\n", encoding="utf-8")
+    _git(repository, "add", "value.txt")
+    (repository / "value.txt").write_text("unstaged\n", encoding="utf-8")
+    (repository / "untracked.bin").write_bytes(b"\x00closure\xff")
+    ignored_relative = (
+        "src/quant_system/__pycache__/__init__.cpython-311.pyc"
+    )
+    ignored = repository / ignored_relative
+    ignored.parent.mkdir()
+    ignored.write_bytes(b"attempt7-platform-ignored-bytecode-fixture\n")
+    assert _git(repository, "check-ignore", ignored_relative) == ignored_relative
+    source_before = repository_identity(repository)
+    package = tmp_path / "evidence" / "package"
+    first = tmp_path / "restores" / "first"
+    second = tmp_path / "restores" / "second"
+
+    result = capture_and_drill_closure_repository(
+        repository,
+        package,
+        first,
+        second,
+        None,
+        rehearsal_patch_sha256=None,
+        rehearsal_rebuild=True,
+        repository_id="platform",
+        publication_url="https://github.com/example/closure.git",
+        publication_remote_name="github",
+        operator_identity="attempt7-test-operator",
+    )
+
+    assert result["restore_verified"] is True
+    assert not (first / ignored_relative).exists()
+    assert not (second / ignored_relative).exists()
+    assert repository_identity(repository) == source_before
+    assert stat.S_IMODE(
+        (first / ".venv" / "rebuild-project" / "src").stat().st_mode
+    ) == 0o700
+    receipt = json.loads((package / "restore-receipt.json").read_bytes())
+    assert receipt["first_restore"]["restore_verified"] is True
+    assert receipt["second_restore"]["restore_verified"] is True
+    assert receipt["restore_verified"] is True
+    proof = receipt["rehearsal"]["rebuild_proof"]
+    assert proof["verified"] is True
+    assert (
+        proof["source_inventory_sha256"]
+        == proof["source_copy_inventory_sha256"]
+        == proof["installed_inventory_sha256"]
+    )
+    assert not (second / ".venv").exists()
+    verification = verify_closure_package(package)
+    assert verification["restore_verified"] is True
+    assert verification["verification_rebuild_verified"] is True
+
+
 def test_verifier_performs_an_independent_fresh_rebuild(
     tmp_path: Path,
 ) -> None:

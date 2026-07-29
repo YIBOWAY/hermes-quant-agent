@@ -2714,7 +2714,13 @@ def _copy_closed_rebuild_project(
             _read_regular(build_backend),
             mode=stat.S_IMODE(build_backend.lstat().st_mode),
         )
-    source_relative = str(spec["source_package_relative"])
+    source_relative = _safe_relative(
+        str(spec["source_package_relative"])
+    )
+    source_parent = project
+    for component in PurePosixPath(source_relative).parts[:-1]:
+        source_parent /= component
+        source_parent.mkdir(mode=0o700)
     copy_tree(
         _validate_existing_chain(
             destination / source_relative, final_directory=True
