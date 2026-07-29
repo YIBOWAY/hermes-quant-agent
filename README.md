@@ -212,6 +212,16 @@ imports, editable/direct-directory installs, `PYTHONPATH`, `.pth` files,
 symlinked identity, URL/branch/commit/tree drift, non-descendant history,
 unpublished `HEAD`, and dirty or hidden index state fail closed.
 
+Run the fixed Round 1 Gate 6 focused-safety selector with
+`scripts/verify_agent_v02_focused_safety.sh --python ABS --basetemp ABS
+--hermes-live ABS --integration-worktree ABS --hermes-python ABS`, using a
+release-local Python, a fresh basetemp outside the checkout, and the explicitly
+bound owned Hermes root, clean `codex/agent-v0-2-release` integration worktree,
+and Hermes Python. The wrapper accepts no other pytest arguments or selectors,
+replaces the host environment with disabled-provider and fail-closed trading
+rails, and requires private owner-controlled authority paths; only the final
+Hermes Python entry may be a checked user-owned symlink.
+
 Separately, build a clean, non-editable full-test environment from the exact current commit
 (not from uncommitted working-tree bytes):
 
