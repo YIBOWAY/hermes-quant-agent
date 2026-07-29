@@ -2166,6 +2166,48 @@ def _regular_tree_inventory(root: Path) -> list[dict[str, object]]:
     return entries
 
 
+def _captured_source_inventory(
+    repository: Path,
+    source_package: str,
+) -> list[dict[str, object]]:
+    source_relative = _safe_relative(source_package)
+    prefix = f"{source_relative}/"
+    paths = sorted(
+        set(
+            _split_nul(
+                _git(
+                    repository,
+                    "ls-files",
+                    "--cached",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
+                    "--",
+                    source_relative,
+                )
+            )
+        ),
+        key=lambda value: value.encode("utf-8"),
+    )
+    entries: list[dict[str, object]] = []
+    for recorded in _file_inventory(repository, paths):
+        if recorded["exists"] is not True:
+            continue
+        repository_relative = str(recorded["path"])
+        if not repository_relative.startswith(prefix):
+            raise RepositoryRecoveryError(
+                "closed rebuild source path escaped its package"
+            )
+        entries.append(
+            {
+                "path": _safe_relative(repository_relative[len(prefix) :]),
+                "sha256": recorded["sha256"],
+                "size": recorded["bytes"],
+            }
+        )
+    return entries
+
+
 def _managed_python_contract() -> dict[str, object]:
     try:
         interpreter = Path(sys._base_executable).resolve(strict=True)
@@ -2252,7 +2294,10 @@ def _closed_rebuild_spec(
     cache = _validate_existing_chain(cache, final_directory=True)
     if stat.S_IMODE(cache.lstat().st_mode) != 0o700:
         raise RepositoryRecoveryError("closed rebuild cache mode is not 0700")
-    source_inventory = _regular_tree_inventory(source_package)
+    source_inventory = _captured_source_inventory(
+        repository,
+        str(project["source_package"]),
+    )
     managed = _managed_python_contract()
     return {
         "cache_path": str(cache),

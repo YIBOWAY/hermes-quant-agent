@@ -503,6 +503,59 @@ def test_command_rehearsal_rebuilds_ignored_environment_only_in_first_restore(
     )
 
 
+def test_section_4_1_restore_ignores_ignored_bytecode_in_source_inventory(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    (repository / ".gitignore").write_text(
+        ".venv/\n__pycache__/\n*.pyc\n",
+        encoding="utf-8",
+    )
+    _git(repository, "add", ".gitignore")
+    _git(repository, "commit", "-m", "ignore environment and bytecode")
+    ignored_relative = "hqa/__pycache__/__init__.cpython-311.pyc"
+    ignored = repository / ignored_relative
+    ignored.parent.mkdir()
+    ignored.write_bytes(b"attempt6-ignored-bytecode-fixture\n")
+    assert _git(repository, "check-ignore", ignored_relative) == ignored_relative
+    source_before = repository_identity(repository)
+    package = tmp_path / "evidence" / "package"
+    first = tmp_path / "restores" / "first"
+    second = tmp_path / "restores" / "second"
+
+    result = capture_and_drill_closure_repository(
+        repository,
+        package,
+        first,
+        second,
+        None,
+        rehearsal_patch_sha256=None,
+        rehearsal_rebuild=True,
+        repository_id="hqa",
+        publication_url="https://github.com/example/closure.git",
+        publication_remote_name="github",
+        operator_identity="attempt7-test-operator",
+    )
+
+    assert result["restore_verified"] is True
+    assert not (first / ignored_relative).exists()
+    assert not (second / ignored_relative).exists()
+    assert repository_identity(repository) == source_before
+    receipt = json.loads((package / "restore-receipt.json").read_bytes())
+    assert receipt["first_restore"]["restore_verified"] is True
+    assert receipt["second_restore"]["restore_verified"] is True
+    assert receipt["restore_verified"] is True
+    proof = receipt["rehearsal"]["rebuild_proof"]
+    assert (
+        proof["source_inventory_sha256"]
+        == proof["source_copy_inventory_sha256"]
+        == proof["installed_inventory_sha256"]
+    )
+    verification = verify_closure_package(package)
+    assert verification["restore_verified"] is True
+    assert verification["verification_rebuild_verified"] is True
+
+
 def test_verifier_performs_an_independent_fresh_rebuild(
     tmp_path: Path,
 ) -> None:
