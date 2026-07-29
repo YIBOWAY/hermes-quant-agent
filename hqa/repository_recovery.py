@@ -179,20 +179,27 @@ def _validate_new_path(path: Path) -> Path:
 
 
 def canonical_json_bytes(value: object) -> bytes:
-    return (
-        json.dumps(
-            value,
-            allow_nan=False,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
-        + b"\n"
-    )
+    return json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _matches_canonical_or_legacy_lf(payload: bytes, value: object) -> bool:
+    canonical = canonical_json_bytes(value)
+    return payload == canonical or payload == canonical + b"\n"
 
 
 def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _canonical_json_sha256_candidates(value: object) -> set[str]:
+    canonical = canonical_json_bytes(value)
+    return {_sha256(canonical), _sha256(canonical + b"\n")}
 
 
 def _safe_relative(raw: str) -> str:
@@ -870,7 +877,7 @@ def verify_package(package: Path) -> dict[str, object]:
         document = json.loads(index_bytes)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RepositoryRecoveryError("invalid recovery-files JSON") from exc
-    if canonical_json_bytes(document) != index_bytes:
+    if not _matches_canonical_or_legacy_lf(index_bytes, document):
         raise RepositoryRecoveryError("recovery-files JSON is not canonical")
     if document.get("schema_version") != "hqa.repository-recovery-files.v1":
         raise RepositoryRecoveryError("unsupported recovery-files schema")
@@ -925,7 +932,7 @@ def _load_identity(package: Path) -> dict[str, object]:
         not isinstance(identity, dict)
         or set(identity) != _IDENTITY_KEYS
         or identity.get("schema_version") != "hqa.repository-recovery-identity.v1"
-        or canonical_json_bytes(identity) != payload
+        or not _matches_canonical_or_legacy_lf(payload, identity)
         or identity.get("object_format") not in {"sha1", "sha256"}
     ):
         raise RepositoryRecoveryError("invalid recovery identity")
@@ -1195,7 +1202,7 @@ def verify_receipt(package: Path, receipt: Path) -> dict[str, object]:
         document = json.loads(receipt_bytes)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RepositoryRecoveryError("invalid restore receipt") from exc
-    if canonical_json_bytes(document) != receipt_bytes:
+    if not _matches_canonical_or_legacy_lf(receipt_bytes, document):
         raise RepositoryRecoveryError("restore receipt is not canonical")
     validation = verify_package(package)
     claimed = document.get("package_validation")
@@ -1369,7 +1376,7 @@ def _load_closure_identity(package: Path) -> dict[str, object]:
         or set(identity) != required
         or identity.get("schema_version")
         != "hqa.repository-recovery-identity.v2"
-        or canonical_json_bytes(identity) != payload
+        or not _matches_canonical_or_legacy_lf(payload, identity)
         or not isinstance(mutable, dict)
         or set(mutable) != _IDENTITY_KEYS
         or mutable.get("schema_version")
@@ -1388,10 +1395,12 @@ def _load_closure_identity(package: Path) -> dict[str, object]:
         or not isinstance(rehearsal_input.get("sha256"), str)
         or re.fullmatch(r"[0-9a-f]{64}", rehearsal_input["sha256"]) is None
         or not isinstance(rehearsal_input.get("document"), dict)
-        or _sha256(
-            canonical_json_bytes(rehearsal_input["document"])
+        or (
+            rehearsal_input["sha256"]
+            not in _canonical_json_sha256_candidates(
+                rehearsal_input["document"]
+            )
         )
-        != rehearsal_input["sha256"]
         or not isinstance(untracked_bounds, dict)
         or set(untracked_bounds)
         != {"max_bytes", "max_files", "observed_bytes", "observed_files"}
@@ -1586,7 +1595,7 @@ def verify_closure_package(package: Path) -> dict[str, object]:
         raise RepositoryRecoveryError(
             "invalid closure recovery-files JSON"
         ) from exc
-    if canonical_json_bytes(document) != index_bytes:
+    if not _matches_canonical_or_legacy_lf(index_bytes, document):
         raise RepositoryRecoveryError(
             "closure recovery-files JSON is not canonical"
         )
@@ -1632,7 +1641,7 @@ def verify_closure_package(package: Path) -> dict[str, object]:
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RepositoryRecoveryError("invalid closure restore receipt") from exc
     if (
-        canonical_json_bytes(receipt) != receipt_bytes
+        not _matches_canonical_or_legacy_lf(receipt_bytes, receipt)
         or not isinstance(receipt, dict)
         or set(receipt)
         != {
