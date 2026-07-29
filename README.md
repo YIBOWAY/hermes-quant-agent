@@ -188,7 +188,31 @@ rather than silent empty options.
 Logic lives in `hqa/` (Python 3.11+, stdlib-only runtime). Hermes cron runs thin wrappers
 copied into `~/.hermes/scripts/` by `scripts/install.sh`.
 
-Build a clean, non-editable test environment from the exact current commit
+The repository-authoritative published-baseline-to-final upgrade/import/CLI
+smoke is:
+
+```bash
+upgrade_parent="$(mktemp -d /private/tmp/hqa-noneditable-upgrade.XXXXXX)"
+scripts/verify_agent_v02_noneditable_upgrade.sh \
+  --output-dir "$upgrade_parent/result"
+```
+
+Run it only from the canonical clean release branch after its exact `HEAD` is
+published to the `github` remote-tracking ref. The command archives committed
+bytes, denies network access, removes provider/trading credentials, keeps the
+global kill switch on and live trading off, and writes a private 0700 evidence
+root with 0600 command logs and receipt. The published baseline `a5589ba` has a
+pytest-only `pyproject.toml`, no PEP 621 project metadata, and no `uv.lock`, so
+the command builds a deterministic, explicitly labeled compatibility wheel
+around those exact historical `hqa/` bytes. It then consumes the final
+`pyproject.toml` and frozen lock offline, upgrades the same copy-based Python
+3.11 environment to the final wheel, runs an isolated import and CLI help
+smoke, and compares it with an independent fresh-final environment. Source-tree
+imports, editable/direct-directory installs, `PYTHONPATH`, `.pth` files,
+symlinked identity, URL/branch/commit/tree drift, non-descendant history,
+unpublished `HEAD`, and dirty or hidden index state fail closed.
+
+Separately, build a clean, non-editable full-test environment from the exact current commit
 (not from uncommitted working-tree bytes):
 
 ```bash
