@@ -128,11 +128,26 @@ cleanup() {
   if [ -n "${TEMPORARY:-}" ]; then
     /bin/rm -f -- "$TEMPORARY"
   fi
-  if [ -n "${TEMPORARY_DIRECTORY:-}" ]; then
-    /bin/rmdir -- "$TEMPORARY_DIRECTORY" 2>/dev/null || true
+  if [ -n "${TEMPORARY_DIRECTORY:-}" ] && [ -d "$TEMPORARY_DIRECTORY" ]; then
+    /bin/rmdir -- "$TEMPORARY_DIRECTORY"
   fi
 }
-trap cleanup EXIT
+
+cleanup_and_exit() {
+  original_status=$?
+  trap - EXIT
+  if cleanup; then
+    exit "$original_status"
+  else
+    cleanup_status=$?
+  fi
+  echo "intent payload crypto cleanup failed with status $cleanup_status" >&2
+  if [ "$original_status" -ne 0 ]; then
+    exit "$original_status"
+  fi
+  exit "$cleanup_status"
+}
+trap cleanup_and_exit EXIT
 
 "$SWIFTC" \
   -sdk "$SDK" \

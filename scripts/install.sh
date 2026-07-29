@@ -112,8 +112,10 @@ finally:
 PY
 
 cleanup() {
-  [ -n "${STAGING_NAME:-}" ] || return 0
-  /usr/bin/python3 - "$HERMES_ROOT" "$STAGING_NAME" <<'PY' || true
+  if [ -z "${STAGING_NAME:-}" ]; then
+    return 0
+  fi
+  /usr/bin/python3 - "$HERMES_ROOT" "$STAGING_NAME" <<'PY'
 import os
 import stat
 import sys
@@ -159,11 +161,13 @@ def remove_tree(parent_fd, name):
     except FileNotFoundError:
         return
     if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
-        return
+        raise OSError("install staging changed type or owner before cleanup")
     directory_fd = os.open(name, flags, dir_fd=parent_fd)
     try:
         for child in os.listdir(directory_fd):
             child_meta = os.stat(child, dir_fd=directory_fd, follow_symlinks=False)
+            if child_meta.st_uid != os.geteuid():
+                raise OSError("install staging child changed owner before cleanup")
             if stat.S_ISDIR(child_meta.st_mode):
                 remove_tree(directory_fd, child)
             else:
@@ -177,17 +181,36 @@ def remove_tree(parent_fd, name):
 
 try:
     root_fd = open_physical_directory(sys.argv[1])
-except (FileNotFoundError, NotADirectoryError, OSError):
+except FileNotFoundError:
     raise SystemExit(0)
+except (NotADirectoryError, OSError) as exc:
+    print(f"install cleanup refused unsafe Hermes root: {exc}", file=sys.stderr)
+    raise SystemExit(2)
 try:
     root_meta = os.fstat(root_fd)
-    if root_meta.st_uid == os.geteuid() and stat.S_IMODE(root_meta.st_mode) == 0o700:
-        remove_tree(root_fd, sys.argv[2])
+    if root_meta.st_uid != os.geteuid() or stat.S_IMODE(root_meta.st_mode) != 0o700:
+        raise OSError("Hermes root changed owner or mode before cleanup")
+    remove_tree(root_fd, sys.argv[2])
 finally:
     os.close(root_fd)
 PY
 }
-trap cleanup EXIT
+
+cleanup_and_exit() {
+  original_status=$?
+  trap - EXIT
+  if cleanup; then
+    exit "$original_status"
+  else
+    cleanup_status=$?
+  fi
+  echo "HQA install cleanup failed with status $cleanup_status" >&2
+  if [ "$original_status" -ne 0 ]; then
+    exit "$original_status"
+  fi
+  exit "$cleanup_status"
+}
+trap cleanup_and_exit EXIT
 
 /bin/mkdir -m 700 "$STAGING/scripts" "$STAGING/skills" "$STAGING/bin"
 
