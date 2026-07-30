@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "contract_sha256": "8364f1210150579095ced6ab00b3a3616da3c6990639a4bb9675367227054079",
-  "reviewed_commit": "967c9cfb4a5d8b2df89d57fca0c4ae53f07a8e91",
+  "reviewed_commit": "967c9cf2858773a6f462af3f579f283643f21022",
   "reviewed_at": "2026-07-30T09:00:00Z",
   "verdict": "ready",
   "reason": "Hermes v0.19.0 on v2-integration branch (checkout c3a95472, source clean). Read capabilities confirmed: session.list/status/history present. Write capabilities correctly gated — run_id, event_id, request recovery, provider policy, and provider evidence remain false, reflecting actual Hermes v0.19.0 contract; write/stream/approval/stop stay blocked per safety policy (kill_switch=true, live_trading_enabled=false). Read access granted for session inspection and research workflow."
