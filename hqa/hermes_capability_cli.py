@@ -222,14 +222,23 @@ def _probe_installation() -> dict:
         timeout=5,
     ).stdout
     match = re.search(
-        r"^Hermes Agent v(?P<version>\S+).*upstream (?P<upstream>[0-9a-f]+)$",
+        r"^Hermes Agent v(?P<version>\S+).*upstream (?P<upstream>[0-9a-f]+)",
         version,
         flags=re.MULTILINE,
     )
     if match is None:
         raise ValueError("unrecognized Hermes version output")
+    # Prefer the install directory reported by hermes --version so worktree
+    # installations (where the active checkout is a subdirectory) are resolved
+    # correctly rather than falling back to the config default.
+    install_dir_match = re.search(r"^Install directory: (.+)$", version, flags=re.MULTILINE)
+    source_dir = (
+        Path(install_dir_match.group(1).strip())
+        if install_dir_match
+        else config.HERMES_SOURCE_DIR
+    )
     checkout = subprocess.run(
-        ["git", "-C", str(config.HERMES_SOURCE_DIR), "rev-parse", "HEAD"],
+        ["git", "-C", str(source_dir), "rev-parse", "HEAD"],
         check=True,
         capture_output=True,
         text=True,
@@ -240,7 +249,7 @@ def _probe_installation() -> dict:
         [
             "git",
             "-C",
-            str(config.HERMES_SOURCE_DIR),
+            str(source_dir),
             "status",
             "--porcelain",
             "--untracked-files=no",
@@ -251,7 +260,7 @@ def _probe_installation() -> dict:
         shell=False,
         timeout=5,
     ).stdout
-    server_bytes = (config.HERMES_SOURCE_DIR / "tui_gateway" / "server.py").read_bytes()
+    server_bytes = (source_dir / "tui_gateway" / "server.py").read_bytes()
     return {
         "hermes_version": match.group("version"),
         # Diagnostic only: remote-tracking tip from the version banner.
