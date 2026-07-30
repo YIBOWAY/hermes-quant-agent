@@ -19,6 +19,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Mapping, Optional
+import socket as _socket_module
 
 import pytest
 
@@ -37,6 +38,24 @@ from hqa.hermes_run_adapter import (
     StreamEvent,
     UrllibLoopbackHttpTransport,
     evaluate_durable_run_availability,
+)
+
+
+def _can_bind_loopback_socket() -> bool:
+    """Return True if loopback socket binding is permitted in this environment."""
+    try:
+        s = _socket_module.socket(_socket_module.AF_INET, _socket_module.SOCK_STREAM)
+        s.setsockopt(_socket_module.SOL_SOCKET, _socket_module.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", 0))
+        s.close()
+        return True
+    except (PermissionError, OSError):
+        return False
+
+
+_requires_loopback_socket = pytest.mark.skipif(
+    not _can_bind_loopback_socket(),
+    reason="loopback socket binding not available in this environment (e.g. sandboxed CI)",
 )
 
 _BODY = {"input": "hello"}
@@ -423,6 +442,7 @@ class TestHttpTransport:
         with pytest.raises(HermesRunError):
             UrllibLoopbackHttpTransport(base_url="http://127.0.0.1")
 
+    @_requires_loopback_socket
     def test_adapter_satisfies_port(self) -> None:
         server = _ScriptedUpstreamServer()
         server.start()

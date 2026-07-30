@@ -13,6 +13,25 @@ from typing import Any, Mapping, Optional
 import pytest
 
 from hqa.hermes_capabilities import HermesChatGate
+
+
+def _can_bind_loopback_socket() -> bool:
+    """Return True if loopback socket binding is permitted in this environment."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", 0))
+        s.close()
+        return True
+    except (PermissionError, OSError):
+        return False
+
+
+_requires_loopback_socket = pytest.mark.skipif(
+    not _can_bind_loopback_socket(),
+    reason="loopback socket binding not available in this environment (e.g. sandboxed CI)",
+)
+
 from hqa.hermes_read_bridge import (
     BridgeGateError,
     BridgeTransportError,
@@ -306,6 +325,7 @@ def _start_fake_hermes_ws(handler) -> tuple[str, threading.Thread, socket.socket
     return endpoint, thread, server
 
 
+@_requires_loopback_socket
 def test_loopback_ws_roundtrip_session_list() -> None:
     def handler(req: dict) -> dict:
         assert req["method"] == "session.list"
