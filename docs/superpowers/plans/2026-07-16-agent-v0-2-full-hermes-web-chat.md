@@ -1,46 +1,61 @@
 # Agent v0.2 — 完整 `/hermes` Web Chat 实施计划
 
-> **OPERATOR-WINDOW ADDENDUM（2026-08-01）：LOCAL PRIVATE PAPER-RESEARCH E2E
-> PASS / PUBLIC OFF。** 本 addendum 是当前 dated status；下方 2026-07-31 及更早的
-> source-boundary、进度和 NEXT 保留为历史决策/施工记录，不得继续把 migration 028、私有
-> candidate、connector 或第一条真实 paper-research browser flow 写成未执行。
+> **OPERATOR-WINDOW ADDENDUM（2026-08-01）：RUNTIME SUBPATHS PASS / PAPER
+> INTAKE FAIL / PUBLIC OFF。** 本 addendum 是当前 dated status；下方 2026-07-31 及更早的
+> source-boundary、进度和 NEXT 保留为历史决策/施工记录。Command/Run 的 `succeeded` 只
+> 证明运行终态，不能替代 paper-intake、reproducibility 或领域纵切验收。
 >
-> 最终精确提交为 Hermes
+> 第一轮 operator-window source fix 提交为 Hermes
 > `199a251d20ec62be3845681f40d220a40fabd7d8`、HQA
 > `005e92ed7849ea2956bff18b72e399b407b67895`、Platform
 > `2eb714d1ef4ece96a664a816b1f3392d1640809e`。正常 build/install、Hermes exact frozen
-> sync/restart/import、Platform restart 与 compatibility watcher 通过；sealed manifest
-> SHA-256 为 `439b5731b52e761168caaa5202e495a0c0c7f2ef2aa50f7557864eb2eb110da5`，
-> Platform/HQA/Hermes-focused/frontend 合计 `5632 passed / 272 skipped / 0 failed`。
+> sync/restart/import、Platform restart 与 compatibility watcher 通过。2026-08-01 retest
+> 另行绑定 Hermes `199a251d20ec62be3845681f40d220a40fabd7d8`、HQA
+> `669c247f8b0d33c8a90e6381c3f0828519304816`、Platform
+> `53f7280dbd66ecb79add9fc377db2de8a3d22edd`；其
+> sealed manifest 位于
+> `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-websearch-retest-20260801.pEDa3x/preflight/agent-v0.2-candidate-evidence.json`，
+> SHA-256 为 `eba8099bf3801927f3d93b40d1e133546d7cbcc4eece4c58b416bf52bd29a136`；
+> Platform/HQA/Hermes-focused/frontend 合计 `5632 passed / 272 skipped / 0 failed`。套件
+> 通过不覆盖 live paper-intake semantic failure。
 >
 > 正式数据库在 pre-028 backup + 隔离恢复验证后只应用 migration 028 一次。窗口快照中
-> marker=`1`、version=`1`、目标 triggers=`2`；后续不得重放。私有 candidate
-> `candidate_5ddfd4db518146318beebf4a58f45d5a` 在 current paper-authority epoch 下开启，
-> supervised connector 真实 dispatch 后已 revoke，open candidates=`0`，connector 已恢复
-> `reconcile_only`。这不是 accepted release candidate，也不授权 public write。
+> marker=`1`、version=`1`、目标 triggers=`2`；后续不得重放。第一轮 candidate
+> `candidate_5ddfd4db518146318beebf4a58f45d5a` 与 retest candidate
+> `candidate_087abe73ffb54fb9914fac6817862c01` 均已 revoke；后者 digest 为
+> `6324041cca7b8a33ca40a55b5e24318bb4225f6c6e83019c843436f0eef0afa0`。connector 已恢复
+> `reconcile_only`，composer 只读，public cutover OFF，`kill_switch=true`，zero orders。
 >
-> 第一条 AlphaZeroBeta 尝试（Session
+> 第一轮中的最初 AlphaZeroBeta 尝试（Session
 > `web_211e8ec3eb6944bcc5c83f1eaae535e9a3964b6f` / Command
 > `2f6d48f5-7a18-458c-bfc5-28c9923ae0e8` / Run
 > `run_ac253949311b47929d445f50f963456a`）因缺失 durable approval snapshot 投影而
-> **FAIL**。Hermes/Platform/HQA 修复并重新提交、安装、验收后，最终 Session
+> **FAIL**。修复后第一轮 Platform Session
+> `wm_fb5f44086e3c059ce65cf0f314a9222f`、Hermes Session
 > `web_fb5f44086e3c059ce65cf0f314a9222fb0a1bee5`、Command
 > `3176607c-4202-4646-8781-4bf7dcb1dab2`（version 13 / attempt 1）和 Run
-> `run_f62837e8fda84cd7a04a37239f258e2d` 均 succeeded。actual provider/model 为
-> `xai-oauth/grok-4.5`，5 个 command approval challenge 全部通过精确 allow-once 消费并具有
-> 完整 durable chain；zero orders，`kill_switch=true`。
+> `run_f62837e8fda84cd7a04a37239f258e2d` 均 succeeded；provider、5 个 durable
+> allow-once approval、直接 PDF/全文读取和数据库持久化有证据。但该轮没有运行时强制的
+> paper-intake contract/receipts/verifier，因此 **paper intake FAIL（追溯纠正）**。
 >
-> Hermes 真实联网、下载并读取 59 页 AlphaZeroBeta PDF 后，按 HQA 可复现性合同把论文判为
-> **non-actionable**。因此 prepare-intent、Gate 1/2/3、factor、backtest 与 strategy 沉淀均为
-> `EXPECTED_NOT_REACHED`；PostgreSQL 本次 workflow binding/run link/Gate/new
-> factor/backtest 都是零写入。这是正确分支，不得为了“覆盖功能”虚构因子。它也不能替代
-> actionable paper Gate 纵切、Vertical A、multi-turn/restart/exact-message fork/stop 矩阵。
+> 2026-08-01 retest 为 Platform Session
+> `wm_39f4577b534c9a9bca8eb5c634339408`、Hermes Session
+> `web_39f4577b534c9a9bca8eb5c634339408cd82dd74`、Command
+> `850d34cd-6286-4fdb-9151-4c6b333ef895`（version 11 / attempt 1）与 Run
+> `run_7cf82203191743ff85cb373285579ab6`，外层均 succeeded。tool trace 却是
+> `web_search=0`、`web_extract=1` 且失败、`terminal=5`（一次 exit 124）、
+> `read_file=5`、`skill_view=2`；模型 prose 声称 web search，trace 反证。因此
+> reproducibility 与 non-actionable verdict 为 `UNVERIFIED / NOT ACCEPTED`，
+> factor/backtest/Gate/result 为 `NOT EVALUATED`，不是 `EXPECTED_NOT_REACHED`。
 >
-> `release_authorized=false`、`public_write_authorized=false`、
-> `public_chat_write_ready=false` 保持不变。详见
+> P1 NEXT：运行时绑定 digest-bound
+> `execution_contract=hqa.paper_intake/v1`，生成 typed no-body tool receipts，调用 HQA
+> subprocess verifier，并在合同未满足时于 `mark_succeeded` 前 fail closed。skill 1.18.5
+> hardening 单独没有做到 enforcement。详见
 > [`../../audits/2026-07-31-alphazerobeta-paper-research-web-e2e.md`](../../audits/2026-07-31-alphazerobeta-paper-research-web-e2e.md)。
 > 此 docs-only commit 会改变 HQA runtime identity；若继续 candidate/release，必须重新冻结
-> clean HEAD 和 sealed evidence，不得复用已 revoke candidate 或旧 manifest。
+> clean HEAD 和 sealed evidence，不得复用两轮已 revoke candidate 或旧 manifest。本文不授权
+> release stamp、public write/cutover 或 trading。
 
 > **HISTORICAL SOURCE BOUNDARY（2026-07-31；已由上方 2026-08-01 addendum 取代）：**
 > 2026-07-26 的 Agent v0.2 clean
@@ -1153,27 +1168,30 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 |---|---|---|
 | V0 Interface/cardinality/authority freeze | DONE（source/formal） | identity + validation binding + independent `CLEAR` 已闭合；verdict 不授权 live release；见 `../../audits/2026-07-19-v0-v2-release-closure.md` |
 | V1 Stop-the-line baseline | DONE；restricted live role ACCEPT | 旧 `live_role_unprovisioned` 是历史；006–015 已 live，015 constrained-role canary 已通过；schema ≠ release |
-| V2 Hermes DurableRunAuthority | LOCAL CANDIDATE RUN/APPROVAL E2E PASS / PUBLIC OFF | managed Session/Run、actual provider usage 与 5 个 durable approval 已真实验证；stop/restart/exact fork 与 release stamp 仍待完整 Gate |
+| V2 Hermes DurableRunAuthority | LOCAL CANDIDATE RUN/APPROVAL E2E PASS / PUBLIC OFF | managed Session/Run、actual provider 与 durable approval 已真实验证；这不证明 paper intake。stop/restart/exact fork 与 release stamp 仍待完整 Gate |
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
 | V4 PG schema/BFF saga/security | LIVE 006–028 IN 2026-08-01 SNAPSHOT | 028 在 backup/隔离 restore 后只 apply 一次；marker/version 各 1、目标 triggers 2。dated schema evidence ≠ release；不得重放 028 |
 | V5 supervised dispatch worker | SUPERVISED REAL E2E PASS / CLEANUP RECONCILE_ONLY | connector 完成真实 dispatch/approval recovery 后恢复 `reconcile_only`；下一次运行必须使用新 candidate 和 fresh liveness |
-| V6 final workspace UI | **PAPER-RESEARCH BROWSER E2E PASS / FULL DOD PARTIAL** | managed composer/transcript/spine 与 5 次 approval 已实测；multi-turn/restart/exact fork/stop/Vertical A 仍未由本次任务证明 |
-| V7 decisions/results/vertical slices | **PARTIAL / NON-ACTIONABLE BRANCH PASS** | AlphaZeroBeta 正确停在 non-actionable，Gate/factor/backtest 为 EXPECTED_NOT_REACHED；历史 US ETF proxy backend Gate flow 仍在，actionable final browser Gate vertical 尚未完成 |
-| V8 adversarial acceptance/release | **PRIVATE OPERATOR WINDOW PASS / PUBLIC BLOCKED** | sealed preflight 5632p/272sk/0f 与真实 provider E2E 通过；candidate 已 revoke，stamp/cutover 未开，`release_authorized=false` |
+| V6 final workspace UI | **RUNTIME/UI SUBPATHS PASS / PAPER INTAKE FAIL / FULL DOD PARTIAL** | managed composer/transcript/spine、approval、direct PDF/full-text 已实测；两轮 intake 均失败，multi-turn/restart/exact fork/stop/Vertical A 也未由本次任务证明 |
+| V7 decisions/results/vertical slices | **PARTIAL / PAPER VERDICT UNVERIFIED** | AlphaZeroBeta reproducibility/non-actionable verdict 未接受；Gate/factor/backtest/result 为 `NOT EVALUATED`。历史 US ETF proxy backend Gate flow 仍在，actionable final browser Gate vertical 尚未完成 |
+| V8 adversarial acceptance/release | **PREFLIGHT PASS / LIVE PAPER INTAKE FAIL / PUBLIC BLOCKED** | retest preflight 5632p/272sk/0f，但 live intake 失败；candidate 已 revoke，stamp/cutover 未开，不能推导 release authorization |
 
 ## 9. 当前立即执行顺序
 
 1. 保持 candidate revoked、connector `reconcile_only`、public release/write OFF；不重放
    migration 028。把 2026-08-01 audit 当 dated evidence，不当新准入凭据。
-2. 补齐 AlphaZeroBeta 未证明的真实浏览器 DoD：multi-turn、restart recovery、历史 session
-   exact-message fork、Run stop、Vertical A，以及一条 actionable paper Gate 1/2/3 + backtest
-   纵切。non-actionable 分支不能替代它们。
-3. 因本次 docs-only commit 改变 HQA identity，重新读取三仓 clean HEAD，刷新 Platform/HQA
+2. 先关闭 paper-intake P1：运行时绑定 digest-bound
+   `execution_contract=hqa.paper_intake/v1`，生成 typed no-body tool receipts，调用 HQA
+   subprocess verifier，并在合同未满足时于 `mark_succeeded` 前 fail closed。
+3. 再以新 candidate 重测 paper intake，并补齐真实浏览器 DoD：multi-turn、restart recovery、
+   历史 session exact-message fork、Run stop、Vertical A，以及一条 actionable paper
+   Gate 1/2/3 + backtest 纵切。当前 non-actionable prose 不能替代这些验收。
+4. 因本次 docs-only commit 改变 HQA identity，重新读取三仓 clean HEAD，刷新 Platform/HQA
    full、Hermes focused、frontend tests/build，重建 sealed preflight；不得复用已 revoke candidate。
-4. 仅在新的明确 operator 授权下，复核正式库 006–028、role/trigger、Keychain probe、paper
+5. 仅在新的明确 operator 授权下，复核正式库 006–028、role/trigger、Keychain probe、paper
    epoch、compatibility 与 zero-orders baseline，然后打开新的 bounded private candidate；无需也
    不得再次 apply 028。
-5. 完成剩余 E2E、独立审查与 exact candidate acceptance 后，才可另行请求 release stamp/public
+6. 完成剩余 E2E、独立审查与 exact candidate acceptance 后，才可另行请求 release stamp/public
    cutover 授权；随后执行 public smoke、close rollback、最终恢复和外部 mode-600 close-out seal。
    legacy redirect 仍另开后续计划。
 

@@ -4,8 +4,9 @@
 长期方向、历史实现细节和特定日期审计分别留在 roadmap、plan 和 audit 中。
 
 > 文档同步快照：2026-08-01。受控 operator window 已完成三仓精确提交与正常安装、正式库
-> backup/隔离恢复、仅应用 migration 028、私有 candidate、supervised connector 和真实
-> AlphaZeroBeta 浏览器论文研究重跑；最终 Run 成功，candidate 已 revoke，connector 已恢复
+> backup/隔离恢复、仅应用 migration 028、私有 candidate、supervised connector 和两轮
+> AlphaZeroBeta 浏览器运行。UI/Session/dispatch/provider/approval/durable Run/直接 PDF/全文/
+> DB 子项通过，但两轮 paper intake 都失败；candidate 已 revoke，connector 已恢复
 > `reconcile_only`，public release/write 仍 OFF。完整证据见本页链接的 AlphaZeroBeta audit。
 > branch、dirty、PID、端口、candidate、release stamp/cutover 与服务健康仍是易变事实；交接时
 > 必须重新检查 git、进程、HTTP smoke、数据库和测试。
@@ -16,8 +17,8 @@
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
-| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。顶部 2026-08-01 addendum 记录 006–028 live snapshot、正常安装/restart、私有 AlphaZeroBeta Web E2E 与暗态清理；剩余范围是完整 browser DoD、全新 candidate acceptance 和另行授权的 public release。Keychain/recovery 操作合同见 V3 运维手册。 |
-| AlphaZeroBeta Web E2E | [`audits/2026-07-31-alphazerobeta-paper-research-web-e2e.md`](audits/2026-07-31-alphazerobeta-paper-research-web-e2e.md) | 2026-08-01 operator-window 事实源：首次审批投影失败、修复、最终真实 provider/PDF/5 次 durable approval 成功、non-actionable 研究分支、zero orders 与暗态清理。明确不授权 public release。 |
+| 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。顶部 2026-08-01 addendum 记录 006–028 live snapshot、两轮私有 AlphaZeroBeta 运行、paper-intake P1 与暗态清理；下一步先做运行时 intake contract，再补完整 browser DoD、全新 candidate acceptance 和另行授权的 public release。 |
+| AlphaZeroBeta Web E2E | [`audits/2026-07-31-alphazerobeta-paper-research-web-e2e.md`](audits/2026-07-31-alphazerobeta-paper-research-web-e2e.md) | 第一轮与 2026-08-01 retest 的事实源：运行链路子项通过但两轮 paper intake 均 FAIL；retest trace 为 `web_search=0`、一次失败的 `web_extract`，reproducibility/non-actionable verdict 未接受，下游未评估。zero orders，明确不授权 public release。 |
 | V0 Workspace v1 candidate ADR | [`design/2026-07-16-agent-workspace-v1-adr.md`](design/2026-07-16-agent-workspace-v1-adr.md) | **SOURCE + FORMAL EVIDENCE + INDEPENDENT CLOSE-OUT DONE**；这只冻结 interface/cardinality/authority，不授权 runtime/live effect。 |
 | L2a-Send thin write rail ADR | [`design/2026-07-22-l2a-send-thin-write-rail-adr.md`](design/2026-07-22-l2a-send-thin-write-rail-adr.md) | Browser composite `submit-turn` → HQA Intent Payload Store → ledger `conversation_turn` → worker bind/resolve → Hermes；**M1+M2 ACCEPT@2026-07-22**。≠ Plan-V6 全 UI。 |
 | V0/V2 release closure | [`audits/2026-07-19-v0-v2-release-closure.md`](audits/2026-07-19-v0-v2-release-closure.md) | 三仓 source、live identity、validation binding 与 independent `CLEAR` 的事实源；verdict 明确 `release_authorized=false`。 |
@@ -36,17 +37,18 @@
 
 ## 一句话项目阶段
 
-**2026-08-01 本地私有 paper-research Web E2E 已通过，但 Agent v0.2 仍是 release
-candidate，public release/write 没有打开。** 三仓最终架构已收敛到 managed Hermes
+**2026-08-01 本地私有运行链路已通过若干子项，但 paper intake 失败；Agent v0.2 仍是
+release candidate，public release/write 没有打开。** 三仓最终架构已收敛到 managed Hermes
 Session/Run + PostgreSQL AgentWorkspace + deterministic HQA connector；migration 006–028 在该
 operator window 的正式库快照中均 live，028 marker/version 各一行、目标 trigger 两个，禁止重放。
-最终 AlphaZeroBeta Session/Command/Run 成功，真实 `xai-oauth/grok-4.5` 完成联网、PDF 读取与
-5 次 durable approval。Hermes 按 HQA 可复现性规则把论文判为 non-actionable，因此
-prepare-intent、Gate、factor、backtest 和 strategy 是 `EXPECTED_NOT_REACHED`，不是失败。
-第一次缺失 durable approval snapshot 投影的失败保留在 audit 中。清理后 candidate revoked、
-connector=`reconcile_only`、`kill_switch=true`、zero orders。历史真实论文 Gate 1/2/Futu final/
-Gate 3 US ETF proxy 仍只证明 backend/CLI flow；完整 actionable paper browser vertical、Vertical A、
-restart/fork 矩阵和 public release Gate 仍须另行完成。
+两轮 AlphaZeroBeta 的 UI/Session/dispatch/provider/approval/durable Run/直接 PDF/全文/DB
+证据不能升级为 paper-research PASS。2026-08-01 retest 虽然 Command version 11 / attempt 1
+与 Run succeeded，但 trace 是 `web_search=0`、`web_extract=1` 且失败；模型 prose 的
+web-search 声明不构成证据。reproducibility 与 non-actionable verdict 为
+`UNVERIFIED / NOT ACCEPTED`，factor/backtest/Gate/result 为 `NOT EVALUATED`。清理后
+candidate revoked、connector=`reconcile_only`、`kill_switch=true`、zero orders。历史真实论文
+Gate 1/2/Futu final/Gate 3 US ETF proxy 仍只证明 backend/CLI flow；完整 intake、actionable paper
+browser vertical、Vertical A、restart/fork 矩阵和 public release Gate 仍须另行完成。
 
 以下 V4–V8 内容是截至 2026-07-23 的**历史切片交付记录**，用于追溯能力来源，不再作为
 当前 NEXT 或 runtime identity。**V4 code + isolated + live schema ACCEPT**（修订 006 Scheme A、007 session registry、
@@ -115,8 +117,8 @@ browser E2E 仍未完成；不得从历史 M1–M6 ACCEPT 推导 `release_author
 
 | 能力 | 状态 | 真实含义 |
 |---|---|---|
-| `/hermes` Agent Workspace source | **LOCAL CANDIDATE E2E PASS / PUBLIC OFF** | 专业 shell、managed-session composer、transcript、Activity 与 durable approval projection 已经真实 AlphaZeroBeta 浏览器任务验证；exact-message fork、Vertical A 和完整发布矩阵仍不能从这一次任务推导。 |
-| Tasks / Run / result 证据面 | **REAL COMMAND/RUN PASS / RESEARCH DOMAIN NOT REACHED** | AlphaZeroBeta Command version 13 / attempt 1 与 Hermes Run 均 succeeded；论文被判 non-actionable，所以本次不创建 Task/Attempt/Gate/result。不得从 conversation turn 发明 research Task。 |
+| `/hermes` Agent Workspace source | **LOCAL TRANSPORT E2E PASS / PAPER INTAKE FAIL / PUBLIC OFF** | 专业 shell、managed-session composer、transcript、Activity 与 durable approval projection 已经真实 AlphaZeroBeta 浏览器运行验证；paper-research 语义未通过，exact-message fork、Vertical A 和完整发布矩阵也不能从这两轮推导。 |
+| Tasks / Run / result 证据面 | **REAL COMMAND/RUN PASS / PAPER VERDICT UNVERIFIED** | 最新 retest Command `850d34cd-6286-4fdb-9151-4c6b333ef895` version 11 / attempt 1 与 Run `run_7cf82203191743ff85cb373285579ab6` succeeded；这不接受 non-actionable verdict。Gate/factor/backtest/result 为 `NOT EVALUATED`，不得从 conversation turn 发明 research Task。 |
 | Candidate integrity | **DONE** | canonical root、immutable manifest、verified/migration_required/corrupt、digest/status CAS、legacy_unbound 非授权。 |
 | Scene-B Gate 1/2/final/Gate 3（Wave 2） | **DONE / HISTORICAL** | 人类 Gate 3 commit `524e791e5e3e22cec12a4166ad8fc3617c735566` 已进入 promoted registry 并 cleanup。 |
 | Agent v0.2 paper factor Gate 1/2/final/Gate 3 | **REAL BACKEND FLOW DONE / WEB PENDING** | exact source/candidate/digest、Futu final receipt、human commit `7ad6a92` 与 cleanup 已闭环；这是 US ETF operational proxy，不是全球论文完整复现。 |
@@ -126,16 +128,16 @@ browser E2E 仍未完成；不得从历史 M1–M6 ACCEPT 推导 `release_author
 | Task/Attempt + payload + exact binding | **FOUNDATION REVISED AND ACCEPTED** | HQA append-only journal、projection/replay/CAS、encrypted payload、multi-Attempt binding 与跨权威 audit 已对齐；research claim 明文（论文标题 + 有序 universe）只进 encrypted Intent Payload Store，公开 workflow/Platform 只投影 digest；claim 只允许绑定 Attempt 1，terminal completion 前重验 pre-terminal exact lineage，Platform completion 为闭合 42-key 合同。该增量已 source + isolated review APPROVE；旧 `UNIQUE(task_id)` 006 问题是历史 blocker，不再是当前 NEXT。 |
 | V3 Intent / WorkflowAuthority | **SOURCE ACCEPTED / LOCAL DARK INSTALL DONE** | AES-GCM/Keychain intent、TTL/tombstone、Task `1:N` Attempt、CAS/replay/backup 与只读 Hermes skill 已交付；唯一 retention cron 为 local no-agent。无 Web/Hermes mutation/provider/DB/交易。 |
 | Browser Gate 1/2/3 | **FINAL EXACT CONTRACT SOURCE** | Gate 1 从 owner-only BFF 读取并由 WebCrypto 重算 exact UTF-8 bytes；Gate 2 只允许 human-supplied exact CAS；Gate 3 prepare-only + 人类 Git commit。浏览器实测结果属于运行证据。 |
-| Hermes chat/stream/resume/stop | **MANAGED PAPER-RESEARCH E2E PASS / FULL MATRIX PARTIAL** | 真实 managed Session/Run、provider usage 与 5 个 durable approval 已通过；本次没有覆盖 stop、restart recovery 或 exact-message fork。public 开放仍要求全新 clean identity、accepted candidate、release stamp/cutover、connector 与完整 recovery evidence。 |
+| Hermes chat/stream/resume/stop | **MANAGED RUN/APPROVAL PASS / PAPER INTAKE FAIL / FULL MATRIX PARTIAL** | 真实 managed Session/Run、provider 与 approval 子路径已通过；第一轮与 2026-08-01 retest 的 paper intake 均失败，且没有覆盖 stop、restart recovery 或 exact-message fork。public 开放仍要求运行时 intake contract、全新 clean identity、accepted candidate、release stamp/cutover、connector 与完整 recovery evidence。 |
 | Unified Results 3E-A | **DONE（只读实现 + 本机验收）** | 统一索引、动态详情、权威源回链和 exact Run-link 投影已交付；不复制领域真相。独立 Hermes research Run 结果与 full cutover 仍受 3D/用户验收门阻断，`unifiedResultsCutoverAccepted=false`。 |
 | Legacy page redirects/deletion | **MECHANISM ONLY / DEFAULT OFF** | Agent Studio 有独立可回滚 redirect 机制但默认 OFF；exact digest-bound audit parity 与用户 cutover 批准仍缺。Factor Lab / Backtester / Experiments 仍承载写任务，不可退；全局 `legacyRedirects=false`。 |
 | 交易执行 | **OFF** | 本轮真实 Futu 调用仅行情/回测；zero orders、`live_trading_enabled=false`、`kill_switch=true`，不增加交易资格。 |
 
-Agent v0.2 当前仍是**release candidate**。AlphaZeroBeta 已证明本地私有
-research-conversation/provider/PDF/durable-approval 路径，但没有证明 actionable paper Gate 纵切、
-Vertical A、浏览器多轮/重启/exact-message fork 或 full release。不要表述为 public `/hermes` 已
-可日常使用；`release_authorized`、`public_write_authorized` 与
-`public_chat_write_ready` 在清理快照中均为 false。
+Agent v0.2 当前仍是**release candidate**。AlphaZeroBeta 只证明本地私有
+UI/Session/dispatch/provider/approval/durable Run/直接 PDF/全文/DB 的相应子项；两轮 paper
+intake 都失败，reproducibility/non-actionable verdict 未接受，下游 Gate/factor/backtest/result
+未评估。它也没有证明 Vertical A、浏览器多轮/重启/exact-message fork 或 full release。不要
+表述为 public `/hermes` 已可日常使用；public cutover 保持 OFF。
 
 ## Gate 3 已完成的权威事实
 
@@ -205,9 +207,10 @@ Browser /hermes
 
 Platform 不 `import hqa`，浏览器不持有 Hermes/provider key，外部历史 session 始终只读；
 继续外部上下文必须通过 exact message cursor fork 到新的 managed Session。2026-08-01 窗口中
-migration 006–028、正常安装/restart、supervised connector 与一条 AlphaZeroBeta 真实浏览器
-paper-research flow 已验证；任务结束后 candidate revoke、connector 回到 `reconcile_only`。
-public release stamp/cutover 未打开，完整 browser DoD 仍 pending。
+migration 006–028、正常安装/restart、supervised connector 与 AlphaZeroBeta 真实浏览器运行
+链路的相应子项已验证；两轮 paper intake 均失败。任务结束后 candidate revoke、connector 回到
+`reconcile_only`，composer 恢复只读。public release stamp/cutover 未打开，运行时 intake
+contract 与完整 browser DoD 仍 pending。
 
 Hermes 40k upstream full suite 不属于 Agent v0.2 release gate；最终使用 focused Hermes
 contract tests、Platform/HQA full suites、frontend build/tests、sealed artifacts 与真实本地 E2E。
@@ -318,17 +321,20 @@ periodic/manual update + no-agent watcher；watcher 只报告漂移，不得 ins
 1. **保持当前暗态安全终态。** 不重放 migration 028；保持 candidate closed、connector
    `reconcile_only`、public release/write OFF，并把 AlphaZeroBeta audit 作为 dated evidence，而不是
    当前准入凭据。
-2. **补齐这次任务未证明的完整 DoD。** 仍需真实浏览器 multi-turn、restart recovery、历史
-   session exact-message fork、Run stop、Vertical A，以及一条被判定为 actionable、能够进入论文
-   Gate 1/2/3 与 backtest 的纵切。non-actionable AlphaZeroBeta 不能替代这些验收。
-3. **为下一次 candidate 重新冻结身份和 evidence。** 本次 docs-only commit 会改变 HQA runtime
+2. **先关闭 paper-intake P1。** 运行时绑定 digest-bound
+   `execution_contract=hqa.paper_intake/v1`，持久化 typed no-body tool receipts，经 HQA
+   subprocess verifier 校验，并在合同未满足时于 `mark_succeeded` 前 fail closed。skill
+   1.18.5 hardening 单独不能充当 enforcement。
+3. **再补齐完整 DoD。** 使用新 candidate 重测 paper intake，并完成真实浏览器 multi-turn、
+   restart recovery、历史 session exact-message fork、Run stop、Vertical A，以及一条可进入论文
+   Gate 1/2/3 与 backtest 的 actionable 纵切。当前 non-actionable prose 未获接受。
+4. **为下一次 candidate 重新冻结身份和 evidence。** 本次 docs-only commit 会改变 HQA runtime
    identity；重新读取三仓 clean HEAD，重跑 Platform/HQA full、Hermes focused、frontend
-   tests/build，并重新生成 sealed preflight。不得复用已 revoke 的
-   `candidate_5ddfd4db518146318beebf4a58f45d5a`。
-4. **仅在新的明确授权下重开私有 candidate。** 先复核正式库 006–028/role/trigger、非创建式
+   tests/build，并重新生成 sealed preflight。不得复用两轮已 revoke 的 candidate。
+5. **仅在新的明确授权下重开私有 candidate。** 先复核正式库 006–028/role/trigger、非创建式
    Keychain probe、paper-authority epoch、zero-orders baseline 与 connector compatibility；无需也
    不得再次 apply 028。随后完成剩余 E2E、封存并 accept exact candidate。
-5. **最后才讨论 public release。** 只有完整 DoD、accepted candidate、final runtime/schema/
+6. **最后才讨论 public release。** 只有完整 DoD、accepted candidate、final runtime/schema/
    evidence 全部精确匹配，且用户对当次 operator action 另行授权，才能打开 release stamp/
    public cutover，并完成 public smoke、close rollback 与最终恢复。legacy redirect 仍另行审批。
 

@@ -28,16 +28,22 @@ Rules for AI agents working in this repository.
 - **Agent v0.2 operator boundary (2026-08-01 snapshot):** migration 006–028 was
   live in the inspected `quantplatform`; 028 was applied exactly once after
   backup/isolated restore (marker/version each 1, target triggers 2). Do not
-  re-apply it. A bounded private candidate completed a real AlphaZeroBeta Web
-  research Run with `xai-oauth/grok-4.5` and five durable allow-once approvals,
-  then was revoked; connector cleanup is `reconcile_only`. The first attempt's
-  missing durable approval projection remains recorded as FAIL. Full evidence
-  and exact commits are in
+  re-apply it. Two bounded private AlphaZeroBeta runs reached real
+  UI/Session/dispatch/provider/approval/durable-Run/direct-PDF/full-text/DB
+  milestones, but **both failed paper intake** and were revoked; connector
+  cleanup is `reconcile_only`. The earlier approval-projection failure remains
+  separate FAIL evidence. Full evidence is in
   `docs/audits/2026-07-31-alphazerobeta-paper-research-web-e2e.md`.
-  - AlphaZeroBeta was classified non-actionable under HQA reproducibility
-    rules. Its zero prepare-intent/Gate/factor/backtest/strategy writes are
-    `EXPECTED_NOT_REACHED`, not a full actionable-paper vertical. Do not invent
-    a factor to make the test look broader.
+  - A `succeeded` Command/Run is not paper-research acceptance. The 2026-08-01
+    retest trace recorded `web_search=0` and one failed `web_extract`, while
+    model prose claimed web search. Reproducibility and the non-actionable verdict
+    are `UNVERIFIED / NOT ACCEPTED`; factor/backtest/Gate/result are
+    `NOT EVALUATED`, not `EXPECTED_NOT_REACHED`.
+  - Before another paper candidate, runtime must bind digest-bound
+    `execution_contract=hqa.paper_intake/v1`, emit typed no-body tool receipts,
+    invoke the HQA subprocess verifier, and fail before `mark_succeeded` when
+    the contract is unmet. Skill 1.18.5 hardening alone did not enforce this.
+    Do not invent a factor or trust model prose to make the test look broader.
   - HQA research claim bodies (paper title plus ordered universe) remain only in
     the encrypted Intent Payload Store; public/workflow projections carry
     digests. Claim binding is Attempt-1-only and completion re-verifies exact
@@ -70,9 +76,10 @@ Rules for AI agents working in this repository.
   V3 alone did not enable Web writes; later V6 local dark + L2a did under
   separate local authorization (public cutover still OFF).
 - V4–V8 M1–M6 details remain dated delivery evidence. Current work starts from
-  the safe dark state above: complete the still-unproven multi-turn, restart,
-  exact-message fork, Run-stop, Vertical A and actionable-paper Gate browser
-  flows. Then refresh identities/suites/sealed preflight and use a **new**
+  the safe dark state above: first close the paper-intake runtime P1, then
+  complete the still-unproven multi-turn, restart, exact-message fork, Run-stop,
+  Vertical A and actionable-paper Gate browser flows. Then refresh
+  identities/suites/sealed preflight and use a **new**
   explicitly authorized private candidate; do not re-run migration 028. Only an
   accepted exact candidate plus the full release Gate may precede a separately
   authorized stamp/public cutover and rollback smoke. Authoritative status is

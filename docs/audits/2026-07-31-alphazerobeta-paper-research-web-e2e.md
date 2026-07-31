@@ -3,22 +3,27 @@
 > 执行窗口：2026-07-31 至 2026-08-01（Asia/Shanghai）
 > 审计范围：本机、单用户、私有 candidate 下的真实浏览器 → Platform → HQA connector →
 > Hermes/provider → PostgreSQL/Hermes durable facts；不包含 public release/cutover。
-> 结论：**最终重跑 PASS；public release/write 仍 OFF。** 第一次尝试的审批投影缺陷保留为
-> `FAIL` 证据，修复后同一类真实任务成功完成。
+> 结论：**两轮均为运行链路 PASS、论文 intake FAIL；public release/write 仍 OFF。**
+> Command/Run 的 `succeeded` 只证明运行终态，不证明论文 intake、可复现性判断或后续领域纵切
+> 通过。
 
 ## 1. 判定边界
 
-本审计只证明：在一个受控的本地私有 candidate 窗口中，网页可以提交指定论文研究 prompt，
-Hermes 能真实联网、下载并读取论文、通过精确 command approval、形成有依据的研究结论，并把
-Command/Run/provider/usage 事实持久化。它**不证明** Agent v0.2 全部发布 Gate、两条产品纵切、
-public composer、release stamp/cutover 或 live trading 已完成。
+本审计证明的是两层不同事实：网页、Session、dispatch、provider、approval、durable Run、直接
+PDF/全文读取与数据库持久化能够工作；论文 intake 合同没有被运行时强制满足。尤其是
+2026-08-01 retest 中，模型正文声称执行了 `web_search`，但权威 tool trace 记录为
+`web_search=0`，不能用模型叙述覆盖工具事实。本文不接受该轮 reproducibility 或
+non-actionable verdict，也不证明 Agent v0.2 全部发布 Gate、两条产品纵切、public composer、
+release stamp/cutover 或 live trading 已完成。
 
 状态含义：
 
 - `PASS`：本窗口取得了可复核的运行或持久化证据。
-- `FAIL`：真实尝试失败；即使后来修复，也保留原失败事实。
-- `BLOCKED`：安全边界仍故意关闭，不能从本窗口推导开放。
-- `EXPECTED_NOT_REACHED`：上游研究判断按合同结束，因此后续动作不应发生；不是漏测伪装。
+- `FAIL`：真实尝试或所需合同失败；即使外层 Command/Run 为 `succeeded` 也保留失败。
+- `UNVERIFIED / NOT ACCEPTED`：有模型输出，但缺少所需合同证据，不能作为研究结论接收。
+- `NOT EVALUATED`：上游合同失败后没有资格判断的下游阶段；既不是通过，也不是
+  `EXPECTED_NOT_REACHED`。
+- `BLOCKED / OFF`：安全边界仍故意关闭，不能从本窗口推导开放。
 
 ## 2. 精确输入
 
@@ -34,79 +39,119 @@ public composer、release stamp/cutover 或 live trading 已完成。
 | `prompt.txt` 原始 bytes（含末尾 LF） | `4bedb09dac721d12aeec58f33c85dd79bb6e6c2c78c172aba1a271d7171209de` |
 | operator control source | `730968a71c1f670b568c019619b1d63e436fde7d321fabe19d11b234f518c428` |
 
-输入文件位于
+首次运行输入位于
 `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-e2e-20260731.CKKG3r/`。
 
-## 3. 结果矩阵
+## 3. 两轮运行必须分开
+
+| 窗口 | 运行事实 | 论文 intake 判定 |
+|---|---|---|
+| 首次真实 Web 尝试 | Hermes Session `web_211e8ec3eb6944bcc5c83f1eaae535e9a3964b6f`、Command `2f6d48f5-7a18-458c-bfc5-28c9923ae0e8`、Run `run_ac253949311b47929d445f50f963456a` 因缺失 durable approval snapshot 投影而失败；zero orders。 | **FAIL**。该尝试没有越过 approval recovery。 |
+| 第一轮修复后完成态（2026-07-31 至 2026-08-01） | Candidate `candidate_5ddfd4db518146318beebf4a58f45d5a`；Platform Session `wm_fb5f44086e3c059ce65cf0f314a9222f`、Hermes Session `web_fb5f44086e3c059ce65cf0f314a9222fb0a1bee5`；Command `3176607c-4202-4646-8781-4bf7dcb1dab2` version 13 / attempt 1 和 Run `run_f62837e8fda84cd7a04a37239f258e2d` 为 `succeeded`。真实 provider、5 次 allow-once approval、直接 PDF/全文读取和 durable persistence 有证据；candidate 后续已 revoke。 | **FAIL（追溯纠正）**。原报告把外层成功和模型结论误写成 paper-research PASS；当时没有由运行时强制的 digest-bound intake contract、typed no-body tool receipts 与 HQA verifier，不能接受 reproducibility/non-actionable 判定。 |
+| 2026-08-01 web-search retest | Candidate `candidate_087abe73ffb54fb9914fac6817862c01`、digest `6324041cca7b8a33ca40a55b5e24318bb4225f6c6e83019c843436f0eef0afa0`；Platform Session `wm_39f4577b534c9a9bca8eb5c634339408`、Hermes Session `web_39f4577b534c9a9bca8eb5c634339408cd82dd74`；Command `850d34cd-6286-4fdb-9151-4c6b333ef895` version 11 / attempt 1 和 Run `run_7cf82203191743ff85cb373285579ab6` 为 `succeeded`；candidate 后续已 revoke。 | **FAIL**。权威 trace 为 `web_search=0`、`web_extract=1` 且失败；模型 prose 声称使用 web search，trace 直接反证。 |
+
+第一轮的 approval-projection 修复是真实闭环，但它只修复 approval recovery，不能据此把论文
+intake 也判为通过。2026-08-01 retest 是新的 candidate、新的 Session/Command/Run 和新的
+preflight，不能与第一轮合并成一个“最终重跑 PASS”。
+
+## 4. 2026-08-01 retest 结果矩阵
 
 | 检查项 | 状态 | 证据与解释 |
 |---|---|---|
-| 第一次真实 Web 尝试 | **FAIL（已修复，保留）** | Session `web_211e8ec3eb6944bcc5c83f1eaae535e9a3964b6f`、Command `2f6d48f5-7a18-458c-bfc5-28c9923ae0e8`、Run `run_ac253949311b47929d445f50f963456a` 失败；根因是 Platform 未从 Hermes durable Run snapshot 投影等待中的审批，网页看不到 challenge，waiter 超时。该尝试未产生订单。 |
-| 最终浏览器提交与 durable lifecycle | **PASS** | Platform Session `wm_fb5f44086e3c059ce65cf0f314a9222f`、Hermes Session `web_fb5f44086e3c059ce65cf0f314a9222fb0a1bee5`；Command `3176607c-4202-4646-8781-4bf7dcb1dab2` 在 version `13`、attempt `1` 进入 `succeeded`；canonical Run `run_f62837e8fda84cd7a04a37239f258e2d` 为 `succeeded`。 |
-| 真实 provider 与联网研究 | **PASS** | actual provider/model=`xai-oauth/grok-4.5`；20 条消息、10 次 tool call、9 次 API call；usage=`442766` input、`3650` output、`446416` total。 |
-| 论文定位、下载与正文读取 | **PASS** | Firecrawl 不可用、arXiv `urllib` 请求失败后没有伪造成功；`curl` fallback 下载成功。PDF 为 `750580` bytes、59 页，提取 `126631` chars。`pymupdf` 安装因 hash mismatch 被拒绝，随后使用已允许的 `pypdf` fallback 成功读取。 |
-| Hermes command approval | **PASS** | 5 个 challenge 全部由网页以精确 digest 的 allow-once 流程消费；每个 challenge 都具有完整 durable event chain，不存在遗留 pending 或重复消费。 |
-| 研究结论与 HQA 可复现性判断 | **PASS** | Hermes 结论是该论文在当前 HQA 因子可复现合同下 **non-actionable**：它描述端到端深度强化学习的 market-neutral portfolio controller，但没有可直接按当前 deterministic factor/Gate 管线提取并复现的独立因子/策略规格。本次应返回论文做法说明，而不是虚构因子。 |
-| `prepare-intent`、论文 Gate 1/2/3 | **EXPECTED_NOT_REACHED** | non-actionable 判定在研究阶段终止，因而不应创建研究 intent 或人类 Gate。PostgreSQL 本次新增 workflow binding、run link、Gate 均为 `0`。 |
-| factor、backtest、strategy 沉淀 | **EXPECTED_NOT_REACHED** | 用户 prompt 明确允许“没有则说明论文做了什么”；既然没有可复现因子，安全且正确的行为是零 factor、零 backtest、零 strategy，而不是强行生成样本结果。本次相关新增行均为 `0`。 |
-| PostgreSQL migration 028 | **PASS** | 正式库快照显示 marker rows=`1`、version rows=`1`、目标 triggers=`2`；028 只应用一次，未重放。 |
-| 正式三仓候选验证 | **PASS** | sealed manifest SHA-256=`439b5731b52e761168caaa5202e495a0c0c7f2ef2aa50f7557864eb2eb110da5`；Platform `2764 passed / 255 skipped`、HQA `2140 / 17`、Hermes focused `299 / 0`、frontend `429 / 0`，合计 `5632 passed / 272 skipped / 0 failed`。 |
-| 正常安装、restart 与兼容性 | **PASS** | final commits：Hermes `199a251d20ec62be3845681f40d220a40fabd7d8`、HQA `005e92ed7849ea2956bff18b72e399b407b67895`、Platform `2eb714d1ef4ece96a664a816b1f3392d1640809e`；Hermes exact frozen sync/restart/import 通过，compatibility report digest `c4762b…` 为 compatible；Platform restart receipt SHA-256=`d436d86324acd25619968413b4d1ce0b52324469c9c913e57aace69f0ec7bec6` 且 status=`passed`。 |
-| 交易与数据库零副作用 | **PASS** | `kill_switch=true`；订单 ledger=`12`、`max_seq=12`、pending orders=`0`、positions=`3`，四表稳定 MD5=`634c9c2ca6c46ef9b000388ec5e7bcc3`。前后快照一致，本窗口 zero orders。 |
-| candidate/connector 清理 | **PASS** | Candidate `candidate_5ddfd4db518146318beebf4a58f45d5a` 已 `revoked`，open candidates=`0`；connector 进程已恢复 `reconcile_only`。candidate 关闭后 health 不宣称 supervised liveness（`connector_liveness_ready=false`），最终页面重载为 dark/只读状态。 |
-| public release/write | **BLOCKED / OFF（预期）** | `release_authorized=false`、`public_write_authorized=false`、`public_chat_write_ready=false`。私有 candidate 成功不构成 public release 授权。 |
+| Browser UI / managed Session | **PASS** | Platform Session `wm_39f4577b534c9a9bca8eb5c634339408` 精确对应 Hermes Session `web_39f4577b534c9a9bca8eb5c634339408cd82dd74`；浏览器提交和最终只读详情可复核。 |
+| dispatch / provider / command approval | **PASS** | supervised connector 完成真实 dispatch；actual provider/model=`xai-oauth/grok-4.5`。Run usage=`489719` input、`3930` output、`493649` total；Session usage=`10` API calls、`53623` input、`436096` cache-read、`3930` output、`1668` reasoning。2 个 approval grant 均 exact allow-once 且 consumed。此项不推导论文 intake 成功。 |
+| Command / durable Run | **PASS** | Command `850d34cd-6286-4fdb-9151-4c6b333ef895` 在 version 11、attempt 1 为 `succeeded`；Run `run_7cf82203191743ff85cb373285579ab6` 为 `succeeded`。 |
+| Hermes durable events | **PASS（运行事实）** | `tool.started=13`、`tool.completed=13`、`run.completed=1`；`approval.request`、`approval.decision_recorded`、`approval.responded`、`approval.release_committed`、`approval.signalled` 各 `2`。这些事件证明 lifecycle，不证明 intake 合同。 |
+| 直接 PDF / 全文读取 | **PASS** | 直接下载/读取路径取得 PDF 与全文证据；这是内容可访问性，不等于 web-search intake 合同完成。 |
+| tool trace | **FAIL（paper intake）** | `web_search=0`；`web_extract=1` 且失败；`terminal=5`（其中一次 exit 124）；`read_file=5`；`skill_view=2`。模型 prose 声称 web search，不能覆盖该 trace。 |
+| 数据库持久化 | **PASS** | PostgreSQL 有 exact managed Session 与 1 条 primary Command；Hermes authority 有 1 条 Run。该 Session 的 workflow binding=`0`、Gate challenge/action/completion=`0/0/0`，primary Command 的 run link=`0`；typed result、Platform run/backtest 均为 `0`。成功落库不升级研究结论的可信度。 |
+| reproducibility 判断 | **UNVERIFIED / NOT ACCEPTED** | paper-intake contract 未满足，因而没有可接受的、由 HQA verifier 绑定的 reproducibility receipt。 |
+| non-actionable 研究结论 | **UNVERIFIED / NOT ACCEPTED** | 模型可以输出该结论，但本轮 trace 不足以证明它来自合规 intake；不得把 prose 当权威 verdict。 |
+| factor / backtest / Gate / result | **NOT EVALUATED** | 上游 intake 已失败，不能把零下游写入解释为 `EXPECTED_NOT_REACHED` 或 non-actionable branch PASS。 |
+| candidate 清理 | **PASS** | Candidate `candidate_087abe73ffb54fb9914fac6817862c01`、digest `6324041cca7b8a33ca40a55b5e24318bb4225f6c6e83019c843436f0eef0afa0` 于 `2026-07-31T22:20:43.863331Z` revoke，close reason 明确记录 paper-intake failure；open candidates=`0`。connector 恢复 `reconcile_only`。revoke 路径按设计不填写 `final_order_snapshot_digest`，不得伪称它已封存。 |
+| 交易边界 | **PASS** | canonical zero-order snapshot SHA-256=`c4d6979ffddeed35fad34ca6daef30907c7bc8036297ce0b6332b6bfa1ad295d`：account=`1`、ledger=`12`（max seq `12`）、pending=`0`、positions=`3`；四张权威表 delta rows=`0`，paper-authority epoch=`197` 未变，`kill_switch=true`。 |
+| public release/write | **BLOCKED / OFF（预期）** | cleanup 后 `release_authorized=false`、public cutover OFF、`chat_write_ready=false`，composer 已恢复只读；私有运行不构成 release 授权。 |
 
-## 4. 第一次失败与修复闭环
+## 5. P1 residual：运行时必须 fail closed
 
-第一次 Run 已在 Hermes 中持久化审批 challenge，但 Platform 当时只依赖事件增量，未从 durable
-snapshot 恢复等待中的审批；网页因此无法呈现 allow-once 操作，Run 最终失败。修复没有延长超时
-或跳过审批，而是补齐权威链：
+重测前已把 Hermes Web search backend 精确配置为 `xai`，真实直接 `web_search` smoke 能返回
+arXiv 主源；安装态 HQA skill 也已是 1.18.5，并明确要求实际 `web_search`。因此本次
+在先调用 `skill_view(arxiv)` 与 `skill_view(hqa-quant)` 后仍出现的 `web_search=0`，不能归因于
+搜索 provider 不可用或 skill 未加载，而是 skill 提示与流程 hardening 没有强制执行成功条件。
+重测证明仅改配置/skill 不足。下一次 paper-research candidate 之前，运行时至少需要：
 
-1. Hermes 暴露 durable approval snapshot，并在 waiter 已消失、challenge 尚未发布/消费且无
-   event 引用时精确清理 unbound orphan；
-2. Platform 从 snapshot 投影审批，并保持 challenge/run/digest/expiry 的 exact CAS；
-3. HQA compatibility watcher 固定 owner-only API-key file 路径，拒绝 hostile env、symlink、
-   world-writable 与不安全 FIFO 情形；
-4. 三仓重新提交、正常安装、完整候选套件、restart 与真实浏览器重跑。
+1. 在执行前绑定 digest-bound `execution_contract=hqa.paper_intake/v1`；
+2. 为 `web_search`、`web_extract`、直接 PDF/全文读取等步骤生成 typed、no-body tool
+   receipts，只投影类型、结果、digest/计数等必要事实，不泄漏正文；
+3. 通过固定端口调用 HQA subprocess verifier 校验 exact contract 与 receipts；
+4. verifier 不通过时必须在 `mark_succeeded` 之前 fail closed，不能让模型 prose 或外层
+   Run terminal status 替代合同事实。
 
-最终 5 个审批均可见、可操作、只消费一次，证明修复的是 recovery/projection 合同，而不是绕过
-Hermes command approval。
+这项是 **P1 residual**，不是已实现能力，也不授权重新打开 candidate 或 public cutover。
 
-## 5. 数据库、备份与安全证据
+## 6. preflight、测试与 artifact
 
-- 正式库 pre-028 备份：
-  `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/maple-e2e-20260731T060327Z/live-pre028-backup/quantplatform-pre028.dump`
-  （SHA-256 `017d29a6abb4a4cd0c51e7e6f573dab250f9f45a3b21e350cd80d3ff0b7b273e`）。
-- 备份已在隔离数据库恢复并核对 owner/relation/effective privileges；隔离库保留为
-  `quantplatform_pre028_maple_20260731_tmp` 与
-  `quantplatform_pre028_rehearsal_20260731_tmp`。
-- schema fingerprint：
-  `e3f713ac05a1a990cfa9be45157e880e06709c425a4883736544d8f2b626f33a`。
-- candidate 绑定 paper-authority epoch=`197`，关闭原因为完成最终监督 E2E 后恢复本地暗态。
-- 本次 Command/Run 成功不伴随任何 research workflow/Gate/factor/backtest 写入，也不改变
-  paper/live eligibility。
+2026-08-01 retest 的正式 preflight 为：
 
-## 6. 关键 artifact
+`/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-websearch-retest-20260801.pEDa3x/preflight/agent-v0.2-candidate-evidence.json`
+
+- SHA-256：
+  `eba8099bf3801927f3d93b40d1e133546d7cbcc4eece4c58b416bf52bd29a136`
+- Platform：`2764 passed / 255 skipped / 0 failed`
+- HQA：`2140 passed / 17 skipped / 0 failed`
+- Hermes focused：`299 passed / 0 skipped / 0 failed`
+- frontend：`429 passed / 0 skipped / 0 failed`
+- 合计：`5632 passed / 272 skipped / 0 failed`
+- runtime identity：Hermes
+  `199a251d20ec62be3845681f40d220a40fabd7d8`、HQA
+  `669c247f8b0d33c8a90e6381c3f0828519304816`、Platform
+  `53f7280dbd66ecb79add9fc377db2de8a3d22edd`
+
+这些测试证明候选源和已列套件通过，不覆盖 live paper-intake semantic failure。
+下表中不以 `/` 开头的路径均相对 `retest bundle`。
 
 | 证据 | 路径 |
 |---|---|
-| exact prompt/control source | `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-e2e-20260731.CKKG3r/` |
-| 正式 sealed preflight | `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-compat-fix-e2e-20260731.luZH43/candidate-preflight-release-final/bundle/agent-v0.2-candidate-evidence.json` |
-| Platform restart receipt | `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-compat-fix-e2e-20260731.luZH43/platform-restart-final/restart-receipt.json` |
-| 浏览器 ready / prompt-filled | `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-e2e-20260731.CKKG3r/browser/01-alphazerobeta-ready.png`、`02-alphazerobeta-prompt-filled.png` |
-| 清理后 dark reload | `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-e2e-20260731.CKKG3r/browser/14-alphazerobeta-final-dark-reloaded.png`（SHA-256 `92f17d04f1db3679768f839d1a0b2217deb63c2158d4b68391d56363a3474148`） |
-| 最终稳定只读详情 | `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-e2e-20260731.CKKG3r/browser/15-alphazerobeta-final-readonly-detail.png`（SHA-256 `2948247f0a1d70467828acbf75fe5805bfce2a090d368c3c10dc4de91d5210c6`） |
+| retest bundle | `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-websearch-retest-20260801.pEDa3x/` |
+| read-only oracle summary（非 release receipt） | `oracle-summary.json`（SHA-256 `c29e42014a9562a8826fad8cc506de74ba0f80b9e88daaaf9a49d15ee3767e8c`） |
+| direct PDF | `paper/2607.18001.pdf`（`750580` bytes；SHA-256 `d9b61183059b5b17d1dc32dc9a690babd3a1e068ec48652c3d975adf70b2778f`） |
+| extracted full text | `paper/2607.18001.txt`（`152195` bytes；SHA-256 `e728f588387419626bf81f10a232fdf8ff5003ce422a98c640f0b83f84f82bdb`） |
+| prompt filled | `browser/01-prompt-filled.png`（SHA-256 `280521adf304b892a1e8fcb0cdba3adac2c406c0efc4112570f07861700fec25`） |
+| prompt sent | `browser/02-prompt-sent.png`（SHA-256 `60d3c69ce1caf289cfe4168b687ef5c6e0459ccbd4a71769d3d4a61b6f0b80b9`） |
+| final live UI | `browser/03-final-live.png`（SHA-256 `c9514ce2de63a3f2e7de5447d114279712ead368c914b4e85d114640f8c0f5cd`） |
+| final read-only detail | `browser/04-final-readonly-detail.png`（SHA-256 `9222c2748ca2e83721a7f33893844ec57c0f3313eab80b82e366c2960c02b97a`） |
+| Platform restart receipt | `platform-restart-retry/restart-receipt.json`（SHA-256 `2299d5bf7d4b244b426e5e5dfccf1bfbad9d1db2348e7c07cc3215c0b8416602`，status=`passed`、`release_authorized=false`） |
+| 第一轮 exact prompt/control source | `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-e2e-20260731.CKKG3r/` |
+| 第一轮 sealed preflight | `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-compat-fix-e2e-20260731.luZH43/candidate-preflight-release-final/bundle/agent-v0.2-candidate-evidence.json` |
+| 第一轮 Platform restart receipt | `/Users/sunyibo/programs/Hermes-quant-agent/artifacts/alphazerobeta-compat-fix-e2e-20260731.luZH43/platform-restart-final/restart-receipt.json` |
 
-`candidate-preflight-final` 与 `candidate-preflight-keyfreeze-final` 是诊断过程产物；最终候选事实只
-引用 `candidate-preflight-release-final`。任何后续仓库提交（包括 docs-only commit）都会改变
-runtime identity，因此不得拿本审计中的已撤销 candidate 或 sealed manifest 直接打开 release。
-浏览器视觉证据仅限上表实际存在且经复核的四个文件；不得在后续报告中补写其他编号。
+第一轮环境证据继续只支持其明确子项：Hermes
+`199a251d20ec62be3845681f40d220a40fabd7d8`、HQA
+`005e92ed7849ea2956bff18b72e399b407b67895`、Platform
+`2eb714d1ef4ece96a664a816b1f3392d1640809e` 的安装/restart/compatibility 记录；旧 sealed
+manifest SHA-256
+`439b5731b52e761168caaa5202e495a0c0c7f2ef2aa50f7557864eb2eb110da5`；以及 pre-028 backup
+`/Users/sunyibo/programs/Hermes-quant-agent/artifacts/maple-e2e-20260731T060327Z/live-pre028-backup/quantplatform-pre028.dump`
+SHA-256
+`017d29a6abb4a4cd0c51e7e6f573dab250f9f45a3b21e350cd80d3ff0b7b273e`、隔离 restore 和 schema
+fingerprint `e3f713ac05a1a990cfa9be45157e880e06709c425a4883736544d8f2b626f33a`。
+这些事实不修复两轮 paper-intake failure。
 
-## 7. 最终结论
+任何后续仓库提交都会改变 runtime identity，因此不得复用两轮已撤销 candidate 或旧 sealed
+manifest 直接打开 release。
 
-AlphaZeroBeta 这条“联网搜索 → PDF 下载/解析 → 论文理解 → 精确审批 → 有条件提取/回测”真实
-任务在修复后完成。它正确停在“论文非当前 HQA 可复现因子”这一分支，所以 Gate、factor、
-backtest 与策略沉淀为 `EXPECTED_NOT_REACHED`。这证明本地私有 research-conversation 路径和
-durable approval recovery 已打通；它没有证明 actionable paper Gate 纵切、Vertical A、完整
-restart/fork 矩阵或 public V8 release 已完成。当前安全终态仍是 candidate revoked、connector
-`reconcile_only`、public write/release OFF、zero orders。
+## 7. 安全终态与最终结论
+
+两轮 AlphaZeroBeta 都证明了本地私有 UI/Session/dispatch/provider/approval/durable
+Run/direct-PDF/full-text/数据库路径中的相应子项，但**都没有通过 paper intake**。因此：
+
+- reproducibility 与 non-actionable research verdict 均为
+  `UNVERIFIED / NOT ACCEPTED`；
+- factor、backtest、Gate 与 result 为 `NOT EVALUATED`；
+- zero orders 通过，`kill_switch=true`；
+- retest candidate 已 revoke，connector=`reconcile_only`，composer 已恢复只读；
+- public cutover OFF，不能声明 release authorization。
+
+下一准入不是重述模型答案，而是先交付 P1 运行时 execution contract/receipt/verifier/fail-before-
+`mark_succeeded`，再使用新的 exact candidate 重测。完整 browser DoD、Vertical A、
+actionable-paper Gate 纵切、release stamp/cutover 仍各自未被本审计证明。
