@@ -1,7 +1,7 @@
 ---
 name: hqa-quant
-description: "HQA quant ops from Hermes — read-only market/signal/radar queries, local prediction and opportunity ledgers, human-gated research/account writes, artifact-first answers, and 30s async triage for long jobs."
-version: 1.18.3
+description: "HQA quant ops and paper/literature/factor research (论文、文献、因子与策略研究) from Hermes — verified web discovery, read-only market/signal/radar queries, local ledgers, human-gated research/account writes, artifact-first answers, and 30s async triage."
+version: 1.18.4
 platforms: [macos]
 metadata:
   hermes:
@@ -222,6 +222,51 @@ The success receipt has contract `agent-v0.2-options-research/v1` and includes
 those references; do not claim success from prose alone.
 
 #### Natural-language paper reproduction (Agent v0.2 primary route)
+
+Requests about a paper, literature review, alpha/factor/strategy extraction, or
+portfolio-construction research trigger this skill. Before any workflow write,
+perform this research intake in order:
+
+1. First call the actual `web_search` tool. Verify the canonical title plus a
+   DOI or arXiv identifier against a primary publisher, DOI, or arXiv source;
+   never trust only the user's spelling, a secondary search snippet, or model
+   memory. An exact unique primary-source match is verified without another
+   confirmation round. If results identify more than one plausible paper, show
+   the ambiguity and ask the user rather than selecting one. If search fails,
+   returns no usable result, or finds no primary source, report the intake as
+   `BLOCKED` and stop.
+2. Then call `web_extract` on the verified primary abstract/landing page and,
+   when needed, its PDF or full text. Source the paper's claims from those
+   extracted bytes, not from search-result prose or a remembered description.
+   A factor/strategy extraction or backtest request requires successfully
+   extracted usable full-text bytes; an error envelope, empty body, or
+   abstract-only response is insufficient. Try the verified primary PDF and
+   then the isolated local fallback below. If usable full text still cannot be
+   obtained, report `BLOCKED` and stop before making a reproducibility decision.
+3. Make the reproducibility decision from the extracted source. A directly
+   actionable factor or strategy needs enough formula or deterministic rules,
+   input/data definitions, eligibility/universe rules, rebalance/holding logic,
+   and parameter values to implement without invention.
+   - If that contract is missing, honestly summarize what the paper does and
+     stop. Do not call `prepare-intent`, create `research_start`, or run any
+     backtest. Architecture, training, optimizer, or benchmark claims are not
+     permission to invent a hand-written factor.
+   - If it is actionable, ask the user for an explicit non-empty ordered
+     `universe` before `prepare-intent`. Never guess, infer, sort, deduplicate,
+     or substitute that universe from paper benchmarks, examples, mentioned
+     assets, or defaults.
+
+Prefer `web_extract` over adding a local PDF parser. Never install PDF
+dependencies into system/global Python, the user site, any project environment,
+or any existing Hermes, HQA, or Platform runtime/venv; in particular, never run
+`uv pip install --system`. If local parsing is truly necessary, use only a
+task-scoped temporary directory with its own isolated `.venv`, invoke that
+environment's interpreter explicitly, and do not expose it through
+Hermes/HQA/Platform environment variables.
+
+Only after this intake passes, the title has one exact verified primary-source
+match (or the user resolved a real ambiguity), and the user supplied the ordered
+universe may the managed research workflow below begin.
 
 When the user asks in natural language to reproduce or extract a factor from a
 paper, use the active `/hermes` managed Session and advance exactly one visible
