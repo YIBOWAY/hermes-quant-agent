@@ -230,6 +230,7 @@ def _platform_contract() -> dict[str, object]:
             "session_resources",
             "run_submission",
             "run_events_sse",
+            "run_events_snapshot",
             "run_status",
             "run_approval_response",
             "run_stop",
@@ -263,6 +264,10 @@ def _platform_contract() -> dict[str, object]:
             {"method": "POST", "path": "/v1/runs"},
             {"method": "GET", "path": "/v1/runs/{run_id}"},
             {"method": "GET", "path": "/v1/runs/{run_id}/events"},
+            {
+                "method": "GET",
+                "path": "/v1/runs/{run_id}/events/snapshot",
+            },
             {"method": "POST", "path": "/v1/runs/{run_id}/approval"},
             {"method": "POST", "path": "/v1/runs/{run_id}/stop"},
             {"method": "POST", "path": "/api/sessions"},
@@ -305,6 +310,10 @@ def _local_agent_capabilities() -> dict[str, object]:
         "run_events": {
             "method": "GET",
             "path": "/v1/runs/{run_id}/events",
+        },
+        "run_events_snapshot": {
+            "method": "GET",
+            "path": "/v1/runs/{run_id}/events/snapshot",
         },
         "run_approval": {
             "method": "POST",
@@ -439,6 +448,10 @@ def test_local_agent_profile_validates_manifest_and_native_capability_surface(
             "exact_feature_drift",
         ),
         (
+            lambda payload: payload["features"].pop("run_events_snapshot"),
+            "bool_feature_drift",
+        ),
+        (
             lambda payload: payload["durable"]["event_replay"].update(
                 grounded=False
             ),
@@ -452,6 +465,10 @@ def test_local_agent_profile_validates_manifest_and_native_capability_surface(
         ),
         (
             lambda payload: payload["endpoints"].pop("session_fork"),
+            "http_endpoint_drift",
+        ),
+        (
+            lambda payload: payload["endpoints"].pop("run_events_snapshot"),
             "http_endpoint_drift",
         ),
     ],
