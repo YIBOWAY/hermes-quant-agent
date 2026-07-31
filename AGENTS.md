@@ -25,61 +25,37 @@ Rules for AI agents working in this repository.
   continuing external context requires an explicit fork with immutable lineage.
   The 2026-07-16 GET-only/reconcile-only/never-live-006 description is
   **historical evidence**, not current instructions. Do not use it as NEXT.
-- **Agent v0.2 release-candidate boundary (2026-07-31 docs sync):**
-  - The 2026-07-26 clean baseline contains managed Web sessions/fork, Run-stop,
-    paper intent/Gate 1, sealed candidate evidence and PostgreSQL release
-    authority. The 2026-07-31 hardening change set adds Keychain/recovery
-    hardening and migration 028. Its commit, install, live and authorization
-    state must be re-observed; this file does not make it a release candidate.
-    Bind evidence to clean three-repo HEADs; dated anchors below are historical only.
-  - Migrations 016 through 028 are the intended additive release-candidate ladder after
-    the live 006–015 baseline. Never infer their live state from source or this
-    file: inspect PostgreSQL migration metadata, schema readiness, role grants,
-    and the runtime health projection in the current operator window. Schema
-    readiness never implies public write authorization. Migration 023 preserves
-    one stable conversation root while binding every Run to its resolved
-    compression tip; migration 024 makes approval/stop external outcomes
-    durable and replay-safe. Migration 025 fences every new managed Session and
-    Command to either the active candidate or the exact accepted release at the
-    current paper-authority epoch; a later paper-authority mutation therefore
-    invalidates the stale release path. Migration 026 seals the HQA research
-    claim plus start/continue payload digests across Gate 1/2/3 and requires
-    exact v2 completion replay while preserving only the explicitly claim-less
-    historical v1 envelope. Migration 027 raises the bounded candidate TTL
-    ceiling from 30 minutes to two hours so an operator can complete the
-    supervised browser, restart and paper flow without racing expiry; it adds
-    no release, public-write or trading authority. Migration 028 requires
-    canonical `default` paper authority and current-epoch candidate writes; its
-    source presence proves neither commit identity, isolated acceptance, live
-    apply nor authorization.
-  - HQA's research claim body (paper title plus ordered universe) remains only
-    in the encrypted Intent Payload Store; workflow, PostgreSQL and public
-    completion projections carry digests. Claim binding is limited to Attempt
-    1, terminal completion first re-verifies the exact pre-terminal
-    Task/Attempt lineage, and the Platform completion response is a closed
-    42-key contract with no passthrough extras. The 2026-07-26 claim/completion
-    hardening was source + isolated-review **APPROVE**; it proves neither
-    migrations 025–028 live nor release/cutover open.
-  - The real paper-factor path completed exact Gate 1, Gate 2 CAS, Futu final
-    receipt `backtest-32a022e60947473be481a2404d85646d`, human Gate 3 commit
-    `7ad6a92`, registry promotion and cleanup. It is an operational US ETF proxy
-    for the paper, **not** a full country-level reproduction. This backend/CLI
-    evidence does not substitute for the final `/hermes` browser vertical.
-  - Release status is a durable runtime fact, not a documentation flag. Inspect
-    the current candidate, connector generation, release stamp, public cutover,
-    runtime identities, schema fingerprint and evidence digest before claiming
-    `release_authorized=true`, `chat_write_ready=true` or Agent v0.2 DONE.
-    Freeze repository documentation before candidate admission. Record the
-    final operator result in PostgreSQL plus the external sealed close-out
-    bundle; a later docs-only commit changes runtime identity and therefore
-    requires a fresh candidate/evidence/release cycle rather than relabeling the
-    existing release.
+- **Agent v0.2 operator boundary (2026-08-01 snapshot):** migration 006–028 was
+  live in the inspected `quantplatform`; 028 was applied exactly once after
+  backup/isolated restore (marker/version each 1, target triggers 2). Do not
+  re-apply it. A bounded private candidate completed a real AlphaZeroBeta Web
+  research Run with `xai-oauth/grok-4.5` and five durable allow-once approvals,
+  then was revoked; connector cleanup is `reconcile_only`. The first attempt's
+  missing durable approval projection remains recorded as FAIL. Full evidence
+  and exact commits are in
+  `docs/audits/2026-07-31-alphazerobeta-paper-research-web-e2e.md`.
+  - AlphaZeroBeta was classified non-actionable under HQA reproducibility
+    rules. Its zero prepare-intent/Gate/factor/backtest/strategy writes are
+    `EXPECTED_NOT_REACHED`, not a full actionable-paper vertical. Do not invent
+    a factor to make the test look broader.
+  - HQA research claim bodies (paper title plus ordered universe) remain only in
+    the encrypted Intent Payload Store; public/workflow projections carry
+    digests. Claim binding is Attempt-1-only and completion re-verifies exact
+    lineage. If an actionable paper needs an ordered universe, stop for explicit
+    user input; never infer one.
+  - `release_authorized`, `public_write_authorized` and
+    `public_chat_write_ready` were all false after cleanup. Release status is a
+    durable runtime fact, never a docs flag. This docs-only commit changes HQA
+    runtime identity, so any new candidate/release must refresh clean three-repo
+    HEADs, suites and sealed evidence; never reuse the revoked candidate or old
+    manifest.
 - Slice V0/V1/V2 close-out records under `docs/audits/` remain historical
   provenance. Their old runtime commits, roles, PIDs, “candidate not installed”
-    and write-gate conclusions must not override the 2026-07-26 final-source
-  record above.
-- Slice V3 is source-accepted and installed locally in dark mode at HQA
-  `121926388d86`; see `docs/audits/2026-07-19-agent-v0-2-v3-acceptance.md` and
+  and write-gate conclusions must not override the 2026-08-01 snapshot above.
+- Slice V3's foundation was source-accepted and installed locally in dark mode
+  at historical HQA `121926388d86`; current installed identity is the exact
+  runtime recorded by the latest audit, not that old anchor. See
+  `docs/audits/2026-07-19-agent-v0-2-v3-acceptance.md` and
   `docs/runbooks/agent-v0-2-v3-authorities.md`. `IntentPayloadStore` owns encrypted
   bodies/TTL/tombstones; `WorkflowAuthority` owns Task/Attempt facts. Hermes may
   only call `show|events|audit|rebuild` on the workflow surface; payload
@@ -93,18 +69,14 @@ Rules for AI agents working in this repository.
   `--no-agent` and must stay free of provider, HTTP, database and trading calls.
   V3 alone did not enable Web writes; later V6 local dark + L2a did under
   separate local authorization (public cutover still OFF).
-- V4–V8 M1–M6 details remain dated delivery evidence. The current order is:
-  finish the final UI/contract; refresh full/focused suites and explicitly
-  inspect the live schema; after 028 is committed, isolated-reviewed and
-  explicitly authorized, perform **backup -> 025 -> 026 -> 027 -> 028 ->
-  restart** (first apply missing earlier entries in order); seal the preflight; open a bounded
-  **private candidate admission**; start and verify connector liveness; execute
-  candidate browser E2E and seal its facts. Thus the data-plane order is always
-  **backup -> 025 -> 026 -> 027 -> 028 -> restart -> live E2E**. Accept the exact
-  candidate; only then open the final runtime-bound release stamp/public
-  cutover, exercise rollback, and run a final public smoke. Authoritative status
-  is `docs/README.md` plus the active plan. A public cutover is never a
-  prerequisite for candidate evidence.
+- V4–V8 M1–M6 details remain dated delivery evidence. Current work starts from
+  the safe dark state above: complete the still-unproven multi-turn, restart,
+  exact-message fork, Run-stop, Vertical A and actionable-paper Gate browser
+  flows. Then refresh identities/suites/sealed preflight and use a **new**
+  explicitly authorized private candidate; do not re-run migration 028. Only an
+  accepted exact candidate plus the full release Gate may precede a separately
+  authorized stamp/public cutover and rollback smoke. Authoritative status is
+  `docs/README.md` plus the active plan.
 - Hermes updates are operator-controlled and periodic/manual. The no-agent
   compatibility watcher may report drift but must never pull, merge, install,
   restart or enable gates. The upstream Hermes 40k full suite is not an Agent
@@ -131,12 +103,11 @@ Rules for AI agents working in this repository.
   supervised dispatch under the trading kill switch — that is not public cutover
   and not Plan-V6 full-UI acceptance. A fake Hermes adapter is for hermetic
   tests only, never a temporary public user path.
-- Migrations 006 through 015 were applied to live `quantplatform` under
-  explicit authorization. Migrations 016 through 028 form one ordered additive
-  release-candidate upgrade and must be applied only by the explicit migration
-  command after backup, isolated replay and current live inspection. Do not
-  re-apply the obsolete `UNIQUE(task_id)`-only 006 or treat an old replay plan
-  as current. Migration 015 narrows runtime managed-session provisioning to
+- Migrations 006 through 028 were present in the explicitly authorized
+  2026-08-01 live `quantplatform` snapshot. Migration 028 was applied once after
+  backup/isolated restore; do not re-apply it or any earlier migration. Recheck
+  live metadata before acting, and require separate authorization for every
+  future migration. Migration 015 narrows runtime managed-session provisioning to
   exact columns and must fail closed on ACL drift. Migration 022 makes both
   selected source/fork point and Hermes-canonical resolved parent mandatory;
   023 separates the durable conversation root from the resolved Run tip; 024
@@ -145,11 +116,9 @@ Rules for AI agents working in this repository.
   active candidate or accepted release; 026 seals research claim/start/continue
   digests through Gate 1/2/3 and splits completion into claim-less v1 versus
   exact-lineage v2; 027 expands only the bounded candidate TTL ceiling to two
-  hours and grants no new capability; the migration 028 change set requires
+  hours and grants no new capability; migration 028 requires
   canonical default paper authority with exact raw safety consistency and
-  rejects candidate writes at a stale paper-authority epoch. Do not apply or
-  authorize 028 from source presence without exact clean identity and current
-  review evidence.
+  rejects candidate writes at a stale paper-authority epoch.
   Schema readiness and the constrained-role canary are not public write
   authorization.
 - Treat the local `~/.hermes/hermes-agent` checkout as a third owned dependency
@@ -202,7 +171,7 @@ Rules for AI agents working in this repository.
   candidates, but resident paper/live paths must only use promoted, registered,
   tested factors. The final Hermes workbench source includes managed write
   paths, but public mutation remains fail-closed until the runtime-bound release
-  stamp/cutover, connector liveness and browser E2E pass. Official API
+  stamp/cutover, connector liveness and **full** browser DoD pass. Official API
   health/capability/session GETs do not call a provider. Do not downgrade to a
   GET-only fallback or claim the release-candidate UI is already public.
 - Opportunity decisions never create or upgrade action eligibility. Link an
