@@ -2789,7 +2789,7 @@ def test_hermes_skill_requires_derived_controls_and_fixed_source_stager() -> Non
         encoding="utf-8"
     )
 
-    assert "version: 1.18.4" in skill
+    assert "version: 1.18.5" in skill
     assert "Hermes must omit `operation_id`, every new `gate_id`, every" in skill
     assert "Supplying `operation_id`, a new `gate_id`, or `hqa_gate_ref` is a" in skill
     assert "legacy API compatibility surface" not in skill

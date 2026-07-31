@@ -1,7 +1,7 @@
 ---
 name: hqa-quant
 description: "HQA quant ops and paper/literature/factor research (论文、文献、因子与策略研究) from Hermes — verified web discovery, read-only market/signal/radar queries, local ledgers, human-gated research/account writes, artifact-first answers, and 30s async triage."
-version: 1.18.4
+version: 1.18.5
 platforms: [macos]
 metadata:
   hermes:
@@ -235,6 +235,12 @@ perform this research intake in order:
    the ambiguity and ask the user rather than selecting one. If search fails,
    returns no usable result, or finds no primary source, report the intake as
    `BLOCKED` and stop.
+   A terminal command (`curl`, `urllib`, or an arXiv API), browser navigation,
+   provider-internal browsing, or a remembered identifier never satisfies this
+   step. The current turn must contain an actual `web_search` result with
+   `success=true` and a unique primary-source hit. If the tool is absent, not
+   called, returns an error envelope, or yields no unique primary source, report
+   `BLOCKED` and stop; do not replace it with terminal or browser access.
 2. Then call `web_extract` on the verified primary abstract/landing page and,
    when needed, its PDF or full text. Source the paper's claims from those
    extracted bytes, not from search-result prose or a remembered description.
@@ -255,6 +261,11 @@ perform this research intake in order:
      `universe` before `prepare-intent`. Never guess, infer, sort, deduplicate,
      or substitute that universe from paper benchmarks, examples, mentioned
      assets, or defaults.
+
+Before any final answer, self-check the current turn's tool history. If a
+successful `web_search` did not precede `web_extract` or the isolated full-text
+fallback, the only valid paper-intake conclusion is `BLOCKED`; do not present a
+reproducibility verdict, factor, backtest, or strategy summary as validated.
 
 Prefer `web_extract` over adding a local PDF parser. Never install PDF
 dependencies into system/global Python, the user site, any project environment,
