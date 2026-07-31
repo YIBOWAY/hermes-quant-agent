@@ -3,9 +3,11 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -178,6 +180,26 @@ def test_runtime_port_timeout_kills_and_reaps_entire_process_group(
     monkeypatch.setattr(launcher, "_PLATFORM_DIR", platform)
     monkeypatch.setattr(launcher, "_QUANT_SYSTEM", quant_system)
     monkeypatch.setattr(launcher, "_RUNTIME_ENV", runtime_env)
+    original_popen = launcher.subprocess.Popen
+
+    def popen_after_fixture_ready(
+        *args: Any,
+        **kwargs: Any,
+    ) -> subprocess.Popen[bytes]:
+        process = original_popen(*args, **kwargs)
+        ready_deadline = time.monotonic() + 5.0
+        while (
+            not pids_path.is_file()
+            and process.poll() is None
+            and time.monotonic() < ready_deadline
+        ):
+            time.sleep(0.01)
+        if not pids_path.is_file():
+            launcher._terminate_process_group(process)
+            raise AssertionError("process-group fixture did not become ready")
+        return process
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", popen_after_fixture_ready)
 
     result = launcher._run_platform(
         argv,

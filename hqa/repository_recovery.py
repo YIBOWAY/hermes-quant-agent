@@ -2217,13 +2217,35 @@ def _captured_source_inventory(
     return entries
 
 
+def _uv_managed_python_root(interpreter: Path) -> Path:
+    for parent in interpreter.parents:
+        if parent.parts[-4:] == (".local", "share", "uv", "python"):
+            return parent
+    raise RepositoryRecoveryError(
+        "managed Python root must identify the uv install directory"
+    )
+
+
 def _managed_python_contract() -> dict[str, object]:
     try:
         interpreter = Path(sys._base_executable).resolve(strict=True)
         invocation = Path(sys.executable)
-        managed_root = (
-            Path.home() / ".local" / "share" / "uv" / "python"
-        ).resolve(strict=True)
+        configured_root = os.environ.get("HQA_UV_MANAGED_PYTHON_ROOT")
+        if configured_root:
+            configured_path = Path(configured_root)
+            if not configured_path.is_absolute():
+                raise RepositoryRecoveryError(
+                    "managed Python root must be an absolute path"
+                )
+            managed_root = configured_path.resolve(strict=True)
+            if managed_root.parts[-4:] != (".local", "share", "uv", "python"):
+                raise RepositoryRecoveryError(
+                    "managed Python root must identify the uv install directory"
+                )
+        else:
+            managed_root = _uv_managed_python_root(interpreter)
+    except RepositoryRecoveryError:
+        raise
     except (OSError, RuntimeError) as exc:
         raise RepositoryRecoveryError(
             "managed Python interpreter cannot be resolved"
@@ -3044,9 +3066,9 @@ def _validate_closed_rebuild_spec(
     live_managed = _managed_python_contract()
     managed_path = Path(str(managed["path"]))
     managed_resolved = Path(str(managed["resolved_path"]))
-    managed_root = (
-        Path.home() / ".local" / "share" / "uv" / "python"
-    ).resolve(strict=True)
+    managed_root = _uv_managed_python_root(
+        Path(str(live_managed["resolved_path"]))
+    )
     embedded_cache = Path(str(spec["cache_path"]))
     expected_cache = _validate_existing_chain(
         expected_cache_path, final_directory=True

@@ -37,6 +37,12 @@ class IntentPayloadCrypto(Protocol):
     algorithm: str
     key_id: str
 
+    def probe(self) -> None:
+        ...
+
+    def initialize(self) -> None:
+        ...
+
     def encrypt(self, plaintext: bytes, *, aad: bytes) -> dict[str, str]:
         ...
 
@@ -86,6 +92,12 @@ class DeterministicCryptoFake:
             raise ValueError("test crypto key must contain at least 32 bytes")
         self._key = key
         self.key_id = _validate_key_id(key_id)
+
+    def probe(self) -> None:
+        return None
+
+    def initialize(self) -> None:
+        return None
 
     def encrypt(self, plaintext: bytes, *, aad: bytes) -> dict[str, str]:
         if type(plaintext) is not bytes or type(aad) is not bytes:
@@ -189,6 +201,26 @@ class MacOSKeychainCrypto:
     @property
     def command(self) -> tuple[str, ...]:
         return (str(self.helper),)
+
+    def probe(self) -> None:
+        self._key_operation("probe")
+
+    def initialize(self) -> None:
+        self._key_operation("initialize")
+
+    def _key_operation(self, operation: str) -> None:
+        response = self._invoke(
+            {
+                "schema_version": "1.0",
+                "operation": operation,
+                "key_id": self.key_id,
+            }
+        )
+        if response != {"ok": True, "status": "ready"}:
+            raise CryptoFailure(
+                "crypto_helper_protocol_error",
+                "crypto helper response is invalid",
+            )
 
     def encrypt(self, plaintext: bytes, *, aad: bytes) -> dict[str, str]:
         if type(plaintext) is not bytes or type(aad) is not bytes:

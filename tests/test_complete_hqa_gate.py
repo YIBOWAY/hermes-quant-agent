@@ -232,6 +232,8 @@ def test_generated_pytest_driver_records_exact_node_outcomes(
             "-q",
             "-p",
             "no:cacheprovider",
+            "--rootdir",
+            str(tmp_path),
             suite.name,
             "--junitxml",
             str(junit),

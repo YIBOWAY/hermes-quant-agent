@@ -1,13 +1,15 @@
 # Agent v0.2 — 完整 `/hermes` Web Chat 实施计划
 
-> **FINAL-SOURCE ADDENDUM（2026-07-26，当前事实源）：** Agent v0.2 三仓 release branch
-> 已包含最终路径所需 source：managed Web session、exact-message fork UI、selected source /
+> **CURRENT SOURCE BOUNDARY（2026-07-31）：** 2026-07-26 的 Agent v0.2 clean
+> release-branch baseline 已包含最终路径所需 source：managed Web session、exact-message fork UI、selected source /
 > fork point 与 Hermes-canonical resolved parent 双重 lineage、自然语言 paper intent 入口、
 > Web Run-stop control（unknown outcome 复用同一 action）、Gate 1 exact-source browser
 > review、sealed candidate evidence 与 PostgreSQL-only
 > release/cutover authority、conversation-root/resolved-run-tip identity 与 durable
-> approval/stop outcome。任何 release evidence 必须绑定提交后的 clean 三仓 HEAD，不能把
-> 下方 dated code anchor 当最终 runtime identity。
+> approval/stop outcome。2026-07-31 hardening change set 另有 Keychain/recovery
+> hardening 与 migration 028 source；它们尚未进入 clean candidate。任何 release evidence
+> 必须绑定提交后的 clean 三仓 HEAD，不能把 dirty source 或下方 dated code anchor 当最终
+> runtime identity。
 >
 > live PostgreSQL migrations 006–015 已应用；015 exact provisioning-column grants、
 > ACL-drift fail-closed 和 constrained runtime-role managed-session canary 已通过。真实论文路径
@@ -16,7 +18,7 @@
 > registry promotion 和 cleanup；它是论文的 **US ETF operational proxy**，不是全球国家样本
 > 完整复现。该 backend/CLI 事实不替代 `/hermes` browser vertical。
 >
-> 016–027 是 live 006–015 baseline 之后的有序 additive migration ladder。025 将每个新
+> 目标 016–028 是 live 006–015 baseline 之后的有序 additive migration ladder。025 将每个新
 > managed Session/Command 围栏到 current paper-authority epoch 以及 active candidate 或 exact
 > accepted release；026 只持久化 HQA research claim/start/continue digest，在 Gate 1/2 传递
 > claim+start、Gate 3 再加入 continue，并将历史 claim-less v1 completion 与 exact-lineage v2
@@ -25,12 +27,24 @@
 > terminal completion 前重验 pre-terminal exact lineage，Platform completion response 为
 > closed 42-key contract。027 只把 candidate admission 的硬 TTL ceiling 从 30 分钟扩到
 > 两小时，避免真实 browser/restart/paper review 在人工验收中途过期；它不增加 release、
-> public-write 或 trading authority。HQA 的 Hermes-facing 论文入口同时改为固定安装路径的
+> public-write 或 trading authority。Migration 028 source 进一步要求 owner 只有一个
+> canonical `default` paper account、raw `account_id`/`kill_switch` 与数据库事实一致，并把
+> candidate Session/Command 围栏到 current paper-authority epoch；stale candidate 必须 fail
+> closed。028 文件存在不证明已提交、isolated-pass、live apply 或获授权。
+>
+> Keychain release preflight 只能先执行非创建式 `probe`。`put`、`bind_resolve` 与普通
+> encrypt 均不得创建 key；只有操作者在 exact committed source、安装/runtime identity 与
+> preflight 绑定后单独决定执行 `initialize-key`，随后重新 `probe`。closure/recovery 的
+> private `HOME`/`TMPDIR`、verification temp 与 `uv-cache` 必须位于 owner-controlled `0700`
+> root；Python authority 来自 exact uv-managed Python 3.11 interpreter 或严格的
+> `HQA_UV_MANAGED_PYTHON_ROOT`，不能从 `HOME` 推导。
+>
+> HQA 的 Hermes-facing 论文入口同时改为固定安装路径的
 > runtime ports，控制 ID/plan digest 从已验证的 durable facts 确定性派生，reviewed source
 > 只经 bounded stdin 暂存到 ignored、owner-only、content-addressed 路径，用户不再需要猜
-> hidden IDs 或把源码写入 tracked worktree。该增量已 source + isolated review
-> **APPROVE**；这不证明 025/026/027 已 live apply，也不证明 candidate、release stamp 或
-> public cutover 已打开。
+> hidden IDs 或把源码写入 tracked worktree。2026-07-26 基线中的该增量已有当时的 source +
+> isolated review **APPROVE**；当前 Keychain/recovery/028 dirty source 不继承该结论。这也不
+> 证明 025/026/027/028 已 live apply，或 candidate、release stamp、public cutover 已打开。
 >
 > 这些 migration、connector、candidate、release stamp/cutover 与 E2E 结果都是当前
 > PostgreSQL/health/evidence
@@ -315,7 +329,7 @@ parent session ID、source channel 和 fork point。它不是让 Web 接管原 S
 | PostgreSQL transport | 现有 repository + 后续 additive schema | 独立临时 PostgreSQL；不使用 SQLite 冒充 lease/transaction |
 | HQA authority | 固定绝对 executable、argv 数组、strict JSON stdin、限时限输出 | temp-dir `ResearchWorkflowStore` / contract fake |
 | Platform domain | 现有 repositories、CLI、artifact reader | immutable fixture repositories，paper/live 永远无 adapter |
-| Key/clock/ID | macOS Keychain、system clock/ID | deterministic key、frozen clock/ID |
+| Key/clock/ID | macOS Keychain；非创建式 `probe`；operator-only `initialize-key`；system clock/ID | deterministic key、frozen clock/ID |
 
 fake adapter 只服务 contract、fault injection 和完整 UI 状态测试；生产和 fake 必须实现同一个
 interface。fake 不是临时产品路径，也不能通过 feature flag 面向用户开放。
@@ -987,6 +1001,10 @@ ticker、字段、次数和时间窗单独请求授权；不得把“只读”�
 
 #### 纵切 B：论文因子复现
 
+这是最终论文 Task 的强制人工暂停链。plan confirmation 与 Gate 1/2/3 是四个互不替代的
+human stop；协调器必须逐点暂停并取得当次明确确认，不能把 plan/canary/前一 Gate 授权沿用到
+下一步。
+
 ```text
 受限 PDF/URL ref + 自然语言目标
 -> plan-only Run
@@ -1002,7 +1020,8 @@ ticker、字段、次数和时间窗单独请求授权；不得把“只读”�
 -> HQA observe canonical completion
 ```
 
-网页不代 commit；Gate 3 commit 之前 Task 不能伪装 completed。Gate/command approval route、类型、
+网页不代 commit；Gate 3 的人类 exact diff review + Git commit 完成之前，Task 不能伪装
+completed。Gate/command approval route、类型、
 digest、TTL 和审计必须做互不兼容的独立安全 review。
 
 本纵切的真实 final backtest、Gate 1 HQA mutation、Gate 2 platform CAS、Gate 3 preparation，以及
@@ -1093,7 +1112,7 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 | V1 Stop-the-line baseline | DONE；restricted live role ACCEPT | 旧 `live_role_unprovisioned` 是历史；006–015 已 live，015 constrained-role canary 已通过；schema ≠ release |
 | V2 Hermes DurableRunAuthority | MANAGED SOURCE ACCEPTED / FINAL RUNTIME STAMP PENDING | managed Session/Run、resume、provider evidence、approval/stop 与 exact fork 已进入 candidate；final clean Hermes identity + capability/browser recovery 仍待 release gate |
 | V3 HQA Intent/WorkflowAuthority | DONE（source accepted + local dark install） | encrypted intent、Task `1:N` Attempt、backup/replay、read-only Hermes surface、no-agent retention 已闭合；见 V3 audit |
-| V4 PG schema/BFF saga/security | LIVE 006–015 + 016–027 FINAL SOURCE LADDER | 015 constrained canary 是历史 live evidence；016–027 的 current live apply 必须现场查询，025/026 research lineage 与 027 bounded-TTL source + isolated review APPROVE 不等于 live |
+| V4 PG schema/BFF saga/security | LIVE 006–015 HISTORICAL BASELINE + 016–027 CANDIDATE LADDER + 028 CHANGE SET | 015 constrained canary 是历史 live evidence；016–027 的 current live apply 必须现场查询；028 canonical-paper/current-epoch source 不证明 exact commit、isolated-pass、live 或 authorization |
 | V5 supervised dispatch worker | RELEASE-CANDIDATE CODE ACCEPTED / DAEMON PENDING | supervised connector/provisioning/recovery source ready；final service install、fresh heartbeat/liveness pending |
 | V6 final workspace UI | **SOURCE COMPLETE / LIVE E2E PENDING** | managed composer/transcript/spine、external exact-message fork UI、Web Run-stop control 与 same-action retry 均已进入 final source；仍须真实 browser acceptance |
 | V7 decisions/results/vertical slices | **PARTIAL / REAL PAPER BACKEND DONE** | exact Gate 1/2/Futu final/Gate 3 commit+cleanup complete as US ETF proxy；Vertical A + paper flow via final `/hermes` browser still pending |
@@ -1106,14 +1125,19 @@ checkbox、代码存在、测试通过、live 运行和用户 cutover 是不同�
 2. 读取 final Platform/HQA/Hermes HEAD，刷新 Platform/HQA full、Hermes focused、
    frontend test/typecheck/lint/build；不运行 Hermes 40k suite。
 3. 备份、隔离恢复演练；若 016–024 有缺失则先按顺序补齐，随后严格执行
-   **backup → migration 025 → migration 026 → migration 027 → service restart**；复核 schema
+   **backup → migration 025 → migration 026 → migration 027 → migration 028 → service
+   restart**；028 只有在提交、isolated replay/review 通过并取得当次 live apply 授权后才可进入
+   该序列。复核 schema
    fingerprint、exact grants、constrained-role provisioning canary、root/tip、run-control
-   outcome、current paper epoch fencing 与 sealed research lineage readiness。
-4. 封存可重算 test-only preflight，打开短时、exact-runtime/schema 绑定的私有 candidate
+   outcome、canonical default paper authority、current paper epoch fencing 与 sealed
+   research lineage readiness。
+4. 封存可重算 test-only preflight；exact runtime/preflight 绑定后先执行非创建式 Keychain
+   `probe`。如果 key missing，必须暂停并由操作者单独决定是否执行 `initialize-key`，随后重新
+   `probe`；普通 encrypt 不得创建 key。再打开短时、exact-runtime/schema 绑定的私有 candidate
    admission；public release 与 public cutover 仍保持关闭。
 5. 在 candidate admission 下启动 connector，验证 fresh heartbeat/liveness、空队列零
    provider；在 `/hermes` 完成 multi-turn/restart/fork/Vertical A/paper Gate browser E2E。
-   数据面顺序始终是 **backup → 025 → 026 → 027 → restart → live E2E**；步骤 4 是 restart 后、
+   数据面顺序始终是 **backup → 025 → 026 → 027 → 028 → restart → live E2E**；步骤 4 是 restart 后、
    E2E 前的 candidate/preflight 准入控制。
 6. 校验五条 canonical flow 与 zero-orders snapshot，封存 final evidence 并接受同一 exact
    candidate；任何失败都 revoke candidate，不能转去 public release 绕过。

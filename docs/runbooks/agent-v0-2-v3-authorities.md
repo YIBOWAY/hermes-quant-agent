@@ -3,6 +3,8 @@
 > 适用范围：V3 `IntentPayloadStore` 与 `WorkflowAuthority` 的本地、暗态运维。
 > 本手册不授权 Web Chat 写入、Hermes Run、worker claim/dispatch、provider、Gate、
 > migration、paper/live 或任何交易动作。`chat_write_ready` 与 public composer 继续 OFF。
+> `probe` / `initialize-key` 与 recovery environment 合同属于 2026-07-31 hardening
+> change set；不能由本手册推导其 exact commit、安装、验收、live runtime 或授权状态。
 
 ## 1. 权威与路径
 
@@ -18,14 +20,23 @@
 `local-owner-v1`，可用 `HQA_WORKFLOW_OWNER_USER_ID` 固定；已经产生 authority 后不得无计划
 更换 owner。
 
-## 2. 安装与验证
+## 2. 安装、Keychain 预检与初始化
 
 ```bash
-cd /Users/sunyibo/programs/Hermes-quant-agent
-bash scripts/install.sh
+HQA_RELEASE_ROOT=/absolute/path/to/clean-reviewed-HQA-release
+cd "$HQA_RELEASE_ROOT"
+git status --short
+git rev-parse HEAD
+test "${HQA_SKIP_NATIVE_BUILD:-0}" = "0"
+env -u HQA_SKIP_NATIVE_BUILD bash "$HQA_RELEASE_ROOT/scripts/install.sh"
 ```
 
-安装过程会：
+只从已审查、已提交并与目标 runtime identity 精确绑定的 checkout 执行安装；不要把 dirty
+worktree 直接当作可安装 candidate。`git status --short` 必须为空，并且记录的 HEAD 必须与
+三仓 preflight 中的 HQA identity 完全一致。不要因为主 checkout 路径看起来更“正式”就从它
+安装；如果它不是被审查的 exact release identity，旧 helper 会覆盖本次修复。release 安装
+必须走正常 native build；`HQA_SKIP_NATIVE_BUILD=1` 仅是测试/受控复用 seam，不能作为本机
+release helper 的来源。安装过程会：
 
 1. 把物理 wrapper 复制到 `~/.hermes/scripts/`；
 2. 安装 `hqa-research-task` skill；
@@ -37,8 +48,30 @@ bash scripts/install.sh
 ~/.hermes/bin/hqa-intent-payload-crypto
 ```
 
-预期 exit `64`，stdout/stderr 均为空。不要手工向 Keychain 写测试 key；仓库测试使用
-deterministic fake，只编译和验证真实 helper 的私有 FD 协议错误路径。
+预期 exit `64`，stdout/stderr 均为空。默认仓库测试使用 deterministic fake，并编译、验证
+真实 helper 的私有 FD 协议与非创建路径；需要实际创建随机 Keychain 项的集成段默认跳过，
+只有操作者显式设置 `HQA_TEST_ALLOW_REAL_KEYCHAIN_MUTATION=1` 才可运行，且精确删除失败必须
+使测试失败。普通全量测试不得把 Keychain 写入当作隐式副作用。
+
+Keychain 预检必须使用非创建式 `probe`。它只接受空 JSON object；成功时只返回
+`{"ok":true,"status":"ready"}`：
+
+```bash
+printf '{}\n' | ./.venv/bin/python -m hqa.intent_payload_cli probe
+```
+
+`probe` 不创建 key。`put`、`bind_resolve` 和普通 encrypt 也不得隐式创建 key；key
+不存在或不可用时必须 fail closed。只有在操作者已经核对 exact committed source、安装/runtime
+identity 与 release preflight，并为本次初始化单独作出明确决定后，才可执行：
+
+```bash
+printf '{}\n' | ./.venv/bin/python -m hqa.intent_payload_cli initialize-key
+```
+
+`initialize-key` 同样只接受空 JSON object，成功 receipt 与 `probe` 相同；它是唯一允许创建
+device-local key 的入口。不得用 `/usr/bin/security add-*` 或其他手工方式写测试 key，也不得把
+`initialize-key` 暴露给 BFF、Hermes skill、worker 或自动重试路径。Platform subprocess port
+只可按其受控流程调用 `put|bind_resolve|probe`。
 
 ## 3. Research Task CLI（只读）
 
@@ -87,7 +120,10 @@ deliver:  local
 ## 5. Backup / restore drill
 
 必须先暂停未来 V4 的 submission/dispatch；当前 V3 暗态没有这些 writer。backup 目的地应在
-owner-only、非 symlink 的新目录中，且不能位于 authority root 内。
+owner-only、非 symlink 的新目录中，且不能位于 authority root 内。release/closure recovery
+使用一个新建的 owner-controlled `0700` evidence root；backup、restore、verification temp 与
+`uv-cache` 都放在该 root 或 recovery package 的 sibling 路径下，不使用共享 `/tmp`。
+生成的 evidence 文件必须保持 owner-only。
 
 ```python
 from pathlib import Path
@@ -113,6 +149,13 @@ restore 只允许指向不存在的全新 authority root；不得覆盖或 merge
 恢复，再执行两边 audit，对比 payload digest、Task snapshot 与 event cursor。Intent backup 依赖
 本机 Keychain key；换设备后没有同一 device-local key 时必须 fail closed，不能生成替代 key 冒充
 旧密文。
+
+闭合恢复可将 `HOME` 与 `TMPDIR` 指向上述 owner-controlled root；private `HOME` 不拥有 Python
+解释器权威。Python 必须是 exact uv-managed Python 3.11：工具从当前 managed interpreter
+推导 `.local/share/uv/python`，或接受同一精确目录的绝对
+`HQA_UV_MANAGED_PYTHON_ROOT`。不得从 `HOME` 推导 uv root，也不得把一个宽泛父目录冒充 managed
+root。recovery 的独立 verification temp 和 `uv-cache` 均必须保持 `0700`，并与 authority root
+隔离。
 
 恢复中断时保留原 backup，不手工拼 journal。Intent restore 使用 sibling staging + atomic rename；
 workflow restore 只能对空目标或 exact identical authority 幂等恢复。任一侧失败时保持 Web/worker
@@ -151,6 +194,8 @@ pull、merge、install、restart、调用模型、provider、交易路径或打�
 - Helper/wrapper/skill 可以由 `scripts/install.sh` 从已审查 commit 重建；不要从未知 live checkout
   反向复制进仓库。
 - authority 数据不可通过 `git checkout`、文本编辑或删除 projection 来“修好”；先 backup，再 audit。
-- migration 006 仍不得 live apply；V3 不读取或写入 PostgreSQL。
-- 当前 live Hermes 未安装 V2 candidate；durable runs、Web mutation、claim/dispatch 和 public
-  composer 必须保持 OFF。
+- V3 authority 本身不读取或写入 PostgreSQL；本手册不授予任何 migration apply、install、
+  service restart、candidate admission、release stamp 或 public cutover。
+- source 存在、测试通过、安装完成、live runtime 加载和操作者授权是不同状态。每次操作前都必须按
+  `docs/README.md`、active plan、PostgreSQL/runtime identity 与当次授权重新确认，不能沿用本手册
+  或历史 audit 中的 dated live 结论。

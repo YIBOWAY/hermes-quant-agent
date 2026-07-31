@@ -203,6 +203,46 @@ private func loadKey(_ keyID: String, create: Bool) throws -> SymmetricKey {
     return SymmetricKey(data: bytes)
 }
 
+private func verifyKey(_ key: SymmetricKey) throws {
+    let aad = Data("hqa-intent-payload-probe-aad-v1".utf8)
+    let plaintext = Data("hqa-intent-payload-probe-v1".utf8)
+    do {
+        let box = try AES.GCM.seal(plaintext, using: key, authenticating: aad)
+        let opened = try AES.GCM.open(box, using: key, authenticating: aad)
+        guard opened == plaintext else {
+            throw HelperFailure.cryptoFailed
+        }
+    } catch let failure as HelperFailure {
+        throw failure
+    } catch {
+        throw HelperFailure.cryptoFailed
+    }
+}
+
+private func probe(_ request: [String: Any]) throws -> [String: Any] {
+    guard exactKeys(request, ["schema_version", "operation", "key_id"]),
+          request["schema_version"] as? String == "1.0",
+          request["operation"] as? String == "probe" else {
+        throw HelperFailure.invalidRequest
+    }
+    let keyID = try boundedIdentifier(request["key_id"])
+    let key = try loadKey(keyID, create: false)
+    try verifyKey(key)
+    return ["ok": true, "status": "ready"]
+}
+
+private func initialize(_ request: [String: Any]) throws -> [String: Any] {
+    guard exactKeys(request, ["schema_version", "operation", "key_id"]),
+          request["schema_version"] as? String == "1.0",
+          request["operation"] as? String == "initialize" else {
+        throw HelperFailure.invalidRequest
+    }
+    let keyID = try boundedIdentifier(request["key_id"])
+    let key = try loadKey(keyID, create: true)
+    try verifyKey(key)
+    return ["ok": true, "status": "ready"]
+}
+
 private func encrypt(_ request: [String: Any]) throws -> [String: Any] {
     guard exactKeys(request, [
         "schema_version", "operation", "key_id", "aad_b64", "plaintext_b64",
@@ -214,7 +254,7 @@ private func encrypt(_ request: [String: Any]) throws -> [String: Any] {
     let keyID = try boundedIdentifier(request["key_id"])
     let aad = try base64(request["aad_b64"], maximum: 750_000)
     let plaintext = try base64(request["plaintext_b64"], maximum: 750_000)
-    let key = try loadKey(keyID, create: true)
+    let key = try loadKey(keyID, create: false)
     do {
         let box = try AES.GCM.seal(plaintext, using: key, authenticating: aad)
         return [
@@ -263,6 +303,8 @@ private func run(_ request: [String: Any]) throws -> [String: Any] {
         throw HelperFailure.invalidRequest
     }
     switch operation {
+    case "probe": return try probe(request)
+    case "initialize": return try initialize(request)
     case "encrypt": return try encrypt(request)
     case "decrypt": return try decrypt(request)
     default: throw HelperFailure.invalidRequest

@@ -1,8 +1,10 @@
-"""Trusted local Intent Payload Store CLI Port (put / bind_resolve).
+"""Trusted local Intent Payload Store CLI Port.
 
 Closed-schema JSON on stdin/stdout. Prompt plaintext never appears on argv,
 the environment, or log lines. ``bind_resolve`` is for parent-process pipes
-only (BFF never calls it; the supervised worker does).
+only (BFF never calls it; the supervised worker does). Key ``probe`` is
+non-creating; only the explicit operator ``initialize-key`` command may create
+the Keychain key.
 """
 
 from __future__ import annotations
@@ -12,12 +14,16 @@ import sys
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from hqa import config
-from hqa.intent_payload_crypto import CryptoFailure, MacOSKeychainCrypto
+from hqa.intent_payload_crypto import (
+    CryptoFailure,
+    IntentPayloadCrypto,
+    MacOSKeychainCrypto,
+)
 from hqa.intent_payloads import IntentPayloadError, IntentPayloadStore
 
 
 _STDIN_LIMIT = 600_000
-_COMMANDS = frozenset({"put", "bind_resolve"})
+_COMMANDS = frozenset({"put", "bind_resolve", "probe", "initialize-key"})
 
 _RETRYABLE_CRYPTO_FAILURES = frozenset(
     {
@@ -117,6 +123,10 @@ def _store() -> IntentPayloadStore:
     )
 
 
+def _crypto() -> IntentPayloadCrypto:
+    return MacOSKeychainCrypto(config.INTENT_PAYLOAD_CRYPTO_HELPER)
+
+
 def _require_string(document: Mapping[str, Any], key: str) -> str:
     value = document.get(key)
     if type(value) is not str or not value:
@@ -193,9 +203,30 @@ def _bind_resolve(store: IntentPayloadStore, request: dict[str, Any]) -> dict[st
     }
 
 
+def _key_command(
+    crypto_factory: Callable[[], IntentPayloadCrypto],
+    request: dict[str, Any],
+    *,
+    initialize: bool,
+) -> dict[str, Any]:
+    if request:
+        raise _InputError(
+            "intent_invalid_request",
+            "key command requires an empty JSON object",
+        )
+    crypto = crypto_factory()
+    if initialize:
+        crypto.initialize()
+    else:
+        crypto.probe()
+    return {"ok": True, "status": "ready"}
+
+
 def _parse_command(argv: Sequence[str]) -> str:
     if len(argv) != 1 or argv[0] not in _COMMANDS:
-        raise _CliArgumentError("expected single command: put | bind_resolve")
+        raise _CliArgumentError(
+            "expected single command: put | bind_resolve | probe | initialize-key"
+        )
     return argv[0]
 
 
@@ -203,23 +234,37 @@ def main(
     argv: Optional[Sequence[str]] = None,
     *,
     store_factory: Optional[Callable[[], IntentPayloadStore]] = None,
+    crypto_factory: Optional[Callable[[], IntentPayloadCrypto]] = None,
 ) -> int:
     try:
         command = _parse_command(list(sys.argv[1:] if argv is None else argv))
     except _CliArgumentError:
         _emit_error(
             "intent_invalid_arguments",
-            "expected single command: put | bind_resolve",
+            "expected single command: put | bind_resolve | probe | initialize-key",
             retryable=False,
         )
         return 2
 
     try:
         request = _read_stdin_object()
-        store = (store_factory or _store)()
-        if command == "put":
+        if command == "probe":
+            document = _key_command(
+                crypto_factory or _crypto,
+                request,
+                initialize=False,
+            )
+        elif command == "initialize-key":
+            document = _key_command(
+                crypto_factory or _crypto,
+                request,
+                initialize=True,
+            )
+        elif command == "put":
+            store = (store_factory or _store)()
             document = _put(store, request)
         else:
+            store = (store_factory or _store)()
             document = _bind_resolve(store, request)
     except _InputError as exc:
         _emit_error(exc.code, exc.message, retryable=False)

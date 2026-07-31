@@ -194,3 +194,73 @@ def test_bind_resolve_rejects_unknown_fields(
     )
     assert code == 2
     assert document["error"]["code"] == "intent_invalid_request"
+
+
+@pytest.mark.parametrize(
+    ("command", "method"),
+    [
+        ("probe", "probe"),
+        ("initialize-key", "initialize"),
+    ],
+)
+def test_key_commands_do_not_construct_or_touch_payload_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    method: str,
+) -> None:
+    payload_root = tmp_path / "must-not-exist"
+    monkeypatch.setattr("hqa.intent_payload_cli.config.INTENT_PAYLOAD_DIR", payload_root)
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.TextIOWrapper(io.BytesIO(b"{}"), encoding="utf-8"),
+    )
+    buffer = io.StringIO()
+    monkeypatch.setattr("sys.stdout", buffer)
+    calls: list[str] = []
+
+    class _Crypto:
+        def probe(self) -> None:
+            calls.append("probe")
+
+        def initialize(self) -> None:
+            calls.append("initialize")
+
+    def fail_store() -> IntentPayloadStore:
+        raise AssertionError("key command must not construct the payload store")
+
+    code = main(
+        [command],
+        store_factory=fail_store,
+        crypto_factory=_Crypto,
+    )
+
+    assert code == 0
+    assert json.loads(buffer.getvalue()) == {"ok": True, "status": "ready"}
+    assert calls == [method]
+    assert not payload_root.exists()
+
+
+def test_probe_rejects_nonempty_request_before_crypto_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.TextIOWrapper(io.BytesIO(b'{"extra":true}'), encoding="utf-8"),
+    )
+    buffer = io.StringIO()
+    monkeypatch.setattr("sys.stdout", buffer)
+
+    def fail_crypto() -> DeterministicCryptoFake:
+        raise AssertionError("invalid probe request must not access crypto")
+
+    code = main(["probe"], crypto_factory=fail_crypto)
+
+    assert code == 2
+    assert json.loads(buffer.getvalue()) == {
+        "error": {
+            "code": "intent_invalid_request",
+            "message": "key command requires an empty JSON object",
+            "retryable": False,
+        }
+    }

@@ -25,15 +25,14 @@ Rules for AI agents working in this repository.
   continuing external context requires an explicit fork with immutable lineage.
   The 2026-07-16 GET-only/reconcile-only/never-live-006 description is
   **historical evidence**, not current instructions. Do not use it as NEXT.
-- **Agent v0.2 release-candidate status (2026-07-26 source freeze):**
-  - The release branches now contain the complete final-path source: managed
-    Web sessions and exact-message fork UI, exact selected plus Hermes-resolved
-    fork lineage, browser Run-stop control with same-action replay,
-    natural-language paper-research intent entry, browser Gate 1 exact-source
-    review, sealed candidate evidence, and PostgreSQL-only release/cutover
-    authority. Bind evidence to the actual clean three-repo
-    HEADs; dated commit anchors below are historical only.
-  - Migrations 016 through 027 are the additive release-candidate ladder after
+- **Agent v0.2 release-candidate boundary (2026-07-31 docs sync):**
+  - The 2026-07-26 clean baseline contains managed Web sessions/fork, Run-stop,
+    paper intent/Gate 1, sealed candidate evidence and PostgreSQL release
+    authority. The 2026-07-31 hardening change set adds Keychain/recovery
+    hardening and migration 028. Its commit, install, live and authorization
+    state must be re-observed; this file does not make it a release candidate.
+    Bind evidence to clean three-repo HEADs; dated anchors below are historical only.
+  - Migrations 016 through 028 are the intended additive release-candidate ladder after
     the live 006–015 baseline. Never infer their live state from source or this
     file: inspect PostgreSQL migration metadata, schema readiness, role grants,
     and the runtime health projection in the current operator window. Schema
@@ -49,16 +48,18 @@ Rules for AI agents working in this repository.
     historical v1 envelope. Migration 027 raises the bounded candidate TTL
     ceiling from 30 minutes to two hours so an operator can complete the
     supervised browser, restart and paper flow without racing expiry; it adds
-    no release, public-write or trading authority.
+    no release, public-write or trading authority. Migration 028 requires
+    canonical `default` paper authority and current-epoch candidate writes; its
+    source presence proves neither commit identity, isolated acceptance, live
+    apply nor authorization.
   - HQA's research claim body (paper title plus ordered universe) remains only
     in the encrypted Intent Payload Store; workflow, PostgreSQL and public
     completion projections carry digests. Claim binding is limited to Attempt
     1, terminal completion first re-verifies the exact pre-terminal
     Task/Attempt lineage, and the Platform completion response is a closed
-    42-key contract with no passthrough extras. This claim/completion hardening
-    is source + isolated-review **APPROVE**; it is not evidence that migrations
-    025/026/027 have been applied to live PostgreSQL or that release/cutover is
-    open.
+    42-key contract with no passthrough extras. The 2026-07-26 claim/completion
+    hardening was source + isolated-review **APPROVE**; it proves neither
+    migrations 025–028 live nor release/cutover open.
   - The real paper-factor path completed exact Gate 1, Gate 2 CAS, Futu final
     receipt `backtest-32a022e60947473be481a2404d85646d`, human Gate 3 commit
     `7ad6a92`, registry promotion and cleanup. It is an operational US ETF proxy
@@ -81,22 +82,25 @@ Rules for AI agents working in this repository.
   `121926388d86`; see `docs/audits/2026-07-19-agent-v0-2-v3-acceptance.md` and
   `docs/runbooks/agent-v0-2-v3-authorities.md`. `IntentPayloadStore` owns encrypted
   bodies/TTL/tombstones; `WorkflowAuthority` owns Task/Attempt facts. Hermes may
-  only call `show|events|audit|rebuild` on the workflow surface; payload put /
-  bind_resolve go through `python -m hqa.intent_payload_cli` (platform subprocess
-  port — platform must never `import hqa`). The retention cron is local
+  only call `show|events|audit|rebuild` on the workflow surface; payload
+  `put|bind_resolve|probe` use `python -m hqa.intent_payload_cli` (platform must
+  never `import hqa`). `probe` is non-creating; ordinary writes cannot create a
+  key. Operator-only `initialize-key` requires exact runtime/preflight binding
+  and is never exposed to BFF/worker/skill/retry. Recovery temp/uv-cache stay
+  under owner-controlled `0700`; private `HOME` is not interpreter authority,
+  which comes from exact uv Python 3.11 or `HQA_UV_MANAGED_PYTHON_ROOT`.
+  The retention cron is local
   `--no-agent` and must stay free of provider, HTTP, database and trading calls.
   V3 alone did not enable Web writes; later V6 local dark + L2a did under
   separate local authorization (public cutover still OFF).
 - V4–V8 M1–M6 details remain dated delivery evidence. The current order is:
   finish the final UI/contract; refresh full/focused suites and explicitly
-  inspect the live schema; in one controlled window perform
-  **backup -> migration 025 -> migration 026 -> migration 027 -> service restart**
-  (applying any missing earlier ladder entries in order before 025); seal the
-  exact test-only preflight; open a bounded
+  inspect the live schema; after 028 is committed, isolated-reviewed and
+  explicitly authorized, perform **backup -> 025 -> 026 -> 027 -> 028 ->
+  restart** (first apply missing earlier entries in order); seal the preflight; open a bounded
   **private candidate admission**; start and verify connector liveness; execute
-  complete candidate browser E2E and seal its real-flow facts. Thus the
-  data-plane order is always **backup -> 025 -> 026 -> 027 -> restart -> live E2E**.
-  Accept the exact
+  candidate browser E2E and seal its facts. Thus the data-plane order is always
+  **backup -> 025 -> 026 -> 027 -> 028 -> restart -> live E2E**. Accept the exact
   candidate; only then open the final runtime-bound release stamp/public
   cutover, exercise rollback, and run a final public smoke. Authoritative status
   is `docs/README.md` plus the active plan. A public cutover is never a
@@ -128,7 +132,7 @@ Rules for AI agents working in this repository.
   and not Plan-V6 full-UI acceptance. A fake Hermes adapter is for hermetic
   tests only, never a temporary public user path.
 - Migrations 006 through 015 were applied to live `quantplatform` under
-  explicit authorization. Migrations 016 through 027 form one ordered additive
+  explicit authorization. Migrations 016 through 028 form one ordered additive
   release-candidate upgrade and must be applied only by the explicit migration
   command after backup, isolated replay and current live inspection. Do not
   re-apply the obsolete `UNIQUE(task_id)`-only 006 or treat an old replay plan
@@ -141,7 +145,11 @@ Rules for AI agents working in this repository.
   active candidate or accepted release; 026 seals research claim/start/continue
   digests through Gate 1/2/3 and splits completion into claim-less v1 versus
   exact-lineage v2; 027 expands only the bounded candidate TTL ceiling to two
-  hours and grants no new capability.
+  hours and grants no new capability; the migration 028 change set requires
+  canonical default paper authority with exact raw safety consistency and
+  rejects candidate writes at a stale paper-authority epoch. Do not apply or
+  authorize 028 from source presence without exact clean identity and current
+  review evidence.
   Schema readiness and the constrained-role canary are not public write
   authorization.
 - Treat the local `~/.hermes/hermes-agent` checkout as a third owned dependency
@@ -154,7 +162,10 @@ Rules for AI agents working in this repository.
 - The supported HQA Scene-B path uses three human gates: formula confirmation,
   candidate source approval, and promotion diff review/commit. All three are
   implemented in the HQA wrappers; raw platform APIs/CLI remain generic
-  primitives and do not independently prove HQA Gate 1 provenance.
+  primitives and do not independently prove HQA Gate 1 provenance. For the
+  final paper task, plan confirmation is a separate human stop and is not Gate
+  1; the coordinator must pause independently at plan confirmation and Gates
+  1/2/3, and it cannot complete the Task before the human Gate 3 commit.
   - Gate 1 is enforced by the HQA Scene-B wrapper: the human supplies the
     SHA-256 of the exact reviewed source plus a non-empty confirmation note;
     HQA stages those bytes read-only and persists a confirmation and exact

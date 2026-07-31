@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from hqa import repository_recovery as recovery_module
 from hqa.detached_manifest import (
     DetachedManifestError,
     build_manifest,
@@ -301,3 +302,74 @@ def test_detached_manifest_rejects_root_symlink_bad_directory_and_crlf(
     manifest.write_bytes(manifest.read_bytes().replace(b"\n", b"\r\n"))
     with pytest.raises(DetachedManifestError, match="LF only"):
         verify_manifest(root)
+
+
+def test_managed_python_contract_uses_explicit_root_with_private_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    managed_root = tmp_path / "operator" / ".local" / "share" / "uv" / "python"
+    interpreter = managed_root / "cpython-3.11-test" / "bin" / "python3.11"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_bytes(b"managed-python-fixture\n")
+    interpreter.chmod(0o700)
+    invocation = tmp_path / "release" / ".venv" / "bin" / "python"
+    invocation.parent.mkdir(parents=True)
+    invocation.symlink_to(interpreter)
+
+    private_home = tmp_path / "evidence-home"
+    private_home.mkdir()
+    monkeypatch.setenv("HOME", str(private_home))
+    monkeypatch.setenv("HQA_UV_MANAGED_PYTHON_ROOT", str(managed_root))
+    monkeypatch.setattr(recovery_module.sys, "_base_executable", str(interpreter))
+    monkeypatch.setattr(recovery_module.sys, "executable", str(invocation))
+
+    contract = recovery_module._managed_python_contract()
+
+    assert contract["resolved_path"] == str(interpreter)
+    assert contract["version"] == "3.11"
+
+
+def test_managed_python_contract_derives_uv_root_with_private_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    managed_root = tmp_path / "operator" / ".local" / "share" / "uv" / "python"
+    interpreter = managed_root / "cpython-3.11-test" / "bin" / "python3.11"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_bytes(b"managed-python-fixture\n")
+    interpreter.chmod(0o700)
+    invocation = tmp_path / "release" / ".venv" / "bin" / "python"
+    invocation.parent.mkdir(parents=True)
+    invocation.symlink_to(interpreter)
+
+    private_home = tmp_path / "evidence-home"
+    private_home.mkdir()
+    monkeypatch.setenv("HOME", str(private_home))
+    monkeypatch.delenv("HQA_UV_MANAGED_PYTHON_ROOT", raising=False)
+    monkeypatch.setattr(recovery_module.sys, "_base_executable", str(interpreter))
+    monkeypatch.setattr(recovery_module.sys, "executable", str(invocation))
+
+    contract = recovery_module._managed_python_contract()
+
+    assert contract["resolved_path"] == str(interpreter)
+    assert contract["version"] == "3.11"
+
+
+def test_managed_python_contract_rejects_broad_explicit_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    interpreter = tmp_path / "bin" / "python3.11"
+    interpreter.parent.mkdir()
+    interpreter.write_bytes(b"unbound-python-fixture\n")
+    interpreter.chmod(0o700)
+    monkeypatch.setenv("HQA_UV_MANAGED_PYTHON_ROOT", str(tmp_path))
+    monkeypatch.setattr(recovery_module.sys, "_base_executable", str(interpreter))
+    monkeypatch.setattr(recovery_module.sys, "executable", str(interpreter))
+
+    with pytest.raises(
+        RepositoryRecoveryError,
+        match="managed Python root must identify the uv install directory",
+    ):
+        recovery_module._managed_python_contract()

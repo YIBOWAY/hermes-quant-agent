@@ -3,6 +3,12 @@
 > 日期：2026-07-19。结论：**V3 SOURCE ACCEPTED / LOCAL DARK INSTALL COMPLETE / PUBLIC
 > WRITES STILL OFF**。本记录不授权 migration、Hermes Durable Run、Web mutation、worker
 > claim/dispatch、provider、Gate、paper/live 或交易；也不把 V3 暗态地基表述成可用的完整 Web Chat。
+>
+> **后续行为替代说明（2026-07-31 change-set inventory）：** 本文保留 2026-07-19 的历史验收事实，
+> 但 §6“第一个真实 encrypted intent 创建 Keychain key”不再是当前 source 合同。后续
+> hardening source 要求非创建式 `probe`；`put`、`bind_resolve` 与普通 encrypt 均不得创建 key；只有
+> 操作者在核对 exact runtime/preflight 后明确执行 `initialize-key` 才可创建。本说明不声称该
+> source 的 exact commit、安装、live 加载、验收或授权状态。
 
 ## 1. Source identity
 
