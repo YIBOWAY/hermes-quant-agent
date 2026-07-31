@@ -142,6 +142,7 @@ def _aligned_specs(tmp_path: Path):
         stderr=subprocess.DEVNULL,
         text=True,
         cwd=hermes_checkout,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
     )
     for _ in range(50):
         if process.poll() is not None:

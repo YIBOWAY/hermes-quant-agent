@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1090,26 +1091,36 @@ def test_experiment_receipt_rejects_incomplete_best_run_metrics(tmp_path) -> Non
 def test_experiment_receipt_rejects_huge_integer_metric_without_traceback(
     tmp_path,
 ) -> None:
-    receipt = _experiment_receipt(tmp_path)
-    summary_path = Path(receipt["agent_summary"])
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    summary["runs"][0]["sharpe"] = 10**10000
-    summary_path.write_text(json.dumps(summary, sort_keys=True), encoding="utf-8")
-    receipt["agent_summary_sha256"] = hashlib.sha256(summary_path.read_bytes()).hexdigest()
+    # Python 3.11.15 enforces the process-wide decimal digit limit during
+    # json.dumps/loads. Disable it only around this adversarial fixture so the
+    # test still reaches the production finite-float guard it is meant to lock.
+    previous_limit = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(0)
+        receipt = _experiment_receipt(tmp_path)
+        summary_path = Path(receipt["agent_summary"])
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        summary["runs"][0]["sharpe"] = 10**10000
+        summary_path.write_text(json.dumps(summary, sort_keys=True), encoding="utf-8")
+        receipt["agent_summary_sha256"] = hashlib.sha256(
+            summary_path.read_bytes()
+        ).hexdigest()
 
-    with pytest.raises(ValueError, match="metrics are incomplete"):
-        fr.verify_experiment_receipt(
-            receipt,
-            platform_dir=tmp_path,
-            experiment_output_dir=tmp_path,
-            candidate_id="factor-reviewed-1",
-            manifest_digest="a" * 64,
-            factor_id="reviewed_factor",
-            provider="futu",
-            symbols=["SPY", "QQQ"],
-            start="2020-01-02",
-            end="2026-06-30",
-        )
+        with pytest.raises(ValueError, match="metrics are incomplete"):
+            fr.verify_experiment_receipt(
+                receipt,
+                platform_dir=tmp_path,
+                experiment_output_dir=tmp_path,
+                candidate_id="factor-reviewed-1",
+                manifest_digest="a" * 64,
+                factor_id="reviewed_factor",
+                provider="futu",
+                symbols=["SPY", "QQQ"],
+                start="2020-01-02",
+                end="2026-06-30",
+            )
+    finally:
+        sys.set_int_max_str_digits(previous_limit)
 
 
 def test_experiment_receipt_rejects_unrelated_report_with_matching_hash(tmp_path) -> None:
