@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -65,6 +66,9 @@ def _install(
     *,
     platform_dir: Path | None = None,
     hermes_source_dir: Path | None = None,
+    hermes_api_key_file: Path | str | None = None,
+    installer_repo: Path = REPO,
+    forbidden_text: str | None = None,
 ):
     fake_home = tmp_path / "home"
     fake_home.mkdir(mode=0o700)
@@ -85,14 +89,26 @@ def _install(
     )
     if platform_dir is not None:
         env["HQA_AIQP_DIR"] = str(platform_dir)
+    if hermes_api_key_file is not None:
+        env["HQA_HERMES_COMPAT_HERMES_API_KEY_FILE"] = str(
+            hermes_api_key_file
+        )
+    else:
+        env.pop("HQA_HERMES_COMPAT_HERMES_API_KEY_FILE", None)
     result = subprocess.run(
-        ["bash", str(REPO / "scripts" / "install.sh")],
+        ["bash", str(installer_repo / "scripts" / "install.sh")],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
     )
     assert result.returncode == 0, result.stdout
+    if forbidden_text is not None:
+        forbidden_bytes = forbidden_text.encode("utf-8")
+        assert forbidden_text not in result.stdout
+        for deployed in hermes_home.rglob("*"):
+            if deployed.is_file():
+                assert forbidden_bytes not in deployed.read_bytes(), deployed
     return hermes_home / "scripts"
 
 
@@ -565,13 +581,23 @@ def test_deployed_wrappers_have_no_unsubstituted_placeholders(tmp_path):
         assert "__HQA_HERMES_SOURCE_DIR__" not in body, (
             f"{wrapper.name}: unsubstituted Hermes source placeholder remains"
         )
+        assert "__HQA_HERMES_API_KEY_FILE__" not in body, (
+            f"{wrapper.name}: unsubstituted Hermes API-key placeholder remains"
+        )
 
 
-def test_installed_compatibility_watcher_freezes_selected_hermes_checkout(
+def test_installed_compatibility_watcher_freezes_selected_hermes_checkout_and_key_path(
     tmp_path: Path,
 ) -> None:
     selected = _init_hermes_checkout(tmp_path / "selected-hermes-worktree")
-    scripts = _install(tmp_path, hermes_source_dir=selected)
+    api_key = tmp_path / "hermes-api.key"
+    api_key.write_text("test-key\n", encoding="utf-8")
+    api_key.chmod(0o600)
+    scripts = _install(
+        tmp_path,
+        hermes_source_dir=selected,
+        hermes_api_key_file=api_key,
+    )
     watcher = scripts / "hqa-hermes-compatibility-watch.sh"
     body = watcher.read_text(encoding="utf-8")
 
@@ -580,7 +606,101 @@ def test_installed_compatibility_watcher_freezes_selected_hermes_checkout(
         'export HQA_HERMES_COMPAT_HERMES_REPO="$HQA_INSTALLED_HERMES_SOURCE_DIR"'
         in body
     )
+    assert f"HQA_INSTALLED_HQA_REPO={REPO}" in body
+    assert 'export HQA_HERMES_COMPAT_HQA_REPO="$HQA_INSTALLED_HQA_REPO"' in body
+    assert f"HQA_INSTALLED_HERMES_API_KEY_FILE={api_key}" in body
+    assert (
+        "export HQA_HERMES_COMPAT_HERMES_API_KEY_FILE="
+        '"$HQA_INSTALLED_HERMES_API_KEY_FILE"'
+    ) in body
     assert "import hermes" not in body
+
+
+def test_installer_freezes_existing_default_key_without_copying_secret(
+    tmp_path: Path,
+) -> None:
+    release_repo = tmp_path / "release-hqa"
+    release_repo.mkdir(mode=0o700)
+    shutil.copytree(REPO / "scripts", release_repo / "scripts")
+    shutil.copytree(REPO / "skills", release_repo / "skills")
+    default_key = release_repo / "data" / "_runtime" / "hermes-api.key"
+    default_key.parent.mkdir(parents=True, mode=0o700)
+    secret = "install-secret-never-copy-f321c809"
+    default_key.write_text(f"{secret}\n", encoding="utf-8")
+    default_key.chmod(0o600)
+    selected = _init_hermes_checkout(tmp_path / "selected-hermes-worktree")
+
+    scripts = _install(
+        tmp_path,
+        hermes_source_dir=selected,
+        installer_repo=release_repo,
+        forbidden_text=secret,
+    )
+    body = (scripts / "hqa-hermes-compatibility-watch.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert f"HQA_INSTALLED_HQA_REPO={release_repo}" in body
+    assert f"HQA_INSTALLED_HERMES_API_KEY_FILE={default_key}" in body
+
+
+@pytest.mark.parametrize("configured_key", [False, True])
+def test_installed_compatibility_watcher_rejects_runtime_key_redirect(
+    tmp_path: Path,
+    configured_key: bool,
+) -> None:
+    selected = _init_hermes_checkout(tmp_path / "selected-hermes-worktree")
+    if configured_key:
+        api_key: Path | str = tmp_path / "hermes-api.key"
+        api_key.write_text("test-key\n", encoding="utf-8")
+        api_key.chmod(0o600)
+        expected_key = str(api_key)
+    else:
+        api_key = ""
+        expected_key = ""
+    scripts = _install(
+        tmp_path,
+        hermes_source_dir=selected,
+        hermes_api_key_file=api_key,
+    )
+    watcher = scripts / "hqa-hermes-compatibility-watch.sh"
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir(mode=0o700)
+    marker = tmp_path / "watcher-environment"
+    python = fake_bin / "python3"
+    python.write_text(
+        "#!/bin/bash\n"
+        "printf '%s\\0%s\\0' "
+        '"$HQA_HERMES_COMPAT_HQA_REPO" '
+        '"$HQA_HERMES_COMPAT_HERMES_API_KEY_FILE" '
+        '> "$WATCH_ENV_MARKER"\n',
+        encoding="utf-8",
+    )
+    python.chmod(0o700)
+
+    result = subprocess.run(
+        ["bash", str(watcher)],
+        env=dict(
+            os.environ,
+            PATH=f"{fake_bin}:/usr/bin:/bin",
+            WATCH_ENV_MARKER=str(marker),
+            HQA_HERMES_COMPAT_HQA_REPO=str(tmp_path / "hostile-hqa"),
+            HQA_HERMES_COMPAT_HERMES_API_KEY_FILE=str(
+                tmp_path / "hostile-key"
+            ),
+        ),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert marker.read_bytes().split(b"\0") == [
+        os.fsencode(REPO),
+        os.fsencode(expected_key),
+        b"",
+    ]
 
 
 @pytest.mark.parametrize("invalid_source", ["relative", "non_git", "symlink"])
@@ -617,6 +737,60 @@ def test_install_refuses_invalid_hermes_source_checkout(
         ),
         capture_output=True,
         text=True,
+    )
+
+    assert result.returncode == 2
+    assert not (hermes_home / "scripts").exists()
+    assert not (hermes_home / "skills").exists()
+    assert not list(hermes_home.glob(".hqa-install.*"))
+
+
+@pytest.mark.parametrize(
+    "invalid_key",
+    ["relative", "symlink", "public", "fifo"],
+)
+def test_install_refuses_invalid_hermes_api_key_file(
+    tmp_path: Path,
+    invalid_key: str,
+) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(mode=0o700)
+    hermes_home = fake_home / ".hermes"
+    helper_parent = hermes_home / "bin"
+    helper_parent.mkdir(parents=True, mode=0o700)
+    helper = helper_parent / "hqa-intent-payload-crypto"
+    helper.write_text("#!/bin/bash\nexit 64\n", encoding="utf-8")
+    helper.chmod(0o700)
+    selected = _init_hermes_checkout(tmp_path / "selected-hermes-worktree")
+    if invalid_key == "relative":
+        api_key = Path("relative-key")
+    elif invalid_key == "symlink":
+        physical = tmp_path / "physical-key"
+        physical.write_text("test-key\n", encoding="utf-8")
+        physical.chmod(0o600)
+        api_key = tmp_path / "linked-key"
+        api_key.symlink_to(physical)
+    elif invalid_key == "public":
+        api_key = tmp_path / "public-key"
+        api_key.write_text("test-key\n", encoding="utf-8")
+        api_key.chmod(0o644)
+    else:
+        api_key = tmp_path / "fifo-key"
+        os.mkfifo(api_key, mode=0o600)
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(
+            os.environ,
+            HOME=str(fake_home),
+            HERMES_HOME=str(hermes_home),
+            HQA_HERMES_SOURCE_DIR=str(selected),
+            HQA_HERMES_COMPAT_HERMES_API_KEY_FILE=str(api_key),
+            HQA_SKIP_NATIVE_BUILD="1",
+        ),
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
 
     assert result.returncode == 2
@@ -886,6 +1060,10 @@ def test_hermes_compatibility_wrapper_is_a_fixed_no_argument_adapter() -> None:
     assert "--platform-root __HQA_PLATFORM_DIR__" in body
     assert "HQA_INSTALLED_HERMES_SOURCE_DIR=__HQA_HERMES_SOURCE_DIR__" in body
     assert "HQA_HERMES_COMPAT_HERMES_REPO" in body
+    assert "HQA_INSTALLED_HQA_REPO=__HQA_REPO_DIR__" in body
+    assert "HQA_HERMES_COMPAT_HQA_REPO" in body
+    assert "HQA_INSTALLED_HERMES_API_KEY_FILE=__HQA_HERMES_API_KEY_FILE__" in body
+    assert "HQA_HERMES_COMPAT_HERMES_API_KEY_FILE" in body
     assert '"$@"' not in body
     assert '"$#" -ne 0' in body
 
@@ -932,6 +1110,31 @@ def test_hermes_compatibility_wrapper_rejects_unsubstituted_source(
     assert result.returncode == 2
     assert result.stdout == ""
     assert "unsubstituted Hermes source" in result.stderr
+
+
+def test_hermes_compatibility_wrapper_rejects_unsubstituted_key_path(
+    tmp_path: Path,
+) -> None:
+    source = REPO / "scripts" / "hermes" / "hqa-hermes-compatibility-watch.sh"
+    wrapper = tmp_path / "watch.sh"
+    wrapper.write_text(
+        source.read_text(encoding="utf-8")
+        .replace("__HQA_REPO_DIR__", str(tmp_path))
+        .replace("__HQA_PLATFORM_DIR__", str(tmp_path))
+        .replace("__HQA_HERMES_SOURCE_DIR__", str(tmp_path)),
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(wrapper)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "unsubstituted API-key path" in result.stderr
 
 
 # --- D-25 read-only gate wrapper -------------------------------------------

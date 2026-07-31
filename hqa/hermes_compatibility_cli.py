@@ -84,11 +84,12 @@ def _environment_config(arguments: _Arguments) -> CompatibilityConfig:
             ),
         )
     )
-    api_key_setting = os.environ.get("HQA_HERMES_COMPAT_HERMES_API_KEY_FILE")
+    api_key_variable = "HQA_HERMES_COMPAT_HERMES_API_KEY_FILE"
+    api_key_setting = os.environ.get(api_key_variable)
     default_api_key = hqa_repo / "data" / "_runtime" / "hermes-api.key"
     api_key_file = (
-        Path(api_key_setting)
-        if api_key_setting
+        (Path(api_key_setting) if api_key_setting else None)
+        if api_key_variable in os.environ
         else (default_api_key if default_api_key.is_file() else None)
     )
     return CompatibilityConfig(

@@ -523,9 +523,9 @@ def _read_owner_only_api_key(path: Optional[Path]) -> Optional[str]:
         return None
     if not path.is_absolute():
         raise CompatibilityError("hermes_api_key_invalid")
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(
-        os, "O_NOFOLLOW", 0
-    )
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(path, flags)
     except OSError as exc:

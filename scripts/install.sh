@@ -35,6 +35,23 @@ case "$HERMES_SOURCE_DIR" in
     exit 2
     ;;
 esac
+if [ "${HQA_HERMES_COMPAT_HERMES_API_KEY_FILE+x}" = x ]; then
+  HERMES_COMPAT_API_KEY_FILE="$HQA_HERMES_COMPAT_HERMES_API_KEY_FILE"
+elif [ -e "$REPO_DIR/data/_runtime/hermes-api.key" ] || \
+     [ -L "$REPO_DIR/data/_runtime/hermes-api.key" ]; then
+  HERMES_COMPAT_API_KEY_FILE="$REPO_DIR/data/_runtime/hermes-api.key"
+else
+  HERMES_COMPAT_API_KEY_FILE=""
+fi
+if [ -n "$HERMES_COMPAT_API_KEY_FILE" ]; then
+  case "$HERMES_COMPAT_API_KEY_FILE" in
+    /*) ;;
+    *)
+      echo "HQA_HERMES_COMPAT_HERMES_API_KEY_FILE must be absolute" >&2
+      exit 2
+      ;;
+  esac
+fi
 
 CANONICAL_INTENT_PAYLOAD_DIR="$REPO_DIR/data/_runtime/intent-payloads-v2"
 CANONICAL_WORKFLOW_AUTHORITY_DIR="$REPO_DIR/data/_runtime/workflow-authority-v2"
@@ -239,6 +256,7 @@ trap cleanup_and_exit EXIT
   "$REPO_DIR" \
   "$PLATFORM_DIR" \
   "$HERMES_SOURCE_DIR" \
+  "$HERMES_COMPAT_API_KEY_FILE" \
   "$HERMES_ROOT/scripts" \
   "$CANONICAL_INTENT_PAYLOAD_DIR" \
   "$CANONICAL_WORKFLOW_AUTHORITY_DIR" \
@@ -265,6 +283,7 @@ def write_all(descriptor, payload):
     repo_dir,
     platform_dir,
     hermes_source_dir,
+    hermes_compat_api_key_file,
     installed_scripts_dir,
     intent_payload_dir,
     workflow_authority_dir,
@@ -293,6 +312,9 @@ for source in wrapper_sources:
     body = body.replace(
         "__HQA_HERMES_SOURCE_DIR__", shlex.quote(hermes_source_dir)
     )
+    body = body.replace(
+        "__HQA_HERMES_API_KEY_FILE__", shlex.quote(hermes_compat_api_key_file)
+    )
     body = body.replace("__HERMES_SCRIPTS_DIR__", installed_scripts_dir)
     if not body.startswith("#!/bin/bash\n"):
         raise SystemExit("wrapper lacks fixed bash shebang: " + source)
@@ -314,6 +336,9 @@ for source in launcher_sources:
     body = body.replace("__HQA_PLATFORM_DIR__", platform_dir)
     body = body.replace(
         "__HQA_HERMES_SOURCE_DIR__", shlex.quote(hermes_source_dir)
+    )
+    body = body.replace(
+        "__HQA_HERMES_API_KEY_FILE__", shlex.quote(hermes_compat_api_key_file)
     )
     body = body.replace("__HERMES_SCRIPTS_DIR__", installed_scripts_dir)
     if not body.startswith("#!/usr/bin/python3\n"):
@@ -338,6 +363,9 @@ for source in skill_sources:
     body = body.replace("__HQA_PLATFORM_DIR__", platform_dir)
     body = body.replace(
         "__HQA_HERMES_SOURCE_DIR__", shlex.quote(hermes_source_dir)
+    )
+    body = body.replace(
+        "__HQA_HERMES_API_KEY_FILE__", shlex.quote(hermes_compat_api_key_file)
     )
     body = body.replace("__HERMES_SCRIPTS_DIR__", installed_scripts_dir)
     if "__HQA_" in body or "__HERMES_" in body:
@@ -471,10 +499,11 @@ PY
     ;;
 esac
 
-# Freeze the compatibility watcher to the exact checkout selected at install
-# time. A linked Git worktree is valid, but the worktree root and its resolved
-# Git directory must both be physical and owner-controlled.
-/usr/bin/python3 - "$HERMES_SOURCE_DIR" <<'PY'
+# Freeze the compatibility watcher to the exact checkout and optional
+# owner-only API-key file selected at install time. A linked Git worktree is
+# valid, but its root and resolved Git directory must both be physical and
+# owner-controlled.
+/usr/bin/python3 - "$HERMES_SOURCE_DIR" "$HERMES_COMPAT_API_KEY_FILE" <<'PY'
 import errno
 import os
 import re
@@ -488,7 +517,7 @@ def fail(message):
     raise SystemExit(2)
 
 
-def open_owner_controlled_directory(path, *, require_current_owner):
+def open_owner_controlled_directory(path, *, require_current_owner, label):
     flags = os.O_RDONLY | os.O_DIRECTORY
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
@@ -500,7 +529,7 @@ def open_owner_controlled_directory(path, *, require_current_owner):
                 next_fd = os.open(component, flags, dir_fd=current_fd)
             except OSError as exc:
                 if exc.errno in (errno.ELOOP, errno.ENOTDIR):
-                    fail("Hermes source must contain only physical directories")
+                    fail(f"{label} must contain only physical directories")
                 raise
             metadata = os.fstat(next_fd)
             final = index == len(parts) - 1
@@ -515,7 +544,7 @@ def open_owner_controlled_directory(path, *, require_current_owner):
                 or stat.S_IMODE(metadata.st_mode) & 0o022
             ):
                 os.close(next_fd)
-                fail("Hermes source must be owner-controlled")
+                fail(f"{label} must be owner-controlled")
             os.close(current_fd)
             current_fd = next_fd
         return current_fd
@@ -537,6 +566,7 @@ try:
     source_fd = open_owner_controlled_directory(
         source,
         require_current_owner=True,
+        label="Hermes source",
     )
 except FileNotFoundError:
     fail("Hermes source checkout is unavailable")
@@ -587,12 +617,50 @@ try:
     git_fd = open_owner_controlled_directory(
         git_dir,
         require_current_owner=True,
+        label="Hermes source Git directory",
     )
 except FileNotFoundError:
     fail("Hermes source Git directory is unavailable")
 finally:
     if "git_fd" in locals():
         os.close(git_fd)
+
+api_key = sys.argv[2]
+if api_key:
+    if (
+        not os.path.isabs(api_key)
+        or api_key != os.path.abspath(api_key)
+        or len(os.fsencode(api_key)) > 4096
+        or any(ord(character) < 0x20 for character in api_key)
+    ):
+        fail("Hermes API key path must be a canonical absolute path")
+    parent, name = os.path.split(api_key)
+    try:
+        parent_fd = open_owner_controlled_directory(
+            parent,
+            require_current_owner=False,
+            label="Hermes API key parent",
+        )
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        key_fd = os.open(name, flags, dir_fd=parent_fd)
+        metadata = os.fstat(key_fd)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) & 0o077
+            or metadata.st_size < 1
+            or metadata.st_size > 4096
+        ):
+            fail("Hermes API key must be an owner-only physical file")
+    except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
+        fail("Hermes API key must be an owner-only physical file")
+    finally:
+        if "key_fd" in locals():
+            os.close(key_fd)
+        if "parent_fd" in locals():
+            os.close(parent_fd)
 PY
 
 # Preflight every destination before creating or replacing any published file,

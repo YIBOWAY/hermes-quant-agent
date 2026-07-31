@@ -45,6 +45,7 @@ Install the physical wrapper with the normal HQA installer:
 ```bash
 cd /Users/sunyibo/programs/Hermes-quant-agent
 HQA_HERMES_SOURCE_DIR=/absolute/path/to/the/installed/hermes-worktree \
+  HQA_HERMES_COMPAT_HERMES_API_KEY_FILE=/absolute/path/to/hermes-api.key \
   bash scripts/install.sh
 ```
 
@@ -54,6 +55,16 @@ Git checkout/worktree and freezes that exact path into the installed watcher.
 The cron job does not infer a checkout from Python imports or accept a later
 environment override; re-run the installer when the intended Hermes worktree
 changes.
+
+When the native capabilities endpoint requires authentication, provide the
+existing owner-only API-key file at install time as shown above. The installer
+validates and freezes only its physical path (never its value) into the cron
+wrapper; the runtime watcher then applies the same owner/mode/content checks
+described below. When the variable is unset, the installer freezes the
+documented HQA-local default if that file already exists, or otherwise freezes
+the no-key state. An explicitly empty variable also freezes the no-key state.
+Inherited runtime variables cannot replace that installed selection; re-run the
+installer to change it.
 
 After reviewing `hermes cron list --all`, an operator may reconcile the desired
 entry explicitly:

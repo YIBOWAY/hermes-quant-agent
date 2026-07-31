@@ -1498,6 +1498,39 @@ def test_cli_rejects_unknown_arguments_without_echoing_them(capsys) -> None:
     assert secret_argument not in captured.err
 
 
+def test_cli_api_key_environment_distinguishes_default_empty_and_explicit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hqa.hermes_compatibility_cli import _Arguments, _environment_config
+
+    hqa_repo = tmp_path / "hqa"
+    default_key = hqa_repo / "data" / "_runtime" / "hermes-api.key"
+    default_key.parent.mkdir(parents=True)
+    default_key.write_text("default-key\n", encoding="utf-8")
+    explicit_key = tmp_path / "explicit.key"
+    explicit_key.write_text("explicit-key\n", encoding="utf-8")
+    monkeypatch.setenv("HQA_HERMES_COMPAT_HQA_REPO", str(hqa_repo))
+    monkeypatch.delenv(
+        "HQA_HERMES_COMPAT_HERMES_API_KEY_FILE",
+        raising=False,
+    )
+    arguments = _Arguments(
+        profile="local_agent_v0_2",
+        platform_root=tmp_path / "platform",
+        explicit_no_agent=True,
+    )
+
+    assert _environment_config(arguments).hermes_api_key_file == default_key
+    monkeypatch.setenv("HQA_HERMES_COMPAT_HERMES_API_KEY_FILE", "")
+    assert _environment_config(arguments).hermes_api_key_file is None
+    monkeypatch.setenv(
+        "HQA_HERMES_COMPAT_HERMES_API_KEY_FILE",
+        str(explicit_key),
+    )
+    assert _environment_config(arguments).hermes_api_key_file == explicit_key
+
+
 def test_local_agent_capability_probe_uses_owner_only_api_key_without_leaking_it(
     tmp_path: Path,
 ) -> None:
@@ -1563,6 +1596,36 @@ def test_local_agent_profile_refuses_unsafe_api_key_files(
     report = result.report_path.read_text(encoding="utf-8")
     assert "hermes_api_key_" in report
     assert "must-never-appear" not in report
+
+
+def test_runtime_api_key_reader_rejects_fifo_without_blocking(
+    tmp_path: Path,
+) -> None:
+    fifo = tmp_path / "hermes-api-key-fifo"
+    os.mkfifo(fifo, mode=0o600)
+    code = (
+        "from pathlib import Path\n"
+        "from hqa.hermes_compatibility import (\n"
+        "    CompatibilityError, _read_owner_only_api_key,\n"
+        ")\n"
+        "try:\n"
+        "    _read_owner_only_api_key(Path(__import__('sys').argv[1]))\n"
+        "except CompatibilityError:\n"
+        "    raise SystemExit(0)\n"
+        "raise SystemExit(1)\n"
+    )
+
+    result = subprocess.run(
+        [str(Path(os.sys.executable)), "-c", code, str(fifo)],
+        cwd=Path(__file__).resolve().parent.parent,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ""
+    assert result.stderr == ""
 
 
 def test_no_agent_cli_profiles_and_exit_codes_are_explicit(tmp_path: Path) -> None:

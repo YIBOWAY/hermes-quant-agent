@@ -22,6 +22,38 @@ case "$HQA_INSTALLED_HERMES_SOURCE_DIR" in
 esac
 export HQA_HERMES_COMPAT_HERMES_REPO="$HQA_INSTALLED_HERMES_SOURCE_DIR"
 
+HQA_INSTALLED_HQA_REPO=__HQA_REPO_DIR__
+case "$HQA_INSTALLED_HQA_REPO" in
+  __*__)
+    echo "hqa-hermes-compatibility-watch has an unsubstituted HQA path" >&2
+    exit 2
+    ;;
+  /*) ;;
+  *)
+    echo "hqa-hermes-compatibility-watch HQA path must be absolute" >&2
+    exit 2
+    ;;
+esac
+export HQA_HERMES_COMPAT_HQA_REPO="$HQA_INSTALLED_HQA_REPO"
+
+HQA_INSTALLED_HERMES_API_KEY_FILE=__HQA_HERMES_API_KEY_FILE__
+case "$HQA_INSTALLED_HERMES_API_KEY_FILE" in
+  __*__)
+    echo "hqa-hermes-compatibility-watch has an unsubstituted API-key path" >&2
+    exit 2
+    ;;
+esac
+if [ -n "$HQA_INSTALLED_HERMES_API_KEY_FILE" ]; then
+  case "$HQA_INSTALLED_HERMES_API_KEY_FILE" in
+    /*) ;;
+    *)
+      echo "hqa-hermes-compatibility-watch API-key path must be absolute" >&2
+      exit 2
+      ;;
+  esac
+fi
+export HQA_HERMES_COMPAT_HERMES_API_KEY_FILE="$HQA_INSTALLED_HERMES_API_KEY_FILE"
+
 cd __HQA_REPO_DIR__
 exec python3 -m hqa.hermes_compatibility_cli check \
   --no-agent \
