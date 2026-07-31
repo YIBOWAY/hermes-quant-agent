@@ -44,8 +44,16 @@ Install the physical wrapper with the normal HQA installer:
 
 ```bash
 cd /Users/sunyibo/programs/Hermes-quant-agent
-bash scripts/install.sh
+HQA_HERMES_SOURCE_DIR=/absolute/path/to/the/installed/hermes-worktree \
+  bash scripts/install.sh
 ```
+
+`HQA_HERMES_SOURCE_DIR` defaults to `~/.hermes/hermes-agent`. The installer
+requires it to be the absolute, physical, owner-controlled root of a readable
+Git checkout/worktree and freezes that exact path into the installed watcher.
+The cron job does not infer a checkout from Python imports or accept a later
+environment override; re-run the installer when the intended Hermes worktree
+changes.
 
 After reviewing `hermes cron list --all`, an operator may reconcile the desired
 entry explicitly:
@@ -72,8 +80,11 @@ The watcher derives a canonical re-probe identity from:
 - a closed list of platform health, safety, Hermes BFF schema/route/client
   files.
 - for `local_agent_v0_2`, the canonical digest and schema version of
-  `contracts/agent_v02_hermes_compatibility.v1.json` under the explicit
-  Platform root.
+  `src/quant_system/hermes/agent_v02_hermes_compatibility.v1.json` under the
+  explicit Platform root, plus the closed set of Platform settings,
+  admission, connector, release, ledger, registry, binding, evidence and
+  database modules that produce the canonical 26-key health projection. These
+  v0.2-only files are not required by the legacy `dark_readonly` profile.
 
 The HQA/platform file digests are **re-probe triggers only**. They make a local
 change invalidate an old successful baseline, but they do not prove which
@@ -127,8 +138,10 @@ schemas. In particular:
 - `session_api_available=true`; the dark profile additionally requires
   `chat_write_ready=false`;
 - the local profile requires ready command-ledger, workflow-binding, and
-  session-registry authorities, but only type-checks mutation/composer/public
-  readiness facts—the watcher never changes them;
+  session-registry authorities and the exact canonical 26-key health ledger;
+  admission/candidate/connector/release identities, digests, liveness age and
+  release cursor must have bounded types and internally consistent states—the
+  watcher observes these facts but never changes them;
 - the session-list response remains the bounded read model;
 - a stale or unsupervised Hermes launchd service definition is incompatible.
 - native Hermes `contract_version` meets the manifest minimum;

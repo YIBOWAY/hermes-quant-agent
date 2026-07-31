@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import json
-import hashlib
 import fcntl
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -295,6 +295,57 @@ def _platform_contract() -> dict[str, object]:
     }
 
 
+def _canonical_local_ledger(**changes: object) -> dict[str, object]:
+    ledger: dict[str, object] = {
+        "database_configured": True,
+        "schema_ready": True,
+        "schema_version": 5,
+        "workflow_binding_schema_ready": True,
+        "workflow_binding_schema_version": 2,
+        "session_registry_schema_ready": True,
+        "session_registry_schema_version": 3,
+        "agent_workspace_authorities_ready": True,
+        "research_binding_ready": True,
+        "mutation_enabled": False,
+        "composer_write_ready": False,
+        "chat_write_ready": False,
+        "admission_mode": "closed",
+        "admission_workspace_id": "ws-local-main",
+        "configured_release_workspace_id": "ws-local-main",
+        "candidate_admission_id": None,
+        "candidate_admission_digest": None,
+        "connector_liveness_ready": False,
+        "connector_liveness_reason": "connector_liveness_unavailable",
+        "connector_worker_id": None,
+        "connector_mode": None,
+        "connector_heartbeat_age_seconds": None,
+        "release_authorized": False,
+        "release_stamp_id": None,
+        "public_cutover_id": None,
+        "release_event_cursor": 0,
+    }
+    ledger.update(changes)
+    return ledger
+
+
+def _candidate_ready_ledger(**changes: object) -> dict[str, object]:
+    ledger = _canonical_local_ledger(
+        mutation_enabled=True,
+        composer_write_ready=True,
+        chat_write_ready=True,
+        admission_mode="candidate",
+        candidate_admission_id="candidate_0123456789abcdef0123456789abcdef",
+        candidate_admission_digest="a" * 64,
+        connector_liveness_ready=True,
+        connector_liveness_reason="ready",
+        connector_worker_id="connector-worker-1",
+        connector_mode="supervised_dispatch",
+        connector_heartbeat_age_seconds=0.25,
+    )
+    ledger.update(changes)
+    return ledger
+
+
 def _local_agent_capabilities() -> dict[str, object]:
     contract = _platform_contract()
     required_bool = contract["required_bool_features"]
@@ -358,12 +409,18 @@ def _local_agent_capabilities() -> dict[str, object]:
 
 
 def _local_agent_config(tmp_path: Path, base_url: str):
-    from hqa.hermes_compatibility import CompatibilityConfig
+    from hqa.hermes_compatibility import (
+        PLATFORM_LOCAL_AGENT_TRIGGER_FILES,
+        CompatibilityConfig,
+    )
 
     base = _config(tmp_path, base_url)
+    _write_contracts(base.platform_repo, PLATFORM_LOCAL_AGENT_TRIGGER_FILES)
     contract_path = (
         base.platform_repo
-        / "contracts"
+        / "src"
+        / "quant_system"
+        / "hermes"
         / "agent_v02_hermes_compatibility.v1.json"
     )
     contract_path.parent.mkdir(parents=True, exist_ok=True)
@@ -372,20 +429,7 @@ def _local_agent_config(tmp_path: Path, base_url: str):
         encoding="utf-8",
     )
     health = dict(_ProbeHandler.responses["/api/health"])
-    health["hermes_command_ledger"] = {
-        "database_configured": True,
-        "schema_ready": True,
-        "schema_version": 5,
-        "workflow_binding_schema_ready": True,
-        "workflow_binding_schema_version": 2,
-        "session_registry_schema_ready": True,
-        "session_registry_schema_version": 2,
-        "agent_workspace_authorities_ready": True,
-        "research_binding_ready": True,
-        "mutation_enabled": True,
-        "composer_write_ready": True,
-        "chat_write_ready": True,
-    }
+    health["hermes_command_ledger"] = _candidate_ready_ledger()
     _ProbeHandler.responses["/api/health"] = health
     gateway = dict(_ProbeHandler.responses["/api/hermes/gateway"])
     gateway["chat_write_ready"] = True
@@ -405,6 +449,27 @@ def _local_agent_config(tmp_path: Path, base_url: str):
         hermes_cli_path=base.hermes_cli_path,
         timeout_seconds=1.0,
     )
+
+
+def test_dark_profile_does_not_require_local_agent_projection_owners(
+    tmp_path: Path,
+) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _config(tmp_path, base_url)
+        assert not (
+            config.platform_repo
+            / "src"
+            / "quant_system"
+            / "hermes"
+            / "release_runtime.py"
+        ).exists()
+
+        result = check_compatibility(config)
+
+    assert result.status == "compatible"
+    assert result.probed is True
 
 
 def test_local_agent_profile_validates_manifest_and_native_capability_surface(
@@ -432,6 +497,490 @@ def test_local_agent_profile_validates_manifest_and_native_capability_surface(
     platform_contract = report["reprobe_identity"]["platform_contract"]
     assert platform_contract["schema_version"] == 1
     assert re.fullmatch(r"[0-9a-f]{64}", platform_contract["digest"])
+
+
+def test_local_agent_accepts_maximum_ready_connector_age(tmp_path: Path) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        health = dict(_ProbeHandler.responses["/api/health"])
+        health["hermes_command_ledger"] = _candidate_ready_ledger(
+            connector_heartbeat_age_seconds=300.0
+        )
+        _ProbeHandler.responses["/api/health"] = health
+
+        result = check_compatibility(config)
+
+    assert result.status == "compatible"
+
+
+def test_local_agent_manifest_path_tracks_the_packaged_platform_contract() -> None:
+    from hqa.hermes_compatibility import _PLATFORM_CONTRACT_RELATIVE_PATH
+
+    assert _PLATFORM_CONTRACT_RELATIVE_PATH == (
+        "src/quant_system/hermes/agent_v02_hermes_compatibility.v1.json"
+    )
+
+
+def test_explicit_platform_manifest_matches_the_hermetic_contract() -> None:
+    platform_setting = os.environ.get("HQA_AIQP_DIR")
+    if platform_setting is None:
+        pytest.skip("set HQA_AIQP_DIR for the cross-repository contract check")
+    path = (
+        Path(platform_setting).resolve()
+        / "src"
+        / "quant_system"
+        / "hermes"
+        / "agent_v02_hermes_compatibility.v1.json"
+    )
+    assert path.is_file()
+    assert json.loads(path.read_text(encoding="utf-8")) == _platform_contract()
+
+
+def test_local_agent_accepts_closed_canonical_health_without_admission(
+    tmp_path: Path,
+) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        health = dict(_ProbeHandler.responses["/api/health"])
+        health["hermes_command_ledger"] = _canonical_local_ledger()
+        _ProbeHandler.responses["/api/health"] = health
+        gateway = dict(_ProbeHandler.responses["/api/hermes/gateway"])
+        gateway["chat_write_ready"] = False
+        _ProbeHandler.responses["/api/hermes/gateway"] = gateway
+
+        result = check_compatibility(config)
+
+    assert result.status == "compatible"
+
+
+def test_dark_profile_accepts_current_closed_health_shape_and_keeps_writes_off(
+    tmp_path: Path,
+) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _config(tmp_path, base_url)
+        health = dict(_ProbeHandler.responses["/api/health"])
+        health["hermes_command_ledger"] = _canonical_local_ledger()
+        _ProbeHandler.responses["/api/health"] = health
+
+        result = check_compatibility(config)
+
+    assert result.status == "compatible"
+
+
+def test_current_health_accepts_a_bounded_future_heartbeat_projection() -> None:
+    from hqa.hermes_compatibility import _validate_platform_health
+
+    health = {
+        "status": "ok",
+        "app_name": "quant-system",
+        "environment": "development",
+        "data_provider": {
+            "configured_default": "futu",
+            "tiingo_token_present": False,
+        },
+        "futu_opend": {"enabled": False},
+        "database": {"enabled": False},
+        "hermes_command_ledger": _canonical_local_ledger(
+            connector_liveness_reason="connector_heartbeat_in_future",
+            connector_worker_id="worker-1",
+            connector_mode="supervised_dispatch",
+            connector_heartbeat_age_seconds=-0.5,
+        ),
+        "safety": {
+            "dry_run": True,
+            "paper_trading": True,
+            "live_trading_enabled": False,
+            "kill_switch": True,
+            "bind_address": "127.0.0.1",
+        },
+    }
+
+    _validate_platform_health(health, profile="local_agent_v0_2")
+
+
+@pytest.mark.parametrize("heartbeat_age", [45.0, -0.5])
+def test_current_health_accepts_retained_candidate_connector_observation(
+    heartbeat_age: float,
+) -> None:
+    from hqa.hermes_compatibility import _validate_platform_health
+
+    health = {
+        "status": "ok",
+        "app_name": "quant-system",
+        "environment": "development",
+        "data_provider": {
+            "configured_default": "futu",
+            "tiingo_token_present": False,
+        },
+        "futu_opend": {"enabled": False},
+        "database": {"enabled": False},
+        "hermes_command_ledger": _canonical_local_ledger(
+            mutation_enabled=True,
+            candidate_admission_id="candidate_1",
+            candidate_admission_digest="a" * 64,
+            connector_worker_id="worker-1",
+            connector_heartbeat_age_seconds=heartbeat_age,
+        ),
+        "safety": {
+            "dry_run": True,
+            "paper_trading": True,
+            "live_trading_enabled": False,
+            "kill_switch": True,
+            "bind_address": "127.0.0.1",
+        },
+    }
+
+    _validate_platform_health(health, profile="local_agent_v0_2")
+
+
+def test_current_ledger_accepts_exact_fail_closed_workspace_mismatch() -> None:
+    from hqa.hermes_compatibility import _validate_current_ledger_projection
+
+    _validate_current_ledger_projection(
+        _canonical_local_ledger(
+            mutation_enabled=True,
+            configured_release_workspace_id="ws-other",
+        ),
+        profile="local_agent_v0_2",
+    )
+
+
+def test_current_ledger_accepts_closed_release_retained_candidate_observation() -> None:
+    from hqa.hermes_compatibility import _validate_current_ledger_projection
+
+    _validate_current_ledger_projection(
+        _canonical_local_ledger(
+            mutation_enabled=True,
+            release_authorized=True,
+            release_stamp_id="release_1",
+            public_cutover_id="cutover_1",
+            connector_worker_id="worker-1",
+            connector_heartbeat_age_seconds=45.0,
+        ),
+        profile="local_agent_v0_2",
+    )
+
+
+def test_local_agent_accepts_fresh_supervised_release_health(
+    tmp_path: Path,
+) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        health = dict(_ProbeHandler.responses["/api/health"])
+        health["hermes_command_ledger"] = _canonical_local_ledger(
+            mutation_enabled=True,
+            composer_write_ready=True,
+            chat_write_ready=True,
+            admission_mode="release",
+            candidate_admission_id="candidate_0123456789abcdef0123456789abcdef",
+            candidate_admission_digest="b" * 64,
+            connector_liveness_ready=True,
+            connector_liveness_reason="ready",
+            connector_worker_id="connector-worker-1",
+            connector_mode="supervised_dispatch",
+            connector_heartbeat_age_seconds=0.5,
+            release_authorized=True,
+            release_stamp_id="release_0123456789abcdef0123456789abcdef",
+            public_cutover_id="cutover_0123456789abcdef0123456789abcdef",
+            release_event_cursor=27,
+        )
+        _ProbeHandler.responses["/api/health"] = health
+
+        result = check_compatibility(config)
+
+    assert result.status == "compatible"
+
+
+def test_local_agent_accepts_release_waiting_for_supervised_connector(
+    tmp_path: Path,
+) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        health = dict(_ProbeHandler.responses["/api/health"])
+        health["hermes_command_ledger"] = _canonical_local_ledger(
+            mutation_enabled=True,
+            admission_mode="release",
+            candidate_admission_id="candidate_0123456789abcdef0123456789abcdef",
+            candidate_admission_digest="b" * 64,
+            release_authorized=True,
+            release_stamp_id="release_0123456789abcdef0123456789abcdef",
+            public_cutover_id="cutover_0123456789abcdef0123456789abcdef",
+            release_event_cursor=27,
+        )
+        _ProbeHandler.responses["/api/health"] = health
+        gateway = dict(_ProbeHandler.responses["/api/hermes/gateway"])
+        gateway["chat_write_ready"] = False
+        _ProbeHandler.responses["/api/hermes/gateway"] = gateway
+
+        result = check_compatibility(config)
+
+    assert result.status == "compatible"
+
+
+def test_local_agent_accepts_closed_release_authority_fail_closed(
+    tmp_path: Path,
+) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        health = dict(_ProbeHandler.responses["/api/health"])
+        health["hermes_command_ledger"] = _canonical_local_ledger(
+            mutation_enabled=True,
+            release_authorized=True,
+            release_stamp_id="release_0123456789abcdef0123456789abcdef",
+            public_cutover_id="cutover_0123456789abcdef0123456789abcdef",
+            release_event_cursor=27,
+        )
+        _ProbeHandler.responses["/api/health"] = health
+        gateway = dict(_ProbeHandler.responses["/api/hermes/gateway"])
+        gateway["chat_write_ready"] = False
+        _ProbeHandler.responses["/api/hermes/gateway"] = gateway
+
+        result = check_compatibility(config)
+
+    assert result.status == "compatible"
+
+
+def _set_ledger_field(field: str, value: object):
+    def mutate(ledger: dict[str, object]) -> None:
+        ledger[field] = value
+
+    return mutate
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda ledger: ledger.update(secret_token="must-not-leak"),
+        _set_ledger_field("admission_mode", "unknown"),
+        _set_ledger_field("admission_workspace_id", "not a bounded id"),
+        _set_ledger_field("configured_release_workspace_id", "x" * 201),
+        lambda ledger: ledger.update(
+            configured_release_workspace_id="ws-other",
+            release_stamp_id="release_1",
+            release_event_cursor=1,
+        ),
+        lambda ledger: ledger.update(
+            configured_release_workspace_id="ws-other",
+            connector_liveness_ready=True,
+            connector_liveness_reason="ready",
+            connector_worker_id="worker-1",
+            connector_mode="supervised_dispatch",
+            connector_heartbeat_age_seconds=0.1,
+        ),
+        lambda ledger: ledger.update(
+            configured_release_workspace_id="ws-other",
+            connector_liveness_reason="connector_not_active",
+            connector_worker_id="worker-1",
+            connector_mode="reconcile_only",
+            connector_heartbeat_age_seconds=0.1,
+        ),
+        _set_ledger_field("candidate_admission_id", "candidate id"),
+        _set_ledger_field("candidate_admission_digest", "A" * 64),
+        _set_ledger_field("connector_liveness_ready", "true"),
+        _set_ledger_field("connector_liveness_reason", ""),
+        _set_ledger_field("connector_liveness_reason", "unknown_reason"),
+        _set_ledger_field(
+            "connector_liveness_reason", "connector_heartbeat_in_future"
+        ),
+        lambda ledger: ledger.update(
+            connector_liveness_reason="connector_generation_missing",
+            connector_worker_id="worker-1",
+            connector_mode="supervised_dispatch",
+            connector_heartbeat_age_seconds=0.1,
+        ),
+        _set_ledger_field("connector_liveness_reason", "connector_not_active"),
+        lambda ledger: ledger.update(
+            connector_liveness_reason="connector_heartbeat_in_future",
+            connector_worker_id="worker-1",
+            connector_heartbeat_age_seconds=-0.1,
+        ),
+        lambda ledger: ledger.update(
+            connector_liveness_reason="connector_heartbeat_stale",
+            connector_worker_id="worker-1",
+            connector_mode="reconcile_only",
+            connector_heartbeat_age_seconds=45.0,
+        ),
+        lambda ledger: ledger.update(
+            connector_liveness_reason="connector_heartbeat_stale",
+            connector_worker_id="worker-1",
+            connector_mode="supervised_dispatch",
+            connector_heartbeat_age_seconds=0.1,
+        ),
+        lambda ledger: ledger.update(
+            mutation_enabled=True,
+            candidate_admission_id="candidate_1",
+            candidate_admission_digest="a" * 64,
+            connector_liveness_reason="connector_generation_missing",
+        ),
+        lambda ledger: ledger.update(
+            candidate_admission_id="candidate_1",
+            candidate_admission_digest="a" * 64,
+            connector_worker_id="worker-1",
+            connector_heartbeat_age_seconds=45.0,
+        ),
+        lambda ledger: ledger.update(
+            mutation_enabled=True,
+            candidate_admission_id="candidate_1",
+            candidate_admission_digest="a" * 64,
+            connector_liveness_ready=True,
+            connector_liveness_reason="ready",
+            connector_worker_id="worker-1",
+            connector_mode="supervised_dispatch",
+            connector_heartbeat_age_seconds=0.1,
+        ),
+        lambda ledger: ledger.update(
+            mutation_enabled=True,
+            release_authorized=True,
+            release_stamp_id="release_1",
+            public_cutover_id="cutover_1",
+            connector_liveness_reason="connector_heartbeat_stale",
+            connector_worker_id="worker-1",
+            connector_mode="supervised_dispatch",
+            connector_heartbeat_age_seconds=45.0,
+        ),
+        _set_ledger_field("connector_worker_id", "worker id"),
+        _set_ledger_field("connector_mode", "always_allow"),
+        _set_ledger_field("connector_heartbeat_age_seconds", float("nan")),
+        _set_ledger_field("connector_heartbeat_age_seconds", 10**309),
+        lambda ledger: ledger.update(
+            _candidate_ready_ledger(connector_heartbeat_age_seconds=301.0)
+        ),
+        _set_ledger_field("release_authorized", 1),
+        _set_ledger_field("release_stamp_id", "release id"),
+        _set_ledger_field("public_cutover_id", "cutover id"),
+        _set_ledger_field("release_event_cursor", True),
+        _set_ledger_field("release_event_cursor", -1),
+        _set_ledger_field("release_event_cursor", 2**63),
+        lambda ledger: ledger.update(candidate_admission_id="candidate_1"),
+        lambda ledger: ledger.update(connector_worker_id="worker-1"),
+        lambda ledger: ledger.update(
+            connector_liveness_ready=True,
+            connector_liveness_reason="connector_heartbeat_stale",
+            connector_worker_id="worker-1",
+            connector_mode="supervised_dispatch",
+            connector_heartbeat_age_seconds=0.1,
+        ),
+        lambda ledger: ledger.update(
+            connector_liveness_reason="connector_heartbeat_in_future",
+            connector_worker_id="worker-1",
+            connector_mode="supervised_dispatch",
+            connector_heartbeat_age_seconds=0.1,
+        ),
+        lambda ledger: ledger.update(
+            admission_mode="candidate",
+            candidate_admission_id=None,
+            candidate_admission_digest=None,
+        ),
+        lambda ledger: ledger.update(
+            admission_mode="candidate",
+            candidate_admission_id="candidate_1",
+            candidate_admission_digest="a" * 64,
+            connector_liveness_ready=True,
+            connector_liveness_reason="ready",
+            connector_worker_id="worker-1",
+            connector_mode="supervised_dispatch",
+            connector_heartbeat_age_seconds=0.1,
+        ),
+        lambda ledger: ledger.update(
+            admission_mode="closed",
+            composer_write_ready=True,
+            chat_write_ready=True,
+        ),
+        lambda ledger: ledger.update(
+            release_authorized=True,
+            admission_mode="release",
+        ),
+        lambda ledger: ledger.update(
+            release_authorized=True,
+            release_stamp_id="release_1",
+            public_cutover_id="cutover_1",
+        ),
+        lambda ledger: ledger.update(
+            mutation_enabled=True,
+            release_authorized=True,
+            release_stamp_id="release_1",
+            public_cutover_id="cutover_1",
+            candidate_admission_id="candidate_1",
+            candidate_admission_digest="b" * 64,
+        ),
+        lambda ledger: ledger.update(
+            mutation_enabled=True,
+            admission_mode="release",
+            candidate_admission_id="candidate_1",
+            candidate_admission_digest="b" * 64,
+            connector_liveness_ready=True,
+            connector_liveness_reason="ready",
+            connector_worker_id="worker-1",
+            connector_mode="supervised_dispatch",
+            connector_heartbeat_age_seconds=0.1,
+            release_authorized=True,
+            release_stamp_id="release_1",
+            public_cutover_id="cutover_1",
+        ),
+        lambda ledger: ledger.update(
+            admission_mode="release",
+            candidate_admission_id="candidate_1",
+            candidate_admission_digest="b" * 64,
+            release_authorized=True,
+            release_stamp_id="release_1",
+            public_cutover_id="cutover_1",
+        ),
+        lambda ledger: ledger.update(
+            mutation_enabled=True,
+            admission_mode="release",
+            candidate_admission_id="candidate_1",
+            candidate_admission_digest="b" * 64,
+            connector_liveness_reason="connector_not_active",
+            connector_worker_id="worker-1",
+            connector_mode=None,
+            connector_heartbeat_age_seconds=0.1,
+            release_authorized=True,
+            release_stamp_id="release_1",
+            public_cutover_id="cutover_1",
+        ),
+        lambda ledger: ledger.update(public_cutover_id="cutover_1"),
+    ],
+)
+def test_current_health_ledger_rejects_schema_and_combination_drift(
+    mutate,
+) -> None:
+    from hqa.hermes_compatibility import CompatibilityError, _validate_platform_health
+
+    health = {
+        "status": "ok",
+        "app_name": "quant-system",
+        "environment": "development",
+        "data_provider": {
+            "configured_default": "futu",
+            "tiingo_token_present": False,
+        },
+        "futu_opend": {"enabled": False},
+        "database": {"enabled": False},
+        "hermes_command_ledger": _canonical_local_ledger(),
+        "safety": {
+            "dry_run": True,
+            "paper_trading": True,
+            "live_trading_enabled": False,
+            "kill_switch": True,
+            "bind_address": "127.0.0.1",
+        },
+    }
+    mutate(health["hermes_command_ledger"])
+
+    with pytest.raises(CompatibilityError, match="platform_health_schema"):
+        _validate_platform_health(health, profile="local_agent_v0_2")
 
 
 @pytest.mark.parametrize(
@@ -517,7 +1066,9 @@ def test_local_agent_profile_fails_closed_on_platform_manifest_drift(
         config = _local_agent_config(tmp_path, base_url)
         path = (
             config.platform_repo
-            / "contracts"
+            / "src"
+            / "quant_system"
+            / "hermes"
             / "agent_v02_hermes_compatibility.v1.json"
         )
         if manifest_change == "missing":
@@ -1220,6 +1771,47 @@ def test_watcher_contract_change_is_a_reprobe_trigger_not_runtime_attestation(
     assert reprobed.status == "compatible"
     assert reprobed.probed is True
     assert len(_ProbeHandler.requests) == requests_before + 4
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "src/quant_system/hermes/candidate_admission_authority.py",
+        "src/quant_system/hermes/candidate_admission_gate.py",
+        "src/quant_system/hermes/command_ledger.py",
+        "src/quant_system/hermes/composer_readiness.py",
+        "src/quant_system/hermes/connector_liveness.py",
+        "src/quant_system/hermes/effective_release_gate.py",
+        "src/quant_system/hermes/release_authority.py",
+        "src/quant_system/hermes/release_runtime.py",
+        "src/quant_system/hermes/run_control_outcome_authority.py",
+        "src/quant_system/hermes/session_registry.py",
+        "src/quant_system/hermes/workflow_binding.py",
+    ],
+)
+def test_release_projection_owner_change_forces_local_agent_reprobe(
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    from hqa.hermes_compatibility import check_compatibility
+
+    with _probe_server() as base_url:
+        config = _local_agent_config(tmp_path, base_url)
+        accepted = check_compatibility(config)
+        projection_owner = config.platform_repo / relative_path
+        projection_owner.write_text(
+            "# changed state-machine owner\n",
+            encoding="utf-8",
+        )
+        requests_before = len(_ProbeHandler.requests)
+
+        reprobed = check_compatibility(config)
+
+    assert accepted.status == "compatible"
+    assert reprobed.status == "compatible"
+    assert reprobed.probed is True
+    assert reprobed.trigger_digest != accepted.trigger_digest
+    assert len(_ProbeHandler.requests) == requests_before + 5
 
 
 def test_report_retention_is_bounded_and_preserves_baseline_and_unsafe_entries(

@@ -21,6 +21,7 @@ import fcntl
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import re
 import stat
@@ -60,7 +61,23 @@ PLATFORM_REPROBE_TRIGGER_FILES: Tuple[str, ...] = (
     "src/quant_system/hermes/gateway_client.py",
 )
 PLATFORM_LOCAL_AGENT_TRIGGER_FILES: Tuple[str, ...] = (
-    "contracts/agent_v02_hermes_compatibility.v1.json",
+    "src/quant_system/hermes/agent_v02_hermes_compatibility.v1.json",
+    "src/quant_system/config/runtime_paths.py",
+    "src/quant_system/config/settings.py",
+    "src/quant_system/hermes/candidate_admission_authority.py",
+    "src/quant_system/hermes/candidate_admission_gate.py",
+    "src/quant_system/hermes/command_ledger.py",
+    "src/quant_system/hermes/composer_readiness.py",
+    "src/quant_system/hermes/connector_liveness.py",
+    "src/quant_system/hermes/dark_identity_profile.py",
+    "src/quant_system/hermes/effective_release_gate.py",
+    "src/quant_system/hermes/release_authority.py",
+    "src/quant_system/hermes/release_runtime.py",
+    "src/quant_system/hermes/run_control_outcome_authority.py",
+    "src/quant_system/hermes/session_registry.py",
+    "src/quant_system/hermes/test_execution_evidence.py",
+    "src/quant_system/hermes/workflow_binding.py",
+    "src/quant_system/storage/database.py",
 )
 
 WATCHER_CONTRACT_FILES: Tuple[str, ...] = (
@@ -93,8 +110,60 @@ _EXPECTED_SAFETY = {
 }
 _PROFILES = frozenset({"dark_readonly", "local_agent_v0_2"})
 _PLATFORM_CONTRACT_RELATIVE_PATH = (
-    "contracts/agent_v02_hermes_compatibility.v1.json"
+    "src/quant_system/hermes/agent_v02_hermes_compatibility.v1.json"
 )
+_BOUNDED_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}\Z")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+_MAX_EVENT_CURSOR = 2**63 - 1
+_MAX_CONNECTOR_AGE_SECONDS = 10 * 366 * 24 * 60 * 60
+_MAX_READY_CONNECTOR_AGE_SECONDS = 300.0
+_CONNECTOR_REASON_VALUES = frozenset(
+    {
+        "connector_generation_missing",
+        "connector_not_active",
+        "connector_mode_not_supervised",
+        "connector_runtime_digest_mismatch",
+        "connector_heartbeat_in_future",
+        "connector_heartbeat_stale",
+        "connector_session_lock_missing",
+        "connector_liveness_unavailable",
+        "ready",
+    }
+)
+_LEGACY_LEDGER_KEYS = frozenset(
+    {
+        "database_configured",
+        "schema_ready",
+        "schema_version",
+        "workflow_binding_schema_ready",
+        "workflow_binding_schema_version",
+        "mutation_enabled",
+    }
+)
+_LOCAL_LEDGER_KEYS = _LEGACY_LEDGER_KEYS | {
+    "session_registry_schema_ready",
+    "session_registry_schema_version",
+    "agent_workspace_authorities_ready",
+    "research_binding_ready",
+    "composer_write_ready",
+    "chat_write_ready",
+}
+_CURRENT_LEDGER_KEYS = _LOCAL_LEDGER_KEYS | {
+    "admission_mode",
+    "admission_workspace_id",
+    "configured_release_workspace_id",
+    "candidate_admission_id",
+    "candidate_admission_digest",
+    "connector_liveness_ready",
+    "connector_liveness_reason",
+    "connector_worker_id",
+    "connector_mode",
+    "connector_heartbeat_age_seconds",
+    "release_authorized",
+    "release_stamp_id",
+    "public_cutover_id",
+    "release_event_cursor",
+}
 _PLATFORM_CONTRACT_KEYS = {
     "schema_version",
     "profile",
@@ -718,31 +787,13 @@ def _validate_platform_health(value: Any, *, profile: str) -> None:
     _validate_dependency_health(health["database"], "database")
 
     ledger = health["hermes_command_ledger"]
-    legacy_keys = {
-        "database_configured",
-        "schema_ready",
-        "schema_version",
-        "workflow_binding_schema_ready",
-        "workflow_binding_schema_version",
-        "mutation_enabled",
-    }
-    local_keys = legacy_keys | {
-        "session_registry_schema_ready",
-        "session_registry_schema_version",
-        "agent_workspace_authorities_ready",
-        "research_binding_ready",
-        "composer_write_ready",
-        "chat_write_ready",
-    }
     ledger_keys = frozenset(ledger)
-    expected_keys = local_keys if profile == "local_agent_v0_2" else set(ledger)
-    if (
-        set(ledger) != expected_keys
-        or (
-            profile == "dark_readonly"
-            and ledger_keys not in {frozenset(legacy_keys), frozenset(local_keys)}
-        )
-    ):
+    accepted_keys = (
+        {_CURRENT_LEDGER_KEYS}
+        if profile == "local_agent_v0_2"
+        else {_LEGACY_LEDGER_KEYS, _LOCAL_LEDGER_KEYS, _CURRENT_LEDGER_KEYS}
+    )
+    if ledger_keys not in accepted_keys:
         raise CompatibilityError("platform_health_schema")
     bool_keys = [
         "database_configured",
@@ -750,7 +801,7 @@ def _validate_platform_health(value: Any, *, profile: str) -> None:
         "workflow_binding_schema_ready",
         "mutation_enabled",
     ]
-    if ledger_keys == frozenset(local_keys):
+    if ledger_keys in {_LOCAL_LEDGER_KEYS, _CURRENT_LEDGER_KEYS}:
         bool_keys.extend(
             [
                 "session_registry_schema_ready",
@@ -767,7 +818,7 @@ def _validate_platform_health(value: Any, *, profile: str) -> None:
         ("schema_ready", "schema_version"),
         ("workflow_binding_schema_ready", "workflow_binding_schema_version"),
     ]
-    if ledger_keys == frozenset(local_keys):
+    if ledger_keys in {_LOCAL_LEDGER_KEYS, _CURRENT_LEDGER_KEYS}:
         version_pairs.append(
             ("session_registry_schema_ready", "session_registry_schema_version")
         )
@@ -779,7 +830,7 @@ def _validate_platform_health(value: Any, *, profile: str) -> None:
             raise CompatibilityError("platform_health_schema")
     if profile == "dark_readonly" and ledger["mutation_enabled"] is not False:
         raise CompatibilityError("platform_mutation_enabled_drift")
-    if ledger_keys == frozenset(local_keys):
+    if ledger_keys in {_LOCAL_LEDGER_KEYS, _CURRENT_LEDGER_KEYS}:
         if profile == "dark_readonly" and (
             ledger["composer_write_ready"] is not False
             or ledger["chat_write_ready"] is not False
@@ -797,7 +848,226 @@ def _validate_platform_health(value: Any, *, profile: str) -> None:
             )
         ):
             raise CompatibilityError("platform_agent_authority_unready")
+    if ledger_keys == _CURRENT_LEDGER_KEYS:
+        _validate_current_ledger_projection(ledger, profile=profile)
     _validate_safety(health["safety"])
+
+
+def _is_bounded_id(value: Any) -> bool:
+    return type(value) is str and _BOUNDED_ID_RE.fullmatch(value) is not None
+
+
+def _is_optional_bounded_id(value: Any) -> bool:
+    return value is None or _is_bounded_id(value)
+
+
+def _validate_current_ledger_projection(
+    ledger: Mapping[str, Any],
+    *,
+    profile: str,
+) -> None:
+    admission_mode = ledger["admission_mode"]
+    admission_workspace = ledger["admission_workspace_id"]
+    configured_workspace = ledger["configured_release_workspace_id"]
+    candidate_id = ledger["candidate_admission_id"]
+    candidate_digest = ledger["candidate_admission_digest"]
+    connector_ready = ledger["connector_liveness_ready"]
+    connector_reason = ledger["connector_liveness_reason"]
+    connector_worker = ledger["connector_worker_id"]
+    connector_mode = ledger["connector_mode"]
+    connector_age = ledger["connector_heartbeat_age_seconds"]
+    release_authorized = ledger["release_authorized"]
+    release_stamp = ledger["release_stamp_id"]
+    public_cutover = ledger["public_cutover_id"]
+    event_cursor = ledger["release_event_cursor"]
+
+    if (
+        admission_mode not in {"closed", "candidate", "release"}
+        or admission_workspace != "ws-local-main"
+        or not _is_bounded_id(configured_workspace)
+        or type(connector_ready) is not bool
+        or type(connector_reason) is not str
+        or connector_reason not in _CONNECTOR_REASON_VALUES
+        or not _is_optional_bounded_id(connector_worker)
+        or connector_mode not in {None, "supervised_dispatch", "reconcile_only"}
+        or type(release_authorized) is not bool
+        or not _is_optional_bounded_id(release_stamp)
+        or not _is_optional_bounded_id(public_cutover)
+        or type(event_cursor) is not int
+        or event_cursor < 0
+        or event_cursor > _MAX_EVENT_CURSOR
+    ):
+        raise CompatibilityError("platform_health_schema")
+
+    candidate_pair_absent = candidate_id is None and candidate_digest is None
+    candidate_pair_valid = (
+        _is_bounded_id(candidate_id)
+        and type(candidate_digest) is str
+        and _SHA256_RE.fullmatch(candidate_digest) is not None
+    )
+    if not candidate_pair_absent and not candidate_pair_valid:
+        raise CompatibilityError("platform_health_schema")
+
+    if connector_age is not None:
+        if type(connector_age) is int:
+            age_is_valid = abs(connector_age) <= _MAX_CONNECTOR_AGE_SECONDS
+        elif type(connector_age) is float:
+            age_is_valid = (
+                math.isfinite(connector_age)
+                and abs(connector_age) <= _MAX_CONNECTOR_AGE_SECONDS
+            )
+        else:
+            age_is_valid = False
+        if not age_is_valid:
+            raise CompatibilityError("platform_health_schema")
+    connector_identity_absent = (
+        connector_worker is None and connector_mode is None and connector_age is None
+    )
+    connector_record_present = (
+        connector_worker is not None
+        and connector_mode is not None
+        and connector_age is not None
+    )
+    connector_candidate_observation = (
+        connector_worker is not None
+        and connector_mode is None
+        and connector_age is not None
+    )
+    if not (
+        connector_identity_absent
+        or connector_record_present
+        or connector_candidate_observation
+    ):
+        raise CompatibilityError("platform_health_schema")
+    if connector_reason == "connector_generation_missing":
+        connector_shape_valid = connector_identity_absent
+    elif connector_reason == "connector_liveness_unavailable":
+        connector_shape_valid = connector_identity_absent or (
+            admission_mode == "closed"
+            and (candidate_pair_valid or release_authorized)
+            and ledger["mutation_enabled"] is True
+            and connector_candidate_observation
+        )
+    elif connector_reason == "connector_not_active":
+        connector_shape_valid = connector_record_present
+    elif connector_reason == "connector_mode_not_supervised":
+        connector_shape_valid = (
+            connector_record_present and connector_mode == "reconcile_only"
+        )
+    elif connector_reason == "connector_runtime_digest_mismatch":
+        connector_shape_valid = (
+            connector_record_present and connector_mode == "supervised_dispatch"
+        )
+    elif connector_reason == "connector_heartbeat_in_future":
+        connector_shape_valid = (
+            connector_record_present
+            and connector_mode == "supervised_dispatch"
+            and connector_age < 0
+        )
+    elif connector_reason == "connector_heartbeat_stale":
+        connector_shape_valid = (
+            connector_record_present
+            and connector_mode == "supervised_dispatch"
+            and connector_age > 1.0
+        )
+    elif connector_reason == "connector_session_lock_missing":
+        connector_shape_valid = (
+            connector_record_present
+            and connector_mode == "supervised_dispatch"
+            and 0 <= connector_age <= _MAX_READY_CONNECTOR_AGE_SECONDS
+        )
+    else:
+        connector_shape_valid = (
+            connector_reason == "ready"
+            and connector_record_present
+            and connector_mode == "supervised_dispatch"
+            and 0 <= connector_age <= _MAX_READY_CONNECTOR_AGE_SECONDS
+        )
+    if not connector_shape_valid:
+        raise CompatibilityError("platform_health_schema")
+    if (
+        admission_mode == "closed"
+        and candidate_pair_valid
+        and connector_reason != "connector_liveness_unavailable"
+    ):
+        raise CompatibilityError("platform_health_schema")
+    if (
+        admission_mode == "closed"
+        and release_authorized
+        and connector_reason not in {"ready", "connector_liveness_unavailable"}
+    ):
+        raise CompatibilityError("platform_health_schema")
+    if connector_ready:
+        if (
+            connector_reason != "ready"
+            or not connector_record_present
+        ):
+            raise CompatibilityError("platform_health_schema")
+    elif connector_reason == "ready":
+        raise CompatibilityError("platform_health_schema")
+    if connector_mode == "reconcile_only" and connector_ready:
+        raise CompatibilityError("platform_health_schema")
+    composer_ready = ledger["composer_write_ready"]
+    chat_ready = ledger["chat_write_ready"]
+    if composer_ready is not chat_ready:
+        raise CompatibilityError("platform_health_schema")
+    if admission_workspace != configured_workspace:
+        if (
+            admission_mode != "closed"
+            or not candidate_pair_absent
+            or release_authorized
+            or composer_ready
+            or release_stamp is not None
+            or public_cutover is not None
+            or event_cursor != 0
+            or connector_ready
+            or not connector_identity_absent
+            or connector_reason != "connector_liveness_unavailable"
+        ):
+            raise CompatibilityError("platform_health_schema")
+    if admission_mode == "closed" and composer_ready:
+        raise CompatibilityError("platform_health_schema")
+    if profile == "dark_readonly" and (
+        admission_mode != "closed" or release_authorized
+    ):
+        raise CompatibilityError("platform_mutation_enabled_drift")
+    if release_authorized and ledger["mutation_enabled"] is not True:
+        raise CompatibilityError("platform_health_schema")
+    if (
+        release_authorized
+        and admission_mode == "closed"
+        and not candidate_pair_absent
+    ):
+        raise CompatibilityError("platform_health_schema")
+    if admission_mode == "candidate" and (
+        not candidate_pair_valid
+        or release_authorized
+        or not connector_ready
+        or ledger["mutation_enabled"] is not True
+        or composer_ready is not True
+    ):
+        raise CompatibilityError("platform_health_schema")
+    if admission_mode == "release" and (
+        not release_authorized
+        or not candidate_pair_valid
+        or release_stamp is None
+        or public_cutover is None
+        or ledger["mutation_enabled"] is not True
+        or composer_ready is not connector_ready
+    ):
+        raise CompatibilityError("platform_health_schema")
+    if composer_ready and (
+        ledger["mutation_enabled"] is not True
+        or admission_mode == "closed"
+        or not connector_ready
+    ):
+        raise CompatibilityError("platform_health_schema")
+    if public_cutover is not None and release_stamp is None:
+        raise CompatibilityError("platform_health_schema")
+    if release_authorized and (
+        release_stamp is None or public_cutover is None
+    ):
+        raise CompatibilityError("platform_health_schema")
 
 
 def _validate_dependency_health(value: Dict[str, Any], label: str) -> None:

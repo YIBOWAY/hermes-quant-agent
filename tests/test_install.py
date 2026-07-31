@@ -12,6 +12,39 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 
 
+def _init_hermes_checkout(path: Path) -> Path:
+    path.mkdir(parents=True, mode=0o700)
+    subprocess.run(
+        ["git", "-C", str(path), "init", "-q", "-b", "main"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "Install Test"],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(path),
+            "config",
+            "user.email",
+            "install@example.invalid",
+        ],
+        check=True,
+    )
+    (path / "hermes.py").write_text("VERSION = 1\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(path), "add", "hermes.py"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-q", "-m", "initial"],
+        check=True,
+    )
+    return path
+
+
 def _codesign_identity(helper: Path) -> tuple[str, str]:
     inspected = subprocess.run(
         ["/usr/bin/codesign", "-d", "--verbose=4", str(helper)],
@@ -27,7 +60,12 @@ def _codesign_identity(helper: Path) -> tuple[str, str]:
     return identifier.group(1), cdhash.group(1)
 
 
-def _install(tmp_path, *, platform_dir: Path | None = None):
+def _install(
+    tmp_path,
+    *,
+    platform_dir: Path | None = None,
+    hermes_source_dir: Path | None = None,
+):
     fake_home = tmp_path / "home"
     fake_home.mkdir(mode=0o700)
     hermes_home = fake_home / ".hermes"
@@ -36,10 +74,13 @@ def _install(tmp_path, *, platform_dir: Path | None = None):
     helper = helper_parent / "hqa-intent-payload-crypto"
     helper.write_text("#!/bin/bash\nexit 64\n", encoding="utf-8")
     helper.chmod(0o700)
+    if hermes_source_dir is None:
+        hermes_source_dir = _init_hermes_checkout(tmp_path / "hermes-source")
     env = dict(
         os.environ,
         HOME=str(fake_home),
         HERMES_HOME=str(hermes_home),
+        HQA_HERMES_SOURCE_DIR=str(hermes_source_dir),
         HQA_SKIP_NATIVE_BUILD="1",
     )
     if platform_dir is not None:
@@ -53,6 +94,41 @@ def _install(tmp_path, *, platform_dir: Path | None = None):
     )
     assert result.returncode == 0, result.stdout
     return hermes_home / "scripts"
+
+
+def test_install_normalizes_default_source_from_lexical_hermes_home(
+    tmp_path: Path,
+) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(mode=0o700)
+    (fake_home / "nested").mkdir(mode=0o700)
+    hermes_home = fake_home / ".hermes"
+    helper_parent = hermes_home / "bin"
+    helper_parent.mkdir(parents=True, mode=0o700)
+    helper = helper_parent / "hqa-intent-payload-crypto"
+    helper.write_text("#!/bin/bash\nexit 64\n", encoding="utf-8")
+    helper.chmod(0o700)
+    source = _init_hermes_checkout(hermes_home / "hermes-agent")
+    lexical_home = fake_home / "nested" / ".." / ".hermes"
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(
+            os.environ,
+            HOME=str(fake_home),
+            HERMES_HOME=str(lexical_home),
+            HQA_SKIP_NATIVE_BUILD="1",
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout
+    installed = hermes_home / "scripts" / "hqa-hermes-compatibility-watch.sh"
+    assert f"HQA_INSTALLED_HERMES_SOURCE_DIR={source}" in installed.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_install_cannot_skip_a_missing_native_helper(tmp_path) -> None:
@@ -220,6 +296,7 @@ def test_install_stages_then_refuses_symlinked_publish_directory(
     helper = helper_parent / "hqa-intent-payload-crypto"
     helper.write_text("#!/bin/bash\nexit 64\n", encoding="utf-8")
     helper.chmod(0o700)
+    _init_hermes_checkout(hermes_home / "hermes-agent")
     victim = tmp_path / "victim-scripts"
     victim.mkdir(mode=0o700)
     marker = victim / "marker"
@@ -240,6 +317,7 @@ def test_install_stages_then_refuses_symlinked_publish_directory(
     )
 
     assert result.returncode != 0
+    assert "install destination contains a symlink or non-directory" in result.stdout
     assert (hermes_home / "scripts").is_symlink()
     assert marker.read_text(encoding="utf-8") == "unchanged"
     assert sorted(victim.iterdir()) == [marker]
@@ -268,6 +346,7 @@ def test_install_atomically_upgrades_owner_controlled_legacy_files(
     legacy_skill = skill_dir / "SKILL.md"
     legacy_skill.write_text("legacy\n", encoding="utf-8")
     legacy_skill.chmod(0o644)
+    _init_hermes_checkout(hermes_home / "hermes-agent")
 
     result = subprocess.run(
         ["bash", str(REPO / "scripts" / "install.sh")],
@@ -310,6 +389,7 @@ def test_install_reports_only_candidate_files_and_preserves_unrelated_entries(
     unrelated_card = unrelated_skill / "SKILL.md"
     unrelated_card.write_text("unrelated\n", encoding="utf-8")
     unrelated_card.chmod(0o600)
+    _init_hermes_checkout(hermes_home / "hermes-agent")
 
     result = subprocess.run(
         ["bash", str(REPO / "scripts" / "install.sh")],
@@ -385,6 +465,7 @@ def test_install_builds_private_native_intent_crypto_helper(tmp_path) -> None:
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     hermes_home = fake_home / ".hermes"
+    _init_hermes_checkout(hermes_home / "hermes-agent")
     result = subprocess.run(
         ["bash", str(REPO / "scripts" / "install.sh")],
         env=dict(os.environ, HOME=str(fake_home), HERMES_HOME=str(hermes_home)),
@@ -481,6 +562,67 @@ def test_deployed_wrappers_have_no_unsubstituted_placeholders(tmp_path):
         assert "__HQA_PLATFORM_DIR__" not in body, (
             f"{wrapper.name}: unsubstituted __HQA_PLATFORM_DIR__ placeholder remains"
         )
+        assert "__HQA_HERMES_SOURCE_DIR__" not in body, (
+            f"{wrapper.name}: unsubstituted Hermes source placeholder remains"
+        )
+
+
+def test_installed_compatibility_watcher_freezes_selected_hermes_checkout(
+    tmp_path: Path,
+) -> None:
+    selected = _init_hermes_checkout(tmp_path / "selected-hermes-worktree")
+    scripts = _install(tmp_path, hermes_source_dir=selected)
+    watcher = scripts / "hqa-hermes-compatibility-watch.sh"
+    body = watcher.read_text(encoding="utf-8")
+
+    assert f"HQA_INSTALLED_HERMES_SOURCE_DIR={selected}" in body
+    assert (
+        'export HQA_HERMES_COMPAT_HERMES_REPO="$HQA_INSTALLED_HERMES_SOURCE_DIR"'
+        in body
+    )
+    assert "import hermes" not in body
+
+
+@pytest.mark.parametrize("invalid_source", ["relative", "non_git", "symlink"])
+def test_install_refuses_invalid_hermes_source_checkout(
+    tmp_path: Path,
+    invalid_source: str,
+) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(mode=0o700)
+    hermes_home = fake_home / ".hermes"
+    helper_parent = hermes_home / "bin"
+    helper_parent.mkdir(parents=True, mode=0o700)
+    helper = helper_parent / "hqa-intent-payload-crypto"
+    helper.write_text("#!/bin/bash\nexit 64\n", encoding="utf-8")
+    helper.chmod(0o700)
+    if invalid_source == "relative":
+        selected = Path("relative-hermes")
+    elif invalid_source == "non_git":
+        selected = tmp_path / "not-a-git-checkout"
+        selected.mkdir(mode=0o700)
+    else:
+        physical = _init_hermes_checkout(tmp_path / "physical-hermes")
+        selected = tmp_path / "linked-hermes"
+        selected.symlink_to(physical, target_is_directory=True)
+
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "install.sh")],
+        env=dict(
+            os.environ,
+            HOME=str(fake_home),
+            HERMES_HOME=str(hermes_home),
+            HQA_HERMES_SOURCE_DIR=str(selected),
+            HQA_SKIP_NATIVE_BUILD="1",
+        ),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert not (hermes_home / "scripts").exists()
+    assert not (hermes_home / "skills").exists()
+    assert not list(hermes_home.glob(".hqa-install.*"))
 
 
 def test_installed_factor_repro_wrapper_freezes_identity_and_exact_allowlist(
@@ -742,6 +884,8 @@ def test_hermes_compatibility_wrapper_is_a_fixed_no_argument_adapter() -> None:
     assert "--no-agent" in body
     assert "--profile local_agent_v0_2" in body
     assert "--platform-root __HQA_PLATFORM_DIR__" in body
+    assert "HQA_INSTALLED_HERMES_SOURCE_DIR=__HQA_HERMES_SOURCE_DIR__" in body
+    assert "HQA_HERMES_COMPAT_HERMES_REPO" in body
     assert '"$@"' not in body
     assert '"$#" -ne 0' in body
 
@@ -764,6 +908,30 @@ def test_hermes_compatibility_wrapper_rejects_forwarded_arguments(tmp_path) -> N
     assert result.returncode == 2
     assert result.stdout == ""
     assert "accepts no arguments" in result.stderr
+
+
+def test_hermes_compatibility_wrapper_rejects_unsubstituted_source(
+    tmp_path: Path,
+) -> None:
+    source = REPO / "scripts" / "hermes" / "hqa-hermes-compatibility-watch.sh"
+    wrapper = tmp_path / "watch.sh"
+    wrapper.write_text(
+        source.read_text(encoding="utf-8")
+        .replace("__HQA_REPO_DIR__", str(tmp_path))
+        .replace("__HQA_PLATFORM_DIR__", str(tmp_path)),
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(wrapper)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "unsubstituted Hermes source" in result.stderr
 
 
 # --- D-25 read-only gate wrapper -------------------------------------------

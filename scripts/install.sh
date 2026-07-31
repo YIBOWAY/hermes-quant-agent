@@ -16,6 +16,25 @@ case "$HERMES_ROOT" in
     exit 2
     ;;
 esac
+if [ "${HQA_HERMES_SOURCE_DIR+x}" = "x" ]; then
+  HERMES_SOURCE_DIR="$HQA_HERMES_SOURCE_DIR"
+else
+  HERMES_SOURCE_DIR="$(/usr/bin/python3 - "$HERMES_ROOT" <<'PY'
+import os
+import sys
+
+
+print(os.path.abspath(os.path.join(sys.argv[1], "hermes-agent")))
+PY
+)"
+fi
+case "$HERMES_SOURCE_DIR" in
+  /*) ;;
+  *)
+    echo "HQA_HERMES_SOURCE_DIR must be absolute" >&2
+    exit 2
+    ;;
+esac
 
 CANONICAL_INTENT_PAYLOAD_DIR="$REPO_DIR/data/_runtime/intent-payloads-v2"
 CANONICAL_WORKFLOW_AUTHORITY_DIR="$REPO_DIR/data/_runtime/workflow-authority-v2"
@@ -219,6 +238,7 @@ trap cleanup_and_exit EXIT
 /usr/bin/python3 - \
   "$REPO_DIR" \
   "$PLATFORM_DIR" \
+  "$HERMES_SOURCE_DIR" \
   "$HERMES_ROOT/scripts" \
   "$CANONICAL_INTENT_PAYLOAD_DIR" \
   "$CANONICAL_WORKFLOW_AUTHORITY_DIR" \
@@ -244,6 +264,7 @@ def write_all(descriptor, payload):
 (
     repo_dir,
     platform_dir,
+    hermes_source_dir,
     installed_scripts_dir,
     intent_payload_dir,
     workflow_authority_dir,
@@ -269,6 +290,9 @@ for source in wrapper_sources:
     body = open(source, encoding="utf-8").read()
     body = body.replace("__HQA_REPO_DIR__", repo_dir)
     body = body.replace("__HQA_PLATFORM_DIR__", platform_dir)
+    body = body.replace(
+        "__HQA_HERMES_SOURCE_DIR__", shlex.quote(hermes_source_dir)
+    )
     body = body.replace("__HERMES_SCRIPTS_DIR__", installed_scripts_dir)
     if not body.startswith("#!/bin/bash\n"):
         raise SystemExit("wrapper lacks fixed bash shebang: " + source)
@@ -288,6 +312,9 @@ for source in launcher_sources:
     body = open(source, encoding="utf-8").read()
     body = body.replace("__HQA_REPO_DIR__", repo_dir)
     body = body.replace("__HQA_PLATFORM_DIR__", platform_dir)
+    body = body.replace(
+        "__HQA_HERMES_SOURCE_DIR__", shlex.quote(hermes_source_dir)
+    )
     body = body.replace("__HERMES_SCRIPTS_DIR__", installed_scripts_dir)
     if not body.startswith("#!/usr/bin/python3\n"):
         raise SystemExit("launcher lacks fixed Python shebang: " + source)
@@ -309,6 +336,9 @@ for source in skill_sources:
     body = open(source, encoding="utf-8").read()
     body = body.replace("__HQA_REPO_DIR__", repo_dir)
     body = body.replace("__HQA_PLATFORM_DIR__", platform_dir)
+    body = body.replace(
+        "__HQA_HERMES_SOURCE_DIR__", shlex.quote(hermes_source_dir)
+    )
     body = body.replace("__HERMES_SCRIPTS_DIR__", installed_scripts_dir)
     if "__HQA_" in body or "__HERMES_" in body:
         raise SystemExit("unsubstituted skill placeholder: " + source)
@@ -440,6 +470,130 @@ PY
     exit 2
     ;;
 esac
+
+# Freeze the compatibility watcher to the exact checkout selected at install
+# time. A linked Git worktree is valid, but the worktree root and its resolved
+# Git directory must both be physical and owner-controlled.
+/usr/bin/python3 - "$HERMES_SOURCE_DIR" <<'PY'
+import errno
+import os
+import re
+import stat
+import subprocess
+import sys
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    raise SystemExit(2)
+
+
+def open_owner_controlled_directory(path, *, require_current_owner):
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    current_fd = os.open(os.path.sep, flags)
+    try:
+        parts = os.path.abspath(path).split(os.path.sep)[1:]
+        for index, component in enumerate(parts):
+            try:
+                next_fd = os.open(component, flags, dir_fd=current_fd)
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                    fail("Hermes source must contain only physical directories")
+                raise
+            metadata = os.fstat(next_fd)
+            final = index == len(parts) - 1
+            owner_allowed = (
+                metadata.st_uid == os.geteuid()
+                if final and require_current_owner
+                else metadata.st_uid in (0, os.geteuid())
+            )
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or not owner_allowed
+                or stat.S_IMODE(metadata.st_mode) & 0o022
+            ):
+                os.close(next_fd)
+                fail("Hermes source must be owner-controlled")
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
+    except Exception:
+        os.close(current_fd)
+        raise
+
+
+source = sys.argv[1]
+if (
+    not os.path.isabs(source)
+    or source != os.path.abspath(source)
+    or len(os.fsencode(source)) > 4096
+    or any(ord(character) < 0x20 for character in source)
+):
+    fail("HQA_HERMES_SOURCE_DIR must be a canonical absolute path")
+
+try:
+    source_fd = open_owner_controlled_directory(
+        source,
+        require_current_owner=True,
+    )
+except FileNotFoundError:
+    fail("Hermes source checkout is unavailable")
+finally:
+    if "source_fd" in locals():
+        os.close(source_fd)
+
+git = "/usr/bin/git"
+if not os.path.isfile(git):
+    fail("Git is unavailable for Hermes source validation")
+git_environment = {
+    "HOME": os.environ.get("HOME", os.path.sep),
+    "PATH": "/usr/bin:/bin",
+    "GIT_CONFIG_NOSYSTEM": "1",
+}
+
+
+def git_output(*arguments):
+    try:
+        result = subprocess.run(
+            [git, "-C", source, *arguments],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=True,
+            timeout=5,
+            env=git_environment,
+        )
+    except (OSError, subprocess.SubprocessError):
+        fail("Hermes source must be a readable Git worktree checkout")
+    if result.stderr or len(result.stdout) > 8192:
+        fail("Hermes source Git identity is unavailable")
+    try:
+        return result.stdout.decode("utf-8", errors="strict").strip()
+    except UnicodeDecodeError:
+        fail("Hermes source Git identity is unavailable")
+
+
+if git_output("rev-parse", "--is-inside-work-tree") != "true":
+    fail("Hermes source must be a Git worktree checkout")
+top_level = git_output("rev-parse", "--show-toplevel")
+if top_level != source:
+    fail("HQA_HERMES_SOURCE_DIR must name the Git worktree root")
+head = git_output("rev-parse", "--verify", "HEAD^{commit}")
+if re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", head) is None:
+    fail("Hermes source Git commit identity is invalid")
+git_dir = git_output("rev-parse", "--absolute-git-dir")
+try:
+    git_fd = open_owner_controlled_directory(
+        git_dir,
+        require_current_owner=True,
+    )
+except FileNotFoundError:
+    fail("Hermes source Git directory is unavailable")
+finally:
+    if "git_fd" in locals():
+        os.close(git_fd)
+PY
 
 # Preflight every destination before creating or replacing any published file,
 # then publish staged files with fd-relative per-file replace and fsync.
