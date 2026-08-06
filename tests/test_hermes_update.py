@@ -235,6 +235,17 @@ def test_cli_candidate_environment_includes_api_server_test_dependencies(
     config = _environment_config()
 
     assert config.validation_commands[0][-2:] == ("--extra", "messaging")
+    assert config.validation_commands[1][:4] == (
+        config.validation_commands[0][0],
+        "run",
+        "--no-sync",
+        "pytest",
+    )
+    assert "tests/gateway/test_api_server_runs.py" in config.validation_commands[1]
+    assert (
+        "tests/gateway/test_api_server_managed_runs.py"
+        not in config.validation_commands[1]
+    )
     assert config.install_commands[0][-8:] == (
         "--extra",
         "all",
