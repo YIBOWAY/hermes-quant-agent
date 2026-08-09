@@ -5,6 +5,25 @@ complete; current D-32 work targets a real Agent v0.2 with complete `/hermes`
 Web Chat while preserving read-only / proposal-only and never touching the trading
 chain:
 
+## Normal local operation
+
+The 2026-08-09 Mac runtime is persistent and project-owned: Docker PostgreSQL
+plus Hermes, Platform backend/frontend, and the HQA connector run under user
+LaunchAgents. Start or inspect it from the Platform runtime checkout:
+
+```bash
+cd /Users/sunyibo/programs/Hermes-quant-agent/data/_runtime/agent-v02-work/ai-quant-platform
+bash scripts/local_mac_stack.sh start
+bash scripts/local_mac_stack.sh status
+```
+
+Hermes official source is pinned at `2446c8bb6755`; the live integration is
+`codex/v2-live-integration@9f2ca72da330`. Use only
+`~/.hermes/scripts/hqa-hermes-update.sh check|apply` for future updates. Local
+trust simplifies the single-user identity step only and does not relax
+`live_trading_enabled=false`, `kill_switch=true`, migrations, human gates, or
+public-release controls.
+
 Start with [`docs/README.md`](docs/README.md): it separates the long-term HQA
 roadmap, the current D-32 Agent v0.2 plan, and predecessor delivery records. The
 `docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md` delivery record covers Slice 9A's paper-strategy

@@ -4,6 +4,14 @@ Rules for AI agents working in this repository.
 
 ## Project Role
 
+- **Current local operations snapshot (2026-08-09):** Hermes official source
+  `2446c8bb6755` is integrated at live branch commit `9f2ca72da330`. Normal Mac
+  startup is the Platform runtime's `bash scripts/local_mac_stack.sh start`,
+  which manages Docker plus Hermes/backend/frontend/connector LaunchAgents.
+  Do not make service lifetime depend on an AI-tool terminal. Local trust is an
+  identity convenience only; real-trading, kill-switch, migration, human-gate,
+  and public-release boundaries remain independent.
+
 - `Hermes-quant-agent` is the active orchestration/COO layer for the local
   `/Users/sunyibo/programs/ai-quant-platform` backend.
 - Start at `docs/README.md`; it distinguishes the product roadmap, completed
@@ -189,6 +197,10 @@ Rules for AI agents working in this repository.
 
 - HQA tests: `./.venv/bin/pytest`
 - Install Hermes wrappers: `bash scripts/install.sh`
+- Persistent Mac stack:
+  `bash /Users/sunyibo/programs/Hermes-quant-agent/data/_runtime/agent-v02-work/ai-quant-platform/scripts/local_mac_stack.sh start`
+- Controlled Hermes update:
+  `~/.hermes/scripts/hqa-hermes-update.sh check` then explicit `apply`
 - Platform CLI path used by wrappers:
   `/Users/sunyibo/programs/ai-quant-platform/ai-quant/bin/quant-system`
 

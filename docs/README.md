@@ -3,15 +3,27 @@
 这份文件只回答三个问题：**现在按哪份计划做、实际做到哪里、其他文档该怎么读**。
 长期方向、历史实现细节和特定日期审计分别留在 roadmap、plan 和 audit 中。
 
-> 文档同步快照：2026-08-01。受控 operator window 已完成三仓精确提交与正常安装、正式库
-> backup/隔离恢复、仅应用 migration 028、私有 candidate、supervised connector 和两轮
-> AlphaZeroBeta 浏览器运行。UI/Session/dispatch/provider/approval/durable Run/直接 PDF/全文/
-> DB 子项通过，但两轮 paper intake 都失败；candidate 已 revoke，connector 已恢复
-> `reconcile_only`，public release/write 仍 OFF。完整证据见本页链接的 AlphaZeroBeta audit。
-> branch、dirty、PID、端口、candidate、release stamp/cutover 与服务健康仍是易变事实；交接时
-> 必须重新检查 git、进程、HTTP smoke、数据库和测试。
+> 文档同步快照：2026-08-09。Hermes 已通过受控双 worktree 更新到官方
+> `2446c8bb6755`，本机集成运行时为 `codex/v2-live-integration@9f2ca72da330`；
+> updater 再检查为 `up_to_date`，focused integration 203 项和受控 updater 140 项通过。
+> PostgreSQL、Hermes API、Platform backend、Next.js production frontend 与 HQA connector
+> 已由 Docker + macOS user LaunchAgents 常驻，不依赖 Codex/Claude/终端生命周期。Platform
+> 本地信任只省略单用户身份仪式，cookie 绑定 trust mode；`live_trading_enabled=false`、
+> `kill_switch=true`、migration/human gates 与 public release/write 边界不变。2026-08-01
+> AlphaZeroBeta paper-intake 结论仍保持未接受，不因本次运维升级而改写。
 
 ## 当前执行入口
+
+日常本机运维入口：
+
+```bash
+cd /Users/sunyibo/programs/Hermes-quant-agent/data/_runtime/agent-v02-work/ai-quant-platform
+bash scripts/local_mac_stack.sh start
+bash scripts/local_mac_stack.sh status
+```
+
+Hermes 只能通过 `~/.hermes/scripts/hqa-hermes-update.sh check|apply` 受控更新；兼容性 watcher
+仍只报告漂移，不自动 pull、install、restart 或打开任何 gate。
 
 | 层级 | 权威文档 | 当前含义 |
 |---|---|---|
