@@ -5,7 +5,8 @@ Rules for AI agents working in this repository.
 ## Project Role
 
 - **Current local operations pointer (2026-08-09):** Hermes official source
-  `2446c8bb6755` is installed through live integration `9f2ca72da330`. Normal
+  `2446c8bb6755` is installed through live integration `a4bac87463fd`, including
+  bounded macOS cold-start socket-drain hardening. Normal
   Mac startup is the Platform runtime's `bash scripts/local_mac_stack.sh start`;
   Docker plus Hermes/backend/frontend/connector survive terminal exit. Local
   trust is identity convenience only and never relaxes trading, kill-switch,

@@ -19,7 +19,8 @@ bash scripts/local_mac_stack.sh status
 This manages the existing Docker PostgreSQL container and the Hermes,
 backend, production frontend, and connector LaunchAgents. Hermes official
 source is pinned at `2446c8bb6755`, with live integration
-`codex/v2-live-integration@9f2ca72da330`. Future Hermes updates must use
+`codex/v2-live-integration@a4bac87463fd` (including bounded macOS cold-start
+socket-drain hardening). Future Hermes updates must use
 `~/.hermes/scripts/hqa-hermes-update.sh check|apply`.
 
 Start with [`docs/README.md`](docs/README.md): it separates the long-term HQA
