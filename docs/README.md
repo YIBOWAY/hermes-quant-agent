@@ -8,7 +8,8 @@
 > updater 再检查为 `up_to_date`，focused integration 203 项和受控 updater 140 项通过。
 > PostgreSQL、Hermes API、Platform backend、Next.js production frontend 与 HQA connector
 > 已由 Docker + macOS user LaunchAgents 常驻，不依赖 Codex/Claude/终端生命周期。Platform
-> 本地信任只省略单用户身份仪式，cookie 绑定 trust mode；`live_trading_enabled=false`、
+> 本地信任只省略单用户身份仪式，cookie 绑定 trust mode，运行态明确报告
+> `admission_mode=local_trust` 且没有 candidate ID/digest；`live_trading_enabled=false`、
 > `kill_switch=true`、migration/human gates 与 public release/write 边界不变。2026-08-01
 > AlphaZeroBeta paper-intake 结论仍保持未接受，不因本次运维升级而改写。
 

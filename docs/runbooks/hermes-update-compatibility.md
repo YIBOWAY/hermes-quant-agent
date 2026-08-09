@@ -117,6 +117,11 @@ mismatch fail closed as drift.
 
 ## Fixed compatibility probes
 
+The installed wrapper pins both source identity and `gateway status` to the
+same controlled Hermes runtime (`<source>/.venv/bin/hermes`, with the legacy
+`venv/bin/hermes` fallback). It must not inspect a different global Hermes
+wrapper and misreport the current LaunchAgent as stale.
+
 Only after the re-probe identity changed or lacks a successful baseline, both
 profiles run one fixed local status command and four fixed HTTP GETs:
 
@@ -219,6 +224,9 @@ the next cron tick until a compatible check succeeds.
    Or invoke the exact no-agent CLI from an HQA checkout:
 
    ```bash
+   HQA_HERMES_COMPAT_HERMES_REPO=/absolute/path/to/live/hermes \
+   HQA_HERMES_COMPAT_HERMES_CLI=/absolute/path/to/live/hermes/.venv/bin/hermes \
+   HQA_HERMES_COMPAT_HERMES_API_KEY_FILE=/absolute/owner-only/hermes-api.key \
    python3 -m hqa.hermes_compatibility_cli check \
      --no-agent \
      --profile local_agent_v0_2 \

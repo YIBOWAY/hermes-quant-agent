@@ -882,7 +882,7 @@ def _validate_current_ledger_projection(
     event_cursor = ledger["release_event_cursor"]
 
     if (
-        admission_mode not in {"closed", "candidate", "release"}
+        admission_mode not in {"closed", "candidate", "local_trust", "release"}
         or admission_workspace != "ws-local-main"
         or not _is_bounded_id(configured_workspace)
         or type(connector_ready) is not bool
@@ -1045,6 +1045,18 @@ def _validate_current_ledger_projection(
         or not connector_ready
         or ledger["mutation_enabled"] is not True
         or composer_ready is not True
+    ):
+        raise CompatibilityError("platform_health_schema")
+    if admission_mode == "local_trust" and (
+        profile != "local_agent_v0_2"
+        or not candidate_pair_absent
+        or release_authorized
+        or not connector_ready
+        or ledger["mutation_enabled"] is not True
+        or composer_ready is not True
+        or release_stamp is not None
+        or public_cutover is not None
+        or event_cursor != 0
     ):
         raise CompatibilityError("platform_health_schema")
     if admission_mode == "release" and (

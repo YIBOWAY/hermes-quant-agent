@@ -54,6 +54,16 @@ if [ -n "$HQA_INSTALLED_HERMES_API_KEY_FILE" ]; then
 fi
 export HQA_HERMES_COMPAT_HERMES_API_KEY_FILE="$HQA_INSTALLED_HERMES_API_KEY_FILE"
 
+if [ -x "$HQA_INSTALLED_HERMES_SOURCE_DIR/.venv/bin/hermes" ]; then
+  HQA_INSTALLED_HERMES_CLI="$HQA_INSTALLED_HERMES_SOURCE_DIR/.venv/bin/hermes"
+elif [ -x "$HQA_INSTALLED_HERMES_SOURCE_DIR/venv/bin/hermes" ]; then
+  HQA_INSTALLED_HERMES_CLI="$HQA_INSTALLED_HERMES_SOURCE_DIR/venv/bin/hermes"
+else
+  echo "hqa-hermes-compatibility-watch Hermes CLI is unavailable" >&2
+  exit 2
+fi
+export HQA_HERMES_COMPAT_HERMES_CLI="$HQA_INSTALLED_HERMES_CLI"
+
 cd __HQA_REPO_DIR__
 exec python3 -m hqa.hermes_compatibility_cli check \
   --no-agent \

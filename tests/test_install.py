@@ -43,6 +43,10 @@ def _init_hermes_checkout(path: Path) -> Path:
         ["git", "-C", str(path), "commit", "-q", "-m", "initial"],
         check=True,
     )
+    hermes_cli = path / ".venv" / "bin" / "hermes"
+    hermes_cli.parent.mkdir(parents=True, mode=0o700)
+    hermes_cli.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    hermes_cli.chmod(0o700)
     return path
 
 
@@ -671,9 +675,10 @@ def test_installed_compatibility_watcher_rejects_runtime_key_redirect(
     python = fake_bin / "python3"
     python.write_text(
         "#!/bin/bash\n"
-        "printf '%s\\0%s\\0' "
+        "printf '%s\\0%s\\0%s\\0' "
         '"$HQA_HERMES_COMPAT_HQA_REPO" '
         '"$HQA_HERMES_COMPAT_HERMES_API_KEY_FILE" '
+        '"$HQA_HERMES_COMPAT_HERMES_CLI" '
         '> "$WATCH_ENV_MARKER"\n',
         encoding="utf-8",
     )
@@ -689,6 +694,7 @@ def test_installed_compatibility_watcher_rejects_runtime_key_redirect(
             HQA_HERMES_COMPAT_HERMES_API_KEY_FILE=str(
                 tmp_path / "hostile-key"
             ),
+            HQA_HERMES_COMPAT_HERMES_CLI=str(tmp_path / "hostile-hermes"),
         ),
         capture_output=True,
         text=True,
@@ -700,6 +706,7 @@ def test_installed_compatibility_watcher_rejects_runtime_key_redirect(
     assert marker.read_bytes().split(b"\0") == [
         os.fsencode(REPO),
         os.fsencode(expected_key),
+        os.fsencode(selected / ".venv" / "bin" / "hermes"),
         b"",
     ]
 
@@ -1061,6 +1068,8 @@ def test_hermes_compatibility_wrapper_is_a_fixed_no_argument_adapter() -> None:
     assert "--platform-root __HQA_PLATFORM_DIR__" in body
     assert "HQA_INSTALLED_HERMES_SOURCE_DIR=__HQA_HERMES_SOURCE_DIR__" in body
     assert "HQA_HERMES_COMPAT_HERMES_REPO" in body
+    assert 'HQA_INSTALLED_HERMES_SOURCE_DIR/.venv/bin/hermes' in body
+    assert "HQA_HERMES_COMPAT_HERMES_CLI" in body
     assert "HQA_INSTALLED_HQA_REPO=__HQA_REPO_DIR__" in body
     assert "HQA_HERMES_COMPAT_HQA_REPO" in body
     assert "HQA_INSTALLED_HERMES_API_KEY_FILE=__HQA_HERMES_API_KEY_FILE__" in body

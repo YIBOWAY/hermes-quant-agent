@@ -346,6 +346,22 @@ def _candidate_ready_ledger(**changes: object) -> dict[str, object]:
     return ledger
 
 
+def _local_trust_ready_ledger(**changes: object) -> dict[str, object]:
+    ledger = _canonical_local_ledger(
+        mutation_enabled=True,
+        composer_write_ready=True,
+        chat_write_ready=True,
+        admission_mode="local_trust",
+        connector_liveness_ready=True,
+        connector_liveness_reason="ready",
+        connector_worker_id="connector-worker-1",
+        connector_mode="supervised_dispatch",
+        connector_heartbeat_age_seconds=0.25,
+    )
+    ledger.update(changes)
+    return ledger
+
+
 def _local_agent_capabilities() -> dict[str, object]:
     contract = _platform_contract()
     required_bool = contract["required_bool_features"]
@@ -651,6 +667,28 @@ def test_current_ledger_accepts_exact_fail_closed_workspace_mismatch() -> None:
     )
 
 
+def test_local_agent_accepts_explicit_local_trust_without_candidate_identity() -> None:
+    from hqa.hermes_compatibility import _validate_current_ledger_projection
+
+    _validate_current_ledger_projection(
+        _local_trust_ready_ledger(),
+        profile="local_agent_v0_2",
+    )
+
+
+def test_dark_profile_rejects_explicit_local_trust() -> None:
+    from hqa.hermes_compatibility import (
+        CompatibilityError,
+        _validate_current_ledger_projection,
+    )
+
+    with pytest.raises(CompatibilityError, match="platform_mutation_enabled_drift"):
+        _validate_current_ledger_projection(
+            _local_trust_ready_ledger(),
+            profile="dark_readonly",
+        )
+
+
 def test_current_ledger_accepts_closed_release_retained_candidate_observation() -> None:
     from hqa.hermes_compatibility import _validate_current_ledger_projection
 
@@ -882,6 +920,17 @@ def _set_ledger_field(field: str, value: object):
             admission_mode="candidate",
             candidate_admission_id=None,
             candidate_admission_digest=None,
+        ),
+        lambda ledger: ledger.update(
+            _local_trust_ready_ledger(
+                candidate_admission_id="candidate_1",
+                candidate_admission_digest="a" * 64,
+            )
+        ),
+        lambda ledger: ledger.update(
+            _local_trust_ready_ledger(
+                release_stamp_id="release_1",
+            )
         ),
         lambda ledger: ledger.update(
             admission_mode="candidate",

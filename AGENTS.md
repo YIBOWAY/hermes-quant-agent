@@ -9,7 +9,8 @@ Rules for AI agents working in this repository.
   startup is the Platform runtime's `bash scripts/local_mac_stack.sh start`,
   which manages Docker plus Hermes/backend/frontend/connector LaunchAgents.
   Do not make service lifetime depend on an AI-tool terminal. Local trust is an
-  identity convenience only; real-trading, kill-switch, migration, human-gate,
+  identity convenience only and reports `admission_mode=local_trust` without
+  candidate identity; real-trading, kill-switch, migration, human-gate,
   and public-release boundaries remain independent.
 
 - `Hermes-quant-agent` is the active orchestration/COO layer for the local
