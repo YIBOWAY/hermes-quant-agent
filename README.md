@@ -18,7 +18,8 @@ bash scripts/local_mac_stack.sh status
 ```
 
 Hermes official source is pinned at `2446c8bb6755`; the live integration is
-`codex/v2-live-integration@9f2ca72da330`. Use only
+`codex/v2-live-integration@a4bac87463fd` (including bounded macOS cold-start
+socket-drain hardening). Use only
 `~/.hermes/scripts/hqa-hermes-update.sh check|apply` for future updates. Local
 trust reports `admission_mode=local_trust` without candidate identity; it
 simplifies the single-user identity step only and does not relax

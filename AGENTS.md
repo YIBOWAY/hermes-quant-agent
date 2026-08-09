@@ -5,7 +5,8 @@ Rules for AI agents working in this repository.
 ## Project Role
 
 - **Current local operations snapshot (2026-08-09):** Hermes official source
-  `2446c8bb6755` is integrated at live branch commit `9f2ca72da330`. Normal Mac
+  `2446c8bb6755` is integrated at live branch commit `a4bac87463fd`, including
+  bounded macOS cold-start socket-drain hardening. Normal Mac
   startup is the Platform runtime's `bash scripts/local_mac_stack.sh start`,
   which manages Docker plus Hermes/backend/frontend/connector LaunchAgents.
   Do not make service lifetime depend on an AI-tool terminal. Local trust is an

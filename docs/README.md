@@ -4,7 +4,7 @@
 长期方向、历史实现细节和特定日期审计分别留在 roadmap、plan 和 audit 中。
 
 > 文档同步快照：2026-08-09。Hermes 已通过受控双 worktree 更新到官方
-> `2446c8bb6755`，本机集成运行时为 `codex/v2-live-integration@9f2ca72da330`；
+> `2446c8bb6755`，本机集成运行时为 `codex/v2-live-integration@a4bac87463fd`；
 > updater 再检查为 `up_to_date`，focused integration 203 项和受控 updater 140 项通过。
 > PostgreSQL、Hermes API、Platform backend、Next.js production frontend 与 HQA connector
 > 已由 Docker + macOS user LaunchAgents 常驻，不依赖 Codex/Claude/终端生命周期。Platform
