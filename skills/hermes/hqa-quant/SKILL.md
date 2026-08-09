@@ -1,7 +1,7 @@
 ---
 name: hqa-quant
 description: "HQA quant ops from Hermes — read-only market/signal/radar queries, local prediction and opportunity ledgers, human-gated research/account writes, artifact-first answers, and 30s async triage for long jobs."
-version: 1.14.0
+version: 1.15.0
 platforms: [macos]
 metadata:
   hermes:
@@ -190,6 +190,141 @@ Run from the repo dir. Each of these mutates state (creates a candidate,
 writes an approval lock, runs a backtest, records a review), so Hermes will
 show an approval prompt. That is intended; do not try to route them through the
 read-only gate.
+
+#### Natural-language paper reproduction (Agent v0.2 primary route)
+
+When the user asks in natural language to reproduce or extract a factor from a
+paper, use the active `/hermes` managed Session and advance exactly one visible
+next step. Do not send the user to the old collection of disconnected commands.
+The installed coordinator is:
+
+`__HERMES_SCRIPTS_DIR__/hqa-paper-research.sh <operation>`
+
+It reads exactly one strict JSON object from stdin. The command is a write path,
+so every invocation remains subject to the normal Hermes approval prompt. Never
+route it through `hqa-quant-readonly.sh`. The JSON is metadata-only: pass
+content-addressed payload/result/provider references and digests, never the
+paper body, prompt, source bytes, API credentials, or a human note other than
+the explicit plan-confirmation note.
+
+Use only IDs that the current workspace turn or the immediately preceding exact
+receipt supplied. Never invent, list-and-substitute, or silently refresh an ID.
+In particular:
+
+- The Hermes API server injects four concurrency-safe selectors into this Run:
+  `HERMES_PLATFORM_COMMAND_ID`, `HERMES_PLATFORM_SESSION_ID`,
+  `HERMES_PLATFORM_RUN_ID`, and
+  `HERMES_PLATFORM_MANAGED_SESSION_ID`. The wrapper fills absent
+  `command_id`, `platform_session_id`, `hermes_run_id`, and
+  `hermes_session_id` from them; if JSON supplies one, it must match exactly.
+  Missing or mismatched env fails closed. Never recover these values from
+  prompt text or a dynamic system prompt. They are selectors, not
+  authorization: HQA and Platform still revalidate the durable authorities.
+- `workspace_id` and `platform_session_id` come from the active ready
+  `web_managed_session`; the HQA task binds them as
+  `workspace:<workspace_id>` and `session:<platform_session_id>`.
+- `command_id`, `hermes_run_id`, `hqa_run_ref`, and provider/result references
+  come from the exact current Run receipts. A Gate may use a different Hermes
+  Run from its parent, but Gate 1/2 stay on planning Attempt 1 and Gate 3 must
+  use the new final-research Attempt 2.
+- Reuse one caller-stable `operation_id` for an interrupted logical step.
+  Reusing it with different input is a conflict. A registration timeout is
+  `paper_research_platform_outcome_unknown`: inspect the same `gate_id`; do not
+  create another Gate or rerun a provider/backtest.
+- `dry_run=true`, `paper_trading=true`, `live_trading_enabled=false`, and
+  `kill_switch=true` remain fixed. This workflow creates zero orders.
+
+The only legal sequence is:
+
+1. **Plan Run (Attempt 1).** Let Hermes analyze the named paper and create an
+   explicit plan card. After the exact planning submission, Hermes Run and
+   provider receipt exist, invoke `start-plan` with:
+   `operation_id, workspace_id, platform_session_id, payload_ref,
+   intent_expires_at, command_id, hermes_run_id, hqa_run_ref,
+   provider_evidence_ref, plan_version, plan_digest`.
+   The coordinator records
+   `StartResearch → ObserveSubmission → ObserveRun →
+   ObserveProviderEvidence → ProposePlan → RequestPlanConfirmation →
+   CompleteAttempt`, then stops at `awaiting_plan_confirmation`.
+
+2. **Independent plan confirmation.** Show the exact plan card/digest to the
+   human. Only after a clear confirmation invoke `confirm-plan` with
+   `operation_id, task_ref, expected_task_version, plan_version, plan_digest,
+   confirmation_note`. Formula confirmation is not implied by plan
+   confirmation.
+
+3. **Gate 1 — exact formula/source.** Generate or stage the candidate source,
+   show the formula, plain-language translation, universe, exact file and
+   SHA-256 to the human, then invoke `open-gate1` with
+   `operation_id, gate_id, workspace_id, platform_session_id, task_ref,
+   expected_task_version, attempt_ref, command_id, hermes_run_id, hqa_gate_ref,
+   source_file_ref, universe, reviewed_source_sha256`.
+   `attempt_ref` must be planning Attempt 1. The coordinator only opens the
+   browser challenge. The human's separate `ConfirmFormulaSource` action is
+   what calls the existing `paper_gate_cli confirm-formula`; never click or
+   imply that action automatically.
+
+4. **Candidate proposal, then Gate 2.** After Gate 1 is confirmed, run the
+   existing exact-source `factor_repro_cli propose` path to create the bound
+   candidate. Show its exact source and manifest. Invoke `open-gate2` with
+   `operation_id, gate_id, parent_gate_id, workspace_id, platform_session_id,
+   task_ref, expected_task_version, attempt_ref, command_id, hermes_run_id,
+   hqa_gate_ref, reviewed_source_sha256, gate1_confirmation_id, candidate_id,
+   expected_digest, expected_status`. `expected_status` is literally
+   `pending`; Gate 1 and Gate 2 must share Task, Attempt 1, source lineage and
+   HQA Gate ref. The human's independent `ReviewCandidateCAS` action supplies
+   the exact candidate/digest/status/note without a refetch.
+
+5. **Futu final evidence, then Gate 3 (Attempt 2).** Only after Gate 2 is
+   `reviewed`, run the approved candidate's one-shot backtest with
+   `factor_repro_cli backtest ... --provider futu --final`. Do not substitute
+   sample/local/Tiingo evidence. When its exact command, Hermes Run, provider
+   receipt and content-addressed `backtest-…` result exist, invoke
+   `open-gate3` with
+   `operation_id, gate_id, parent_gate_id, workspace_id, platform_session_id,
+   task_ref, expected_task_version, payload_ref, intent_expires_at, command_id,
+   hermes_run_id, hqa_run_ref, provider_evidence_ref, result_ref, hqa_gate_ref,
+   reviewed_source_sha256, gate1_confirmation_id, candidate_id,
+   expected_digest, final_backtest_receipt_id, base_commit`.
+   `result_ref` must be exactly
+   `result:<final_backtest_receipt_id>`. The coordinator creates Attempt 2 and
+   records submission/Run/provider/result facts before entering Gate 3.
+
+6. **Independent promotion review.** The human's
+   `PreparePromotionReview` browser action first resolves the exact domain Gate
+   as `passed`, records `ObserveGate3`, and then asks
+   `paper_gate_cli promote` to prepare the isolated review worktree. It never
+   commits. Show the returned `promotion_id`, worktree, patch and manifest.
+
+7. **Human Git review and commit, then completion.** The human personally
+   reviews `git diff` and creates exactly one scoped commit in the named
+   worktree. HQA must not type or run that commit for them. After they supply
+   the exact 40-character commit, invoke `complete-after-human-commit` with
+   `operation_id, gate_id, workspace_id, task_ref, expected_task_version,
+   attempt_ref, hqa_run_ref, provider_evidence_ref, reviewed_commit`.
+   The coordinator calls the read-only promotion-status seam, re-attests the
+   exact candidate/digest/final receipt/base/patch and reviewed commit, then
+   records `CompleteAttempt → CompleteTask`, reverse-audits the Workflow
+   authority, creates one immutable content-addressed HQA completion receipt,
+   and registers that exact terminal fact through
+   `quant-system hermes paper-gate complete`. Until Platform returns the same
+   receipt ref/digest with `status=completed`, the paper workflow is not
+   complete and candidate evidence must remain fail-closed. If that registrar
+   times out, treat it as `paper_research_platform_outcome_unknown` and replay
+   this same logical operation/receipt; never create a replacement Task,
+   Attempt, Gate, promotion, or backtest.
+
+If the current workspace is missing any required exact binding, say which
+receipt is missing and stop. Never create a fake Task/Attempt/Run/provider
+receipt, never reuse the planning Attempt for Gate 3, never treat Gate 2 review
+as Gate 3, and never call completion before the human commit is independently
+re-attested.
+
+#### Low-level Scene-B diagnostics and recovery
+
+The commands below remain useful for inspecting or recovering one exact step.
+They are not a substitute for the coordinator's two-Attempt workflow and must
+not be presented as the normal natural-language user journey.
 
 | Operation | Command |
 |---|---|
