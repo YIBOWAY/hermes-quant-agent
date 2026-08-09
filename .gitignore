@@ -8,7 +8,7 @@ review/entries.md
 predictions/
 opportunities/
 market_foresight/
-artifacts/hermes-feed/
+artifacts/
 automation/
 # Ignore runtime data, but track Scene-A threshold config (audit PR-5).
 # Must use `data/*` (not `data/`) so negation of children works.
@@ -22,6 +22,7 @@ data/_runtime/*
 # never publish local bearer tokens, ports, process IDs, or server instances.
 .superpowers/brainstorm/.last-*
 .superpowers/brainstorm/*/state/
+.superpowers/brainstorm/*/
 
 # Local tool caches and scratch dirs (never publish).
 .codegraph/

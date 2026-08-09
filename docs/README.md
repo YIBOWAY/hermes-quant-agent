@@ -3,6 +3,15 @@
 这份文件只回答三个问题：**现在按哪份计划做、实际做到哪里、其他文档该怎么读**。
 长期方向、历史实现细节和特定日期审计分别留在 roadmap、plan 和 audit 中。
 
+> **2026-08-09 当前本机运维指针**：Hermes 已通过受控 updater 对齐官方
+> `2446c8bb6755`，live integration 为 `9f2ca72da330`；Platform/HQA 当前 release
+> clone 的更新状态与完整 Agent v0.2 事实仍以 `codex/agent-v0-2-release` 分支文档为准。
+> PostgreSQL + Hermes + backend + production frontend + connector 已由 Docker/macOS
+> LaunchAgents 常驻，不依赖 Codex、Claude Code 或终端。日常入口是 Platform runtime 的
+> `bash scripts/local_mac_stack.sh start|status|restart|logs`。本地信任只省略身份仪式，
+> `live_trading_enabled=false`、`kill_switch=true`、migration/human gates 与 public release
+> 边界不变。
+
 > 事实快照：2026-07-23（本分支 `codex/full-9h`）。易变的 branch、dirty、PID、端口与服务健康不写死在这里；交接时
 > 必须重新检查 git、进程、HTTP smoke 和测试。
 
