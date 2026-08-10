@@ -142,6 +142,7 @@ class MockLLMServer:
     def __init__(self) -> None:
         self._mode = "text"
         self._calls = 0
+        self._tool_issued = False
         self._lock = threading.Lock()
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -155,6 +156,7 @@ class MockLLMServer:
         with self._lock:
             self._mode = mode
             self._calls = 0
+            self._tool_issued = False
 
     @staticmethod
     def _sse_chunks(chunks: List[dict]) -> bytes:
@@ -323,7 +325,19 @@ class MockLLMServer:
                 with outer._lock:
                     outer._calls += 1
                     mode = outer._mode
-                    n = outer._calls
+                    has_execute_code = any(
+                        isinstance(tool, dict)
+                        and isinstance(tool.get("function"), dict)
+                        and tool["function"].get("name") == "execute_code"
+                        for tool in body.get("tools", [])
+                    )
+                    use_tool = (
+                        mode == "tool_once"
+                        and has_execute_code
+                        and not outer._tool_issued
+                    )
+                    if use_tool:
+                        outer._tool_issued = True
 
                 err_429 = {
                     "error": {
@@ -340,7 +354,6 @@ class MockLLMServer:
                     self._send_json(429, err_429)
                     return
 
-                use_tool = mode == "tool_once" and n == 1
                 if want_stream:
                     raw = (
                         outer._tool_sse(model) if use_tool else outer._text_sse(model)

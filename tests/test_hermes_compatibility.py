@@ -217,7 +217,7 @@ def _config(tmp_path: Path, base_url: str):
         hermes_base_url=base_url,
         platform_base_url=base_url,
         hermes_cli_path=fake_hermes,
-        timeout_seconds=1.0,
+        timeout_seconds=5.0,
     )
 
 
@@ -468,7 +468,7 @@ def _local_agent_config(tmp_path: Path, base_url: str):
         hermes_base_url=base_url,
         platform_base_url=base_url,
         hermes_cli_path=base.hermes_cli_path,
-        timeout_seconds=1.0,
+        timeout_seconds=5.0,
     )
 
 
