@@ -1,15 +1,16 @@
 # Hermes-quant-agent
 
 Hermes orchestration layer for the local `ai-quant-platform`. Phase 1a-4/9H is
-complete; current D-32 work targets a real Agent v0.2 with complete `/hermes`
-Web Chat while preserving read-only / proposal-only and never touching the trading
-chain:
+complete; D-32 targets a real Agent v0.2 Web Chat, while D-33 provides a
+default-OFF, local-only path from verified paper intake through machine policy,
+final backtest, `paper_only` promotion, bounded sleeve activation, and resident
+paper execution. Live eligibility and every real order remain human-only.
 
 ## Normal local operation
 
-The 2026-08-09 Mac runtime is persistent and project-owned: Docker PostgreSQL
-plus Hermes, Platform backend/frontend, and the HQA connector run under user
-LaunchAgents. Start or inspect it from the Platform runtime checkout:
+The Mac runtime is persistent and project-owned: Docker PostgreSQL plus Hermes,
+Platform backend/frontend, the HQA connector, and the factor-automation driver
+run under user LaunchAgents. Start or inspect it from the Platform runtime checkout:
 
 ```bash
 cd /Users/sunyibo/programs/Hermes-quant-agent/data/_runtime/agent-v02-work/ai-quant-platform
@@ -22,9 +23,11 @@ Hermes official source is pinned at `2446c8bb6755`; the live integration is
 socket-drain hardening). Use only
 `~/.hermes/scripts/hqa-hermes-update.sh check|apply` for future updates. Local
 trust reports `admission_mode=local_trust` without candidate identity; it
-simplifies the single-user identity step only and does not relax
-`live_trading_enabled=false`, `kill_switch=true`, migrations, human gates, or
-public-release controls.
+simplifies the single-user identity step only. D-33 automation additionally
+requires both HQA and Platform Flag pairs and can create only `paper_only`
+qualifications; it does not relax `live_trading_enabled=false`,
+`kill_switch=true`, migrations, manual live gates, or public-release controls.
+See [`docs/runbooks/full-automation-paper.md`](docs/runbooks/full-automation-paper.md).
 
 Start with [`docs/README.md`](docs/README.md): it separates the long-term HQA
 roadmap, the current D-32 Agent v0.2 plan, and predecessor delivery records. The

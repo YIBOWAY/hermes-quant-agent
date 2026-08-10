@@ -1,7 +1,7 @@
 ---
 name: hqa-quant
 description: "HQA quant ops and paper/literature/factor research (论文、文献、因子与策略研究) from Hermes — verified web discovery, read-only market/signal/radar queries, local ledgers, human-gated research/account writes, artifact-first answers, and 30s async triage."
-version: 1.18.5
+version: 1.19.0
 platforms: [macos]
 metadata:
   hermes:
@@ -17,15 +17,30 @@ safety intact:
 
 1. **Answer from artifacts first** — the scheduled watchdogs already wrote the
    answer to a JSONL log. Read it before running anything.
-2. **Read-only queries are pre-authorized; account/research execution writes are
-   not.** Read-only platform queries go through one gate wrapper that Hermes may
-   run without asking. Any command that mutates an account, approves a factor,
-   runs a full options scan, backtests, or trades stays behind a human approval
-   prompt — never bypass it. The prediction ledger is a local evidence artifact,
-   not an account or execution path; create only when the user explicitly states
-   the prediction to record.
+2. **Read-only queries are pre-authorized; manual writes are not.** The sole
+   exception is D-33's owner-enabled, dual-Flag `paper_only` queue: it replaces
+   the manual factor Gate sequence with deterministic policy and audit, never
+   with unconstrained model discretion. It cannot grant live eligibility or
+   send live orders. All other account/research writes remain human-approved.
 
 ## 1. Command quick-ref
+
+### D-33 automatic paper factor ingress
+
+Only after both HQA and Platform Flag pairs are enabled in the owner-only
+backend environment, enqueue one exact request with:
+
+`__HERMES_SCRIPTS_DIR__/hqa-factor-automation.sh enqueue --request-file <absolute-owner-file.json>`
+
+The wrapper exposes `enqueue` only. The request binds `hqa.paper_intake/v1`,
+exact source SHA-256, ordered universe, real provider window, versioned machine
+policy evidence, and the expected Platform base commit. Enqueue re-verifies the
+source and stages owner-private immutable bytes; the five-minute LaunchAgent
+then serially drives machine Gate 1/2/3, final evidence verification, two-phase
+commit, local ff-only land, `paper_only` registration, limited sleeve admission,
+and resident paper maintenance. It never pushes GitHub. If either Flag pair is
+off, policy/evidence fails, HEAD drifts, or a limit is exceeded, it fails closed.
+See `__HQA_REPO_DIR__/docs/runbooks/full-automation-paper.md`.
 
 ### Read-only platform queries — no approval needed
 
@@ -721,11 +736,13 @@ answer those inline, no backgrounding.
 
 ## 4. Safety red lines
 
-- **Account, research-execution, and trading writes always need human approval.**
+- **Manual account, research-execution, and all live-trading writes need human approval.**
   Propose/approve/backtest, review draft/confirm, `paper rebalance`, `agent
   review`, any data ingest, full options scans, and any trade path stay behind
   the approval prompt. Never route them through the read-only gate to dodge
-  approval. A user-requested prediction artifact is not trading authorization.
+  approval. The only automatic mutation exception is the exact D-33
+  `paper_only` queue described in §1; it has no live registry or broker surface.
+  A user-requested prediction artifact is not trading authorization.
 - **Never flip the safety invariants.** `dry_run=true`, `paper_trading=true`,
   `live_trading_enabled=false`, `kill_switch=true` are load-bearing. Do not run
   commands that disable `paper_trading` or the `kill_switch`. If

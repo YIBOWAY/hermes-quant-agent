@@ -1,7 +1,7 @@
 # 全自动 paper 路径实施计划（D-33）— 修订版
 
 **日期**：2026-08-10  
-**状态**：**已批准（§15 八项全绿，2026-08-10）**；下一步 = commit 本计划 + HQA runtime clone 对齐 → Slice 1 可逆冻结  
+**状态**：**Slices 1–5 源码与文档已实施；全量验收、runtime 对齐与双 Flag 启用进行中（2026-08-10）**
 **范围**：HQA + Platform 两仓；paper 全自动；live 永远人工  
 **修订原则（写给怕「又搞成什么都干不了」的你）**：
 
@@ -291,9 +291,9 @@ Gate2 `reviewer=auto` = **对照该政策 CAS 通过**，不是「代码能跑�
 - **禁止** 依赖 Codex/Claude 终端会话保活  
 
 ### 7.6 验收
-- [ ] 强制无正文/无搜索 → 不能 mark_succeeded  
-- [ ] 真 PDF 路径 → 合同过 + candidate +（approve 后）final receipt  
-- [ ] 无 promote / 无 live 资格写入  
+- [x] 强制无正文/无搜索 → 不能 mark_succeeded
+- [x] 真 PDF 路径 → 合同过 + candidate +（approve 后）final receipt
+- [x] Slice 2 停在 receipt；无 promote / 无 live 资格写入
 
 ---
 
@@ -323,10 +323,10 @@ running
 - `demoted.json` 防抖；信号路径 `factor_missing` → 自动进入 quarantine sweep  
 
 ### 8.4 验收
-- [ ] 超限 BLOCKED；日亏/回撤 pause  
-- [ ] 正常 fill 不因 kill_switch 默认 True 误杀  
-- [ ] quarantine 持仓仍被监控  
-- [ ] paper_only 因子无法被 live registry 加载（单测）  
+- [x] 超限 BLOCKED；日亏/回撤 pause
+- [x] 正常 fill 不因 sleeve RiskLimits 的默认 kill switch 误杀
+- [x] quarantine 持仓仍被监控
+- [x] paper_only 因子无法被 live registry 加载（单测）
 
 ---
 
@@ -345,23 +345,26 @@ running
 
 ### 9.3 Driver
 `hqa/factor_automation.py`：串行；LaunchAgent 触发；crash 可恢复。  
+每五分钟先维护风险，再仅对 `automation_managed` sleeve 幂等生成 daily signal、
+next-weekday plan 与到期 paper fill；手工 sleeve 不受影响。
 浏览器 saga 自动完成 = **后置**，不挡 driver-only。
 
 ### 9.4 验收
-- [ ] flag OFF 全拒  
-- [ ] e2e 到 paper_only land + sleeve 限额内  
-- [ ] live registry 拒绝该因子  
-- [ ] landed 不 flip invalidated  
+- [x] flag OFF 全拒
+- [x] 自动链测试到 paper_only land + sleeve 限额内
+- [x] live registry 拒绝该因子
+- [x] landed 不 flip invalidated
+- [x] 常驻 paper 周期 signal → plan → fill 幂等，手工 sleeve 不触碰
 
 ---
 
 ## 10. Slice 5 — 文档
 
-- 现行规则改为「paper 自动 + live 人工 + paper_only 隔离」  
-- 历史 audit **不改写**  
-- skill 升版 + install 重装  
-- D-33 决策写入 roadmap  
-- 运维 runbook：flag、配额、quarantine、demote、policy 文件  
+- [x] 现行规则改为「paper 自动 + live 人工 + paper_only 隔离」
+- [x] 历史 audit **不改写**
+- [x] skill 升到 1.19.0；install 重装进入最终 runtime 验收
+- [x] D-33 决策写入 roadmap
+- [x] 运维 runbook：flag、配额、quarantine、demote、policy、常驻 paper 周期
 
 ---
 
@@ -437,4 +440,16 @@ running
 
 ---
 
-*修订吸收 Codex 2026-08-10 审查；已用 registry/promotion/RiskLimits/Git 现状复核。未改业务代码、未跑迁移、未开 Phase 0。*
+## 17. 实施记录（2026-08-10）
+
+- Platform 已统一为单一受保护 `main`；两份运行 checkout 按同一主线管理，archive
+  tags/bundle/dirty snapshot 可恢复。
+- P1、机器 policy、paper/live registry 分裂、029 authority、两阶段 land、限额 sleeve、
+  risk/demote、五分钟 LaunchAgent、真实 backtest 证据复核和 paper signal→plan→fill 均已落地。
+- 029 在 backup + isolated restore 后只 apply 一次；禁止重放。双 Flag 在全量 suites、安装
+  与冷启动验收通过前保持关闭。
+- 一次真实研究链已到 candidate/final receipt，但实际 cost/drawdown/turnover 不满足政策，
+  因而正确拒绝、没有 land。它是负向安全证据，不冒充成功自动因子。
+- GitHub 不由自动链 push；浏览器 saga 仍是明确后置项，不阻塞 driver-only D-33。
+
+*实施以当前两仓 Git、测试输出、正式库 marker/trigger 和 runtime health 为证据；历史 audit 未改写。*

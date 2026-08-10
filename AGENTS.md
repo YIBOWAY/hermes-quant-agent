@@ -9,13 +9,16 @@ Rules for AI agents working in this repository.
   bounded macOS cold-start socket-drain hardening. Normal Mac
   startup is the Platform runtime's `bash scripts/local_mac_stack.sh start`,
   which manages Docker plus Hermes/backend/frontend/connector LaunchAgents.
-  Do not make service lifetime depend on an AI-tool terminal. Local trust
+  Do not make service lifetime depend on an AI-tool terminal. D-33 adds a fifth
+  project-owned LaunchAgent for the paper-factor automation driver. Local trust
   (2026-08-01) bypasses only the candidate-admission **identity ritual**
   (preflight evidence, three-repo digests, clean checkout, connector ceremony)
   and reports `admission_mode=local_trust` without candidate identity. It does
-  **not** relax the factor-promotion human gates: the Scene-B Gate 1/2/3 chain
-  in the Safety Rules below still applies unchanged. Real-trading, kill-switch,
-  migration, human-gate, and public-release boundaries remain independent.
+  does not authorize factor promotion. Factor automation is a separate,
+  default-OFF, dual-Flag path: when both HQA and Platform pairs are exactly
+  enabled it replaces Gate 1/2/3 with digest-bound machine policy for
+  `paper_only` factors only. The manual Scene-B path and every live-trading,
+  kill-switch, migration, and public-release boundary remain independent.
 
 - `Hermes-quant-agent` is the active orchestration/COO layer for the local
   `/Users/sunyibo/programs/ai-quant-platform` backend.
@@ -24,8 +27,10 @@ Rules for AI agents working in this repository.
 - The product roadmap is `docs/design/2026-07-01-roadmap-phases-0b-4.md`.
   The completed Phase 1a-4 v2 implementation record is
   `docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md`; Slices 9A through 9H
-  are all delivered. The only active implementation plan is
-  `docs/superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`.
+  are all delivered. D-32 continues to govern Agent v0.2 Web Chat. D-33's
+  approved paper-automation implementation and acceptance record is
+  `docs/plans/2026-08-10-full-automation-paper-path.md`; its operator contract is
+  `docs/runbooks/full-automation-paper.md`.
   `docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md` is the
   predecessor Wave 3 delivery record and blocker input, not an active queue;
   the full 9H record is also completed historical delivery evidence.
@@ -38,10 +43,13 @@ Rules for AI agents working in this repository.
   continuing external context requires an explicit fork with immutable lineage.
   The 2026-07-16 GET-only/reconcile-only/never-live-006 description is
   **historical evidence**, not current instructions. Do not use it as NEXT.
-- **Agent v0.2 operator boundary (2026-08-01 snapshot):** migration 006–028 was
+- **Agent v0.2 operator boundary (2026-08-10 snapshot):** migration 006–029 was
   live in the inspected `quantplatform`; 028 was applied exactly once after
   backup/isolated restore (marker/version each 1, target triggers 2). Do not
-  re-apply it. Two bounded private AlphaZeroBeta runs reached real
+  re-apply it. Migration 029 was subsequently applied exactly once after its
+  own backup and isolated restore rehearsal; it is the append-only automatic
+  promote/demote quota authority and must not be replayed. Two bounded private
+  AlphaZeroBeta runs reached real
   UI/Session/dispatch/provider/approval/durable-Run/direct-PDF/full-text/DB
   milestones, but **both failed paper intake** and were revoked; connector
   cleanup is `reconcile_only`. The earlier approval-projection failure remains
@@ -147,11 +155,17 @@ Rules for AI agents working in this repository.
   place. Platform projections must never counterfeit missing Hermes canonical
   Run/event/provider/approval/stop facts.
 - Never bypass `paper_trading`, `live_trading_enabled=false`, `kill_switch`,
-  or human approval gates.
-- The supported HQA Scene-B path uses three human gates: formula confirmation,
+  or the applicable manual/machine policy gate.
+- The supported **manual** HQA Scene-B path uses three human gates: formula confirmation,
   candidate source approval, and promotion diff review/commit. All three are
   implemented in the HQA wrappers; raw platform APIs/CLI remain generic
-  primitives and do not independently prove HQA Gate 1 provenance. For the
+  primitives and do not independently prove HQA Gate 1 provenance. D-33's
+  dual-Flag automatic paper path is the only exception: it uses `reviewer=auto`,
+  `registration=auto_promote`, a versioned policy digest, verified final-backtest
+  evidence, two-phase commit, local ff-only land, and immutable
+  `promotion_scope=paper_only`. It never auto-pushes and cannot populate the
+  live registry. With either Flag pair off, this exception fails closed and the
+  following manual rules apply. For the
   final paper task, plan confirmation is a separate human stop and is not Gate
   1; the coordinator must pause independently at plan confirmation and Gates
   1/2/3, and it cannot complete the Task before the human Gate 3 commit.

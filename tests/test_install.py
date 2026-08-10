@@ -2146,7 +2146,7 @@ def test_skill_card_frontmatter_mirrors_hermes_contract():
 def test_installed_skill_documents_exact_gate2_cas_command(tmp_path) -> None:
     scripts_dest = _install(tmp_path)
     body = (scripts_dest.parent / "skills" / "hqa-quant" / "SKILL.md").read_text()
-    assert "version: 1.18.5" in body
+    assert "version: 1.19.0" in body
     assert "--expected-source-digest <reviewed-source-sha256>" in body
     assert '--confirmation-note "<formula-and-translation-review>"' in body
     assert (
@@ -2156,7 +2156,7 @@ def test_installed_skill_documents_exact_gate2_cas_command(tmp_path) -> None:
     assert "never refetch" in body.lower()
     # Source card must match the installed card for the Gate 2 surface.
     source = SKILL_SRC.read_text(encoding="utf-8")
-    assert "version: 1.18.5" in source
+    assert "version: 1.19.0" in source
     assert (
         "approve --candidate-id <id> --expected-digest <sha256> "
         '--expected-status pending --note "<translation-review>"'
@@ -2168,7 +2168,7 @@ def test_skill_uses_exact_candidate_backtest_and_unambiguous_platform_commands(
     tmp_path,
 ) -> None:
     source = SKILL_SRC.read_text(encoding="utf-8")
-    assert "version: 1.18.5" in source
+    assert "version: 1.19.0" in source
     assert ("backtest --candidate-id <id> --expected-digest <sha256>") in source
     assert "backtest --factor-id" not in source
     for operation in ("propose", "list", "detail", "approve", "backtest", "promote"):
@@ -2184,7 +2184,7 @@ def test_skill_uses_exact_candidate_backtest_and_unambiguous_platform_commands(
     installed = (scripts_dest.parent / "skills" / "hqa-quant" / "SKILL.md").read_text(
         encoding="utf-8"
     )
-    assert "version: 1.18.5" in installed
+    assert "version: 1.19.0" in installed
     for operation in ("propose", "list", "detail", "approve", "backtest", "promote"):
         assert f"{scripts_dest / 'hqa-factor-repro.sh'} {operation}" in installed
     assert "python3 -m hqa.factor_repro_cli" not in installed
@@ -2206,7 +2206,7 @@ def test_skill_routes_paper_research_through_verified_reproducibility_intake(
             "因子",
         ):
             assert trigger in front
-        assert "version: 1.18.5" in contract
+        assert "version: 1.19.0" in contract
 
         search_at = contract.index("call the actual `web_search` tool")
         extract_at = contract.index("call `web_extract`")
@@ -2386,7 +2386,7 @@ def test_skill_card_documents_strict_portfolio_risk_v2() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.18.5" in body
+    assert "version: 1.19.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-portfolio-risk.sh" in body
     assert "logs/portfolio_risk.jsonl" in body
     assert "current snapshot" in lower
@@ -2402,7 +2402,7 @@ def test_skill_card_documents_prediction_ledger_contract() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.18.5" in body
+    assert "version: 1.19.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-prediction.sh" in body
     assert "create" in lower and "list" in lower and "reconcile" in lower
     assert "predictions/entries.jsonl" in body
@@ -2416,7 +2416,7 @@ def test_skill_card_documents_market_foresight_and_artifact_shelf() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.18.5" in body
+    assert "version: 1.19.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-market-foresight.sh" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-artifacts.sh" in body
     assert "artifacts/hermes-feed/manifest.v1.json" in body
@@ -2429,7 +2429,7 @@ def test_skill_card_documents_opportunity_ledger_contract() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.18.5" in body
+    assert "version: 1.19.0" in body
     assert "__HERMES_SCRIPTS_DIR__/hqa-opportunities.sh" in body
     assert "opportunities/entries.jsonl" in body
     assert "sync-signals" in lower and "record-action" in lower
@@ -2443,7 +2443,7 @@ def test_skill_card_documents_full_9h_automation_contract() -> None:
     body = SKILL_SRC.read_text(encoding="utf-8")
     lower = body.lower()
 
-    assert "version: 1.18.5" in body
+    assert "version: 1.19.0" in body
     for wrapper in (
         "hqa-full-9h-daily-close.sh",
         "hqa-full-9h-freshness.sh",

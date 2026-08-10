@@ -3,14 +3,16 @@
 这份文件只回答三个问题：**现在按哪份计划做、实际做到哪里、其他文档该怎么读**。
 长期方向、历史实现细节和特定日期审计分别留在 roadmap、plan 和 audit 中。
 
-> 文档同步快照：2026-08-09。Hermes 已通过受控双 worktree 更新到官方
+> 文档同步快照：2026-08-10。Hermes 已通过受控双 worktree 更新到官方
 > `2446c8bb6755`，本机集成运行时为 `codex/v2-live-integration@a4bac87463fd`；
 > updater 再检查为 `up_to_date`，focused integration 203 项和受控 updater 140 项通过。
-> PostgreSQL、Hermes API、Platform backend、Next.js production frontend 与 HQA connector
-> 已由 Docker + macOS user LaunchAgents 常驻，不依赖 Codex/Claude/终端生命周期。Platform
+> PostgreSQL、Hermes API、Platform backend、Next.js production frontend、HQA connector
+> 与 factor-automation driver 已由 Docker + macOS user LaunchAgents 常驻，不依赖
+> Codex/Claude/终端生命周期。D-33 自动链默认关闭，只有 HQA/Platform 两对 Flag 同时
+> 为 true 才会消费 owner-private queue，并且只允许 `paper_only`。Platform
 > 本地信任只省略单用户身份仪式，cookie 绑定 trust mode，运行态明确报告
 > `admission_mode=local_trust` 且没有 candidate ID/digest；`live_trading_enabled=false`、
-> `kill_switch=true`、migration/human gates 与 public release/write 边界不变。2026-08-01
+> `kill_switch=true`、migration/manual-live gates 与 public release/write 边界不变。2026-08-01
 > AlphaZeroBeta paper-intake 结论仍保持未接受，不因本次运维升级而改写。
 
 ## 当前执行入口
@@ -29,6 +31,8 @@ Hermes 只能通过 `~/.hermes/scripts/hqa-hermes-update.sh check|apply` 受控�
 | 层级 | 权威文档 | 当前含义 |
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
+| D-33 自动 paper 计划 | [`plans/2026-08-10-full-automation-paper-path.md`](plans/2026-08-10-full-automation-paper-path.md) | 论文正文收据 → 因子 → final backtest → 机器 Gate 1/2/3 → 本地 ff-land → 限额 sleeve；只写 `paper_only`，不 auto-push，live 永远人工。 |
+| D-33 运维 | [`runbooks/full-automation-paper.md`](runbooks/full-automation-paper.md) | 双 Flag、owner-private 入队、常驻 driver、029 配额、信号/执行时窗、pause/quarantine/demote 与回滚。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |
 | 当前 implementation plan | [`superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md`](superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md) | 唯一 active backlog：只朝真正 Agent v0.2 + 完整 `/hermes` Web Chat 推进；不做临时网页 chat。顶部 2026-08-01 addendum 记录 006–028 live snapshot、两轮私有 AlphaZeroBeta 运行、paper-intake P1 与暗态清理；下一步先做运行时 intake contract，再补完整 browser DoD、全新 candidate acceptance 和另行授权的 public release。 |
 | AlphaZeroBeta Web E2E | [`audits/2026-07-31-alphazerobeta-paper-research-web-e2e.md`](audits/2026-07-31-alphazerobeta-paper-research-web-e2e.md) | 第一轮与 2026-08-01 retest 的事实源：运行链路子项通过但两轮 paper intake 均 FAIL；retest trace 为 `web_search=0`、一次失败的 `web_extract`，reproducibility/non-actionable verdict 未接受，下游未评估。zero orders，明确不授权 public release。 |

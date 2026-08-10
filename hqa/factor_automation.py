@@ -1,10 +1,4 @@
-"""Fail-closed paper factor automation pipeline.
-
-Slice 2 exposes the repeatable pipeline only through an explicit acceptance
-switch and deliberately stops at a content-bound final backtest receipt.  The
-production dual flags, durable driver, Gate-3 commit, and local ff-land are
-added later; this module has no promotion method by design.
-"""
+"""Fail-closed, dual-flag paper-only factor automation pipeline."""
 
 from __future__ import annotations
 

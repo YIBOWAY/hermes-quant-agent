@@ -4,7 +4,7 @@
 > 上游：`docs/design/hermes_quant_agent_plan.md`（总设计）。前置：Phase 0a 已交付（只读数字员工，见 `docs/plans/2026-07-01-phase-0a-readonly-digital-employee.md`）。
 > 本文定位：把 0a 之后的全部阶段一次性对齐方向。**分层规划**——近期阶段给完整 TDD 计划，中期给设计 spec，远期给方向大纲。
 > 安全红线（贯穿全程，继承总设计）：实盘执行层完成前，保持 `paper_trading` / `live_trading_enabled=false` / `kill_switch` / 人工审批门。任何策略、agent、cron、MCP 都不得绕过。
-> **产品路线事实源**：本文决策台账（D-1…D-32）管理 Hermes-quant-agent 与
+> **产品路线事实源**：本文决策台账（D-1…D-33）管理 Hermes-quant-agent 与
 > `ai-quant-platform` 的跨仓产品方向；平台 Phase 15 只保留素材价值。当前交付状态、
 > 是否已选定下一 slice 和 git 分层口径先看 [`../README.md`](../README.md)。
 
@@ -26,6 +26,7 @@
 
 | 编号 | 决策 |
 |---|---|
+| D-33 | （2026-08-10，**已批准并按五个串行切片实施**）**自动 paper、人工 live**：D-16/D-20 的三道人类门继续适用于手工 Scene-B 与任何 live 资格，但在独立双-Flag paper 模式中由 digest-bound 机器政策取代。自动链必须验证真实正文收据、精确源码、静态前视检查和真实 final-backtest 数据证据；以 `reviewer=auto`、`registration=auto_promote`、不可变 `promotion_scope=paper_only` 经两阶段 commit 和本地 ff-only land，不 auto-push。Platform live registry 物理拒绝 `paper_only`。029 是 append-only promote/demote/日配额权威；首发限额为单 sleeve `min(10k,1% NAV)`、合计 10%、日 promote 1、日亏 2%/回撤 10% 自动 pause。常驻 LaunchAgent 每 5 分钟幂等恢复，生成 paper 信号/执行计划/模拟成交；live、公共发布与浏览器 saga 均不由此授权。权威计划与运行边界见 `docs/plans/2026-08-10-full-automation-paper-path.md`、`docs/runbooks/full-automation-paper.md`。 |
 | D-META-1 | 分层规划：0b+1a 完整计划、1b+2 spec、3+4 大纲 |
 | D-1 | Phase 0b 重定位为「可观测与治理底座」；API/MCP 鉴权从 0b **移到 1b 开头** |
 | D-2 | 复盘日志放 **Hermes 层专用 append-only 库**，与 0a run-log、平台评审池分开；喷给 Hermes memory |
