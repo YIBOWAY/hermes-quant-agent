@@ -197,6 +197,14 @@ Phase 1.1 附加：
 - [x] 响应体瘦身：history 仅保留最近 90 根 sparkline；K 型空序列显示明确空态
 - [x] 晨报导语不再出现“平台模板提示”；半导体/软件相对强弱按当日真实差值生成
 
+Phase 1.2（同日交付，只读扩展）：
+- [x] `GET /api/asia-radar/summary` 只读摘要（同一 fail-closed Futu 契约），供晨报/通知使用
+- [x] 晨报导语在确定性市场手记后追加 1 句亚洲雷达概括；数据不可用时明示“亚洲雷达数据暂不可用”
+- [x] 归档 payload 新增可选 `asia_radar` / `asia_radar_note`（含 provenance）
+- [x] `quant-system data asia-radar-refresh` 日更 CLI：暖 12 ETF bar 缓存并持久化 `<as_of>.json` 快照
+- [x] `com.aiquant.asia-radar-refresh` LaunchAgent（17:05 本地，calendar interval）接入 `local_mac_stack` start/stop/status/logs
+- [x] CLI 测试覆盖快照写入、provider 失败 fail-closed、`--no-write-snapshot`
+
 ### 2.5b Phase 1 复审 findings（已处理/留档）
 
 | ID | 级别 | 处理 |
@@ -214,18 +222,20 @@ Phase 1.1 附加：
 - **Phase 2**：扩展 Futu 多市场代码适配；接入日经/恒指/TWSE；韩国评估 Twelve Data 或 KRX 合同
 - **Phase 3**：样本外验证的龙头映射（点时权重）、估值数据；HQA 定时 + market_foresight 告警
 
-### 2.7 数据日更落库与晨报接入（设计讨论，Phase 2 前菜）
+### 2.7 数据日更落库与晨报接入（Phase 1.2 已交付最小闭环）
 
-用户提出的方向，当前仅设计，不在 Phase 1.1 实现：
+用户提出的方向，最小只读闭环已落地；后续可在此之上扩展：
 
-1. **日更落库**：每日收盘后由调度任务调 `read_asia_radar_overview`，把 12 ETF QFQ 日线写入
-   `EquityBarCache`（DuckDB）并归档当日 overview 快照（as_of 为主键）。后续页面默认读库，
-   provenance 标 `futu_cache`；只有强制刷新或缓存缺口才回打 Futu。失败保留上一版并标 stale。
-2. **晨报接入**：晨报生成时读取当日 Asia Radar overview，给导语追加 1–2 句亚洲市场概括
-   （动态赢家/输家、最大 YTD 分化、数据截至）。必须复用同一 fail-closed 数据路径，
-   晨报缺数据时明示“亚洲雷达数据不可用”，不得生成模拟句子。
+1. **日更落库**：`quant-system data asia-radar-refresh`（默认）把 12 ETF QFQ 日线写入
+   `EquityBarCache`，并把当日 overview 快照写到 `data/api_runs/asia_radar/<as_of>.json`；
+   `com.aiquant.asia-radar-refresh` LaunchAgent 每日 17:05 本地运行。页面默认优先读缓存，
+   provenance 标 `futu_cache`；失败保留上一版并标 stale。hqa 侧如另需自有调度，
+   只须在同一 CLI 上挂 automation，不再重复实现取数。
+2. **晨报接入**：晨报导语在“平台市场手记”后追加 1 句确定性亚洲雷达概括
+   （动态赢家/输家、YTD 前三后三分化、截至日期、provenance）。复用同一 fail-closed
+   `/api/asia-radar/summary`，缺数据时明示“亚洲雷达数据暂不可用”，绝不生成模拟句子。
 3. **导语文案纪律**：刊出语不出现“平台模板提示/确定性模板”等实现性措辞；
-   本次已把半导体 vs 软件改为按当日 SOXX/IGV 真实差值输出。
+   半导体 vs 软件与亚洲概括均按当日真实数据差值输出。
 
 ### 2.8 行情浏览页热力化（设计讨论，另起 P1.5）
 
