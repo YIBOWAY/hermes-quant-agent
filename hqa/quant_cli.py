@@ -202,6 +202,38 @@ def run_agent_review(
     )
 
 
+def run_agent_auto_review(
+    *,
+    candidate_id: str,
+    expected_manifest_digest: str,
+    expected_status: str,
+    policy_digest: str,
+    intake_contract_digest: str,
+    bin_path: Optional[Path] = None,
+    cwd: Optional[Path] = None,
+) -> tuple[int, str]:
+    """Machine Gate 2 with caller-supplied, digest-bound policy lineage."""
+    return _run(
+        [
+            "agent",
+            "auto-review",
+            "--candidate-id",
+            candidate_id,
+            "--expected-digest",
+            expected_manifest_digest,
+            "--expected-status",
+            expected_status,
+            "--policy-digest",
+            policy_digest,
+            "--intake-contract-digest",
+            intake_contract_digest,
+            "--json",
+        ],
+        bin_path=bin_path,
+        cwd=cwd,
+    )
+
+
 def run_promote_candidate(
     *,
     candidate_id: str,

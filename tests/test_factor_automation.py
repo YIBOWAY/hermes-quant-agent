@@ -11,6 +11,7 @@ from hqa.factor_automation import (
     FactorAutomationRequest,
     FinalBacktestReceipt,
     MachineApprovalReceipt,
+    PlatformFactorAutomationSlice2Port,
     run_to_final_backtest,
 )
 from hqa.factor_automation_policy import (
@@ -84,6 +85,7 @@ class _Port:
             reviewer="auto",
             registration="auto_promote",
             policy_digest=policy_digest,
+            intake_contract_digest=self.request.intake_contract_digest,
             status="approved",
         )
 
@@ -136,6 +138,82 @@ def test_slice2_repeatable_pipeline_stops_at_exact_final_receipt(tmp_path: Path)
     assert result.approval.reviewer == "auto"
     assert result.final_backtest.final is True
     assert result.policy_decision.accepted is True
+
+
+def test_platform_port_records_machine_gate1_and_exact_platform_lineage(tmp_path: Path) -> None:
+    loaded = _policy()
+    source = tmp_path / "generated.py"
+    source.write_text(
+        "from quant_system.factors.base import BaseFactor\n"
+        "class ExactFactor(BaseFactor):\n"
+        "    factor_id = 'exact_factor'\n",
+        encoding="utf-8",
+    )
+    import hashlib
+    request = FactorAutomationRequest(
+        **{
+            **_request(tmp_path).__dict__,
+            "source_file_ref": str(source),
+            "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        }
+    )
+    seen: list[tuple[str, object]] = []
+
+    def propose(goal, staged, universe):
+        seen.append(("propose", (goal, staged, universe)))
+        return 0, (
+            '{"candidate_id":"candidate-1","manifest_digest":"'
+            + ("d" * 64)
+            + '","source_sha256":"'
+            + request.source_sha256
+            + '","status":"pending"}\n'
+        )
+
+    def approve(**kwargs):
+        seen.append(("approve", kwargs))
+        return 0, (
+            '{"candidate_id":"candidate-1","decision":"approve",'
+            '"registration":"auto_promote","manifest_digest":"'
+            + ("d" * 64)
+            + '","reviewer":"auto","policy_digest":"'
+            + loaded.policy_digest
+            + '","intake_contract_digest":"'
+            + request.intake_contract_digest
+            + '"}\n'
+        )
+
+    def backtest(_argv):
+        seen.append(("backtest", tuple(_argv)))
+        return 0, "final_backtest_receipt=backtest-" + ("e" * 32) + "\n"
+
+    def verify_final(**kwargs):
+        seen.append(("verify_final", kwargs))
+        return {"factor_id": "exact_factor"}
+
+    port = PlatformFactorAutomationSlice2Port(
+        policy_digest=loaded.policy_digest,
+        gate_dir=tmp_path / "gate1",
+        experiment_output_dir=tmp_path / "experiments",
+        propose_runner=propose,
+        auto_review_runner=approve,
+        backtest_runner=backtest,
+        final_receipt_verifier=verify_final,
+    )
+    result = run_to_final_backtest(
+        request=request,
+        policy=loaded,
+        port=port,
+        allow_acceptance_machine_approval=True,
+    )
+
+    assert result.state == "final_backtest_ready"
+    assert [name for name, _ in seen] == [
+        "propose",
+        "approve",
+        "backtest",
+        "verify_final",
+    ]
+    assert any((tmp_path / "gate1" / "bindings").glob("binding-*.json"))
 
 
 def test_pipeline_policy_failure_makes_no_candidate_mutation(tmp_path: Path) -> None:

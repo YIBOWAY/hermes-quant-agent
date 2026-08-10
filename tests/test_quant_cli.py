@@ -303,6 +303,39 @@ def test_run_agent_review_is_keyword_only():
         )
 
 
+def test_run_agent_auto_review_binds_policy_and_intake_digests(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        return _FakeProc(0, '{"registration":"auto_promote"}\n')
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+    quant_cli.run_agent_auto_review(
+        candidate_id="factor-x-1",
+        expected_manifest_digest="a" * 64,
+        expected_status="pending",
+        policy_digest="b" * 64,
+        intake_contract_digest="c" * 64,
+    )
+
+    assert seen["argv"][1:] == [
+        "agent",
+        "auto-review",
+        "--candidate-id",
+        "factor-x-1",
+        "--expected-digest",
+        "a" * 64,
+        "--expected-status",
+        "pending",
+        "--policy-digest",
+        "b" * 64,
+        "--intake-contract-digest",
+        "c" * 64,
+        "--json",
+    ]
+
+
 def test_run_promote_candidate_uses_exact_gate3_binding_and_clean_json(monkeypatch):
     seen = {}
 
