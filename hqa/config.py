@@ -123,6 +123,18 @@ FACTOR_AUTOMATION_GATE1_DIR = Path(
         str(RUNTIME_DIR / "factor-automation-gate1"),
     )
 )
+FACTOR_AUTOMATION_QUEUE_DIR = Path(
+    os.environ.get(
+        "HQA_FACTOR_AUTOMATION_QUEUE_DIR",
+        str(RUNTIME_DIR / "factor-automation" / "queue"),
+    )
+)
+FACTOR_AUTOMATION_RUN_DIR = Path(
+    os.environ.get(
+        "HQA_FACTOR_AUTOMATION_RUN_DIR",
+        str(RUNTIME_DIR / "factor-automation" / "runs"),
+    )
+)
 PAPER_INTAKE_DIR = Path(
     os.environ.get("HQA_PAPER_INTAKE_DIR", str(RUNTIME_DIR / "paper-intake"))
 )

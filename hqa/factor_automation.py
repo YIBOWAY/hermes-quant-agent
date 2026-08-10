@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -33,6 +34,8 @@ _SAFE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
 _AUTOMATION_ID_RE = re.compile(r"^automation-[0-9a-f]{16,64}$")
 _INTAKE_RECEIPT_RE = re.compile(r"^paper-intake-receipt:sha256:[0-9a-f]{64}$")
 _BACKTEST_RECEIPT_RE = re.compile(r"^backtest-[0-9a-f]{32}$")
+_GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+_PROMOTION_ID_RE = re.compile(r"^promo-[0-9a-f]{32}(?:-r(?:[2-9]|[1-9][0-9]+))?$")
 
 
 class FactorAutomationError(RuntimeError):
@@ -97,6 +100,33 @@ class FactorAutomationSlice2Result:
     final_backtest: FinalBacktestReceipt
     policy_decision: FactorAutomationDecision
     promotion_performed: Literal[False] = False
+
+
+@dataclass(frozen=True)
+class AutomaticPaperLandResult:
+    state: Literal["landed"]
+    promotion_id: str
+    base_commit: str
+    reviewed_commit: str
+    local_head: str
+    pushed: Literal[False]
+    promotion_scope: Literal["paper_only"]
+
+
+@dataclass(frozen=True)
+class FactorAutomationFullResult:
+    slice2: FactorAutomationSlice2Result
+    land: AutomaticPaperLandResult
+
+
+class FactorAutomationPromotionPort(Protocol):
+    def prepare_commit_land(
+        self,
+        *,
+        slice2: FactorAutomationSlice2Result,
+        request: FactorAutomationRequest,
+        base_commit: str,
+    ) -> AutomaticPaperLandResult: ...
 
 
 class FactorAutomationSlice2Port(Protocol):
@@ -594,15 +624,195 @@ class PlatformFactorAutomationSlice2Port:
         )
 
 
+PromotionRunner = Callable[..., tuple[int, str]]
+Gate3Verifier = Callable[..., dict[str, Any]]
+
+
+class PlatformFactorPromotionPort:
+    """HQA-side verifier for separate prepare, commit, and local ff land calls."""
+
+    _STATUS_FIELDS = {
+        "promotion_id",
+        "status",
+        "reviewed_commit",
+        "reason",
+        "manifest_sha256",
+        "patch_sha256",
+        "candidate_id",
+        "candidate_digest",
+        "final_backtest_receipt_id",
+        "base_commit",
+        "scoped_paths",
+    }
+
+    def __init__(
+        self,
+        *,
+        gate_dir: Path,
+        experiment_output_dir: Path,
+        prepare_runner: PromotionRunner = quant_cli.run_auto_promote_prepare,
+        commit_runner: PromotionRunner = quant_cli.run_auto_promote_commit,
+        land_runner: PromotionRunner = quant_cli.run_auto_promote_land,
+        gate3_verifier: Gate3Verifier = factor_repro.verify_gate3_receipt,
+    ) -> None:
+        self.gate_dir = Path(gate_dir)
+        self.experiment_output_dir = Path(experiment_output_dir)
+        self._prepare_runner = prepare_runner
+        self._commit_runner = commit_runner
+        self._land_runner = land_runner
+        self._gate3_verifier = gate3_verifier
+
+    @staticmethod
+    def _status(output: str) -> dict[str, Any]:
+        payload = factor_repro.parse_json_payload(output)
+        if not isinstance(payload, dict) or set(payload) != PlatformFactorPromotionPort._STATUS_FIELDS:
+            raise FactorAutomationError("automatic_promotion_status_invalid")
+        return payload
+
+    def prepare_commit_land(
+        self,
+        *,
+        slice2: FactorAutomationSlice2Result,
+        request: FactorAutomationRequest,
+        base_commit: str,
+    ) -> AutomaticPaperLandResult:
+        if _GIT_COMMIT_RE.fullmatch(base_commit) is None:
+            raise FactorAutomationError("base_commit_invalid")
+        candidate = slice2.candidate
+        final = slice2.final_backtest
+        try:
+            final_record = factor_repro.require_final_backtest_receipt(
+                gate_dir=self.gate_dir,
+                experiment_output_dir=self.experiment_output_dir,
+                receipt_id=final.receipt_id,
+                candidate_id=candidate.candidate_id,
+                manifest_digest=candidate.manifest_digest,
+            )
+            code, output = self._prepare_runner(
+                candidate_id=candidate.candidate_id,
+                expected_manifest_digest=candidate.manifest_digest,
+                final_backtest_receipt=final.receipt_id,
+                base_commit=base_commit,
+                policy_digest=slice2.policy_decision.policy_digest,
+                intake_contract_digest=request.intake_contract_digest,
+            )
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise FactorAutomationError("automatic_promotion_prepare_failed") from exc
+        receipt = factor_repro.parse_json_payload(output) or {}
+        if (
+            code != 0
+            or set(receipt) != {"promotion_id", "worktree", "patch", "manifest"}
+            or _PROMOTION_ID_RE.fullmatch(str(receipt.get("promotion_id", ""))) is None
+        ):
+            raise FactorAutomationError("automatic_promotion_prepare_failed")
+        raw_agent_root = os.environ.get("QS_AGENT_OUTPUT_DIR")
+        agent_root = (
+            Path(raw_agent_root)
+            if raw_agent_root
+            else config.AIQP_DIR / "data" / "agent_run"
+        )
+        try:
+            self._gate3_verifier(
+                receipt,
+                candidate_id=candidate.candidate_id,
+                manifest_digest=candidate.manifest_digest,
+                final_backtest_receipt_id=final.receipt_id,
+                factor_id=str(final_record["factor_id"]),
+                base_commit=base_commit,
+                promotion_root=agent_root / "agent" / "promotions",
+                worktree_root=Path(tempfile.gettempdir())
+                / "ai-quant-platform-gate3-worktrees",
+            )
+            commit_code, commit_output = self._commit_runner(
+                promotion_id=receipt["promotion_id"]
+            )
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise FactorAutomationError("automatic_promotion_commit_failed") from exc
+        committed = self._status(commit_output)
+        reviewed_commit = committed.get("reviewed_commit")
+        if (
+            commit_code != 0
+            or committed.get("promotion_id") != receipt["promotion_id"]
+            or committed.get("status") != "reviewed"
+            or committed.get("candidate_id") != candidate.candidate_id
+            or committed.get("candidate_digest") != candidate.manifest_digest
+            or committed.get("final_backtest_receipt_id") != final.receipt_id
+            or committed.get("base_commit") != base_commit
+            or type(reviewed_commit) is not str
+            or _GIT_COMMIT_RE.fullmatch(reviewed_commit) is None
+        ):
+            raise FactorAutomationError("automatic_promotion_commit_failed")
+        try:
+            land_code, land_output = self._land_runner(
+                promotion_id=receipt["promotion_id"],
+                expected_base_commit=base_commit,
+                expected_reviewed_commit=reviewed_commit,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise FactorAutomationError("automatic_promotion_land_failed") from exc
+        landed = self._status(land_output)
+        if (
+            land_code != 0
+            or landed.get("promotion_id") != receipt["promotion_id"]
+            or landed.get("status") != "landed"
+            or landed.get("reviewed_commit") != reviewed_commit
+            or landed.get("base_commit") != base_commit
+        ):
+            raise FactorAutomationError("automatic_promotion_land_failed")
+        return AutomaticPaperLandResult(
+            state="landed",
+            promotion_id=receipt["promotion_id"],
+            base_commit=base_commit,
+            reviewed_commit=reviewed_commit,
+            local_head=reviewed_commit,
+            pushed=False,
+            promotion_scope="paper_only",
+        )
+
+
+def run_to_paper_land(
+    *,
+    request: FactorAutomationRequest,
+    policy: LoadedFactorAutomationPolicy,
+    slice2_port: FactorAutomationSlice2Port,
+    promotion_port: FactorAutomationPromotionPort,
+    base_commit: str,
+    hqa_mode_enabled: bool,
+    hqa_auto_land_enabled: bool,
+) -> FactorAutomationFullResult:
+    """Run the dual-flag paper-only path; no implementation can push or go live."""
+    if hqa_mode_enabled is not True or hqa_auto_land_enabled is not True:
+        raise FactorAutomationDisabled("factor_automation_disabled")
+    slice2 = run_to_final_backtest(
+        request=request,
+        policy=policy,
+        port=slice2_port,
+        allow_acceptance_machine_approval=True,
+    )
+    landed = promotion_port.prepare_commit_land(
+        slice2=slice2,
+        request=request,
+        base_commit=base_commit,
+    )
+    if landed.promotion_scope != "paper_only" or landed.pushed is not False:
+        raise FactorAutomationError("automatic_land_boundary_drift")
+    return FactorAutomationFullResult(slice2=slice2, land=landed)
+
+
 __all__ = [
+    "AutomaticPaperLandResult",
     "CandidateReceipt",
     "FactorAutomationDisabled",
     "FactorAutomationError",
     "FactorAutomationRequest",
+    "FactorAutomationFullResult",
+    "FactorAutomationPromotionPort",
     "FactorAutomationSlice2Port",
     "FactorAutomationSlice2Result",
     "FinalBacktestReceipt",
     "MachineApprovalReceipt",
     "PlatformFactorAutomationSlice2Port",
+    "PlatformFactorPromotionPort",
     "run_to_final_backtest",
+    "run_to_paper_land",
 ]

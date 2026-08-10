@@ -306,3 +306,76 @@ def run_promotion_status(
         cwd=cwd,
         merge_stderr=False,
     )
+
+
+def run_auto_promote_prepare(
+    *,
+    candidate_id: str,
+    expected_manifest_digest: str,
+    final_backtest_receipt: str,
+    base_commit: str,
+    policy_digest: str,
+    intake_contract_digest: str,
+    bin_path: Optional[Path] = None,
+    cwd: Optional[Path] = None,
+) -> tuple[int, str]:
+    return _run(
+        [
+            "agent",
+            "promote-auto-prepare",
+            "--candidate-id",
+            candidate_id,
+            "--expected-digest",
+            expected_manifest_digest,
+            "--final-backtest-receipt",
+            final_backtest_receipt,
+            "--base-commit",
+            base_commit,
+            "--policy-digest",
+            policy_digest,
+            "--intake-contract-digest",
+            intake_contract_digest,
+        ],
+        bin_path=bin_path,
+        cwd=cwd,
+        merge_stderr=False,
+    )
+
+
+def run_auto_promote_commit(
+    *,
+    promotion_id: str,
+    bin_path: Optional[Path] = None,
+    cwd: Optional[Path] = None,
+) -> tuple[int, str]:
+    return _run(
+        ["agent", "promote-auto-commit", "--promotion-id", promotion_id],
+        bin_path=bin_path,
+        cwd=cwd,
+        merge_stderr=False,
+    )
+
+
+def run_auto_promote_land(
+    *,
+    promotion_id: str,
+    expected_base_commit: str,
+    expected_reviewed_commit: str,
+    bin_path: Optional[Path] = None,
+    cwd: Optional[Path] = None,
+) -> tuple[int, str]:
+    return _run(
+        [
+            "agent",
+            "promote-auto-land",
+            "--promotion-id",
+            promotion_id,
+            "--expected-base-commit",
+            expected_base_commit,
+            "--expected-reviewed-commit",
+            expected_reviewed_commit,
+        ],
+        bin_path=bin_path,
+        cwd=cwd,
+        merge_stderr=False,
+    )

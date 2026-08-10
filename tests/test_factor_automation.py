@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from hqa.factor_automation import (
+    AutomaticPaperLandResult,
     CandidateReceipt,
     FactorAutomationDisabled,
     FactorAutomationError,
@@ -12,6 +13,7 @@ from hqa.factor_automation import (
     FinalBacktestReceipt,
     MachineApprovalReceipt,
     PlatformFactorAutomationSlice2Port,
+    run_to_paper_land,
     run_to_final_backtest,
 )
 from hqa.factor_automation_policy import (
@@ -235,6 +237,69 @@ def test_platform_port_records_machine_gate1_and_exact_platform_lineage(tmp_path
         final_receipt_verifier=verify_final,
     ).propose(request)
     assert resumed == result.candidate
+
+
+class _PromotionPort:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def prepare_commit_land(self, **kwargs) -> AutomaticPaperLandResult:
+        self.calls.append("prepare_commit_land")
+        return AutomaticPaperLandResult(
+            state="landed",
+            promotion_id="promo-" + ("a" * 32),
+            base_commit="b" * 40,
+            reviewed_commit="c" * 40,
+            local_head="c" * 40,
+            pushed=False,
+            promotion_scope="paper_only",
+        )
+
+
+def test_full_paper_land_requires_both_hqa_flags_before_slice2_mutation(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+    loaded = _policy()
+    slice2 = _Port(request, loaded.policy_digest)
+    promotion = _PromotionPort()
+
+    with pytest.raises(FactorAutomationDisabled):
+        run_to_paper_land(
+            request=request,
+            policy=loaded,
+            slice2_port=slice2,
+            promotion_port=promotion,
+            base_commit="b" * 40,
+            hqa_mode_enabled=True,
+            hqa_auto_land_enabled=False,
+        )
+
+    assert slice2.calls == []
+    assert promotion.calls == []
+
+
+def test_full_paper_land_is_two_phase_and_never_pushes(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    loaded = _policy()
+    slice2 = _Port(request, loaded.policy_digest)
+    promotion = _PromotionPort()
+
+    result = run_to_paper_land(
+        request=request,
+        policy=loaded,
+        slice2_port=slice2,
+        promotion_port=promotion,
+        base_commit="b" * 40,
+        hqa_mode_enabled=True,
+        hqa_auto_land_enabled=True,
+    )
+
+    assert result.land.state == "landed"
+    assert result.land.pushed is False
+    assert result.land.promotion_scope == "paper_only"
+    assert slice2.calls == ["propose", "machine_approve", "final_backtest"]
+    assert promotion.calls == ["prepare_commit_land"]
 
 
 def test_pipeline_policy_failure_makes_no_candidate_mutation(tmp_path: Path) -> None:

@@ -395,6 +395,60 @@ def test_run_promotion_status_uses_only_the_promotion_identity(monkeypatch):
     assert seen["kwargs"]["stderr"] is subprocess.PIPE
 
 
+def test_run_auto_promotion_commands_bind_two_phase_cas(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv[1:])
+        return _FakeProc(0, '{}\n')
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+    quant_cli.run_auto_promote_prepare(
+        candidate_id="candidate-1",
+        expected_manifest_digest="a" * 64,
+        final_backtest_receipt="backtest-" + "b" * 32,
+        base_commit="c" * 40,
+        policy_digest="d" * 64,
+        intake_contract_digest="e" * 64,
+    )
+    quant_cli.run_auto_promote_commit(promotion_id="promo-abc")
+    quant_cli.run_auto_promote_land(
+        promotion_id="promo-abc",
+        expected_base_commit="c" * 40,
+        expected_reviewed_commit="f" * 40,
+    )
+
+    assert calls == [
+        [
+            "agent",
+            "promote-auto-prepare",
+            "--candidate-id",
+            "candidate-1",
+            "--expected-digest",
+            "a" * 64,
+            "--final-backtest-receipt",
+            "backtest-" + "b" * 32,
+            "--base-commit",
+            "c" * 40,
+            "--policy-digest",
+            "d" * 64,
+            "--intake-contract-digest",
+            "e" * 64,
+        ],
+        ["agent", "promote-auto-commit", "--promotion-id", "promo-abc"],
+        [
+            "agent",
+            "promote-auto-land",
+            "--promotion-id",
+            "promo-abc",
+            "--expected-base-commit",
+            "c" * 40,
+            "--expected-reviewed-commit",
+            "f" * 40,
+        ],
+    ]
+
+
 def test_run_experiment_config_default_provider_is_futu(monkeypatch):
     seen = {}
 
