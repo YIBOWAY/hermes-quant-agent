@@ -13,6 +13,7 @@ from hqa.factor_automation import (
     FinalBacktestReceipt,
     MachineApprovalReceipt,
     PlatformFactorAutomationSlice2Port,
+    PlatformFactorPromotionPort,
     run_to_paper_land,
     run_to_final_backtest,
 )
@@ -65,6 +66,9 @@ class _Port:
         self.policy_digest = policy_digest
         self.calls: list[str] = []
         self.drift_final = False
+        self.actual_max_drawdown: float | None = None
+        self.actual_turnover: float | None = None
+        self.actual_transaction_cost_bps: float | None = None
 
     def propose(self, request: FactorAutomationRequest) -> CandidateReceipt:
         self.calls.append("propose")
@@ -114,6 +118,21 @@ class _Port:
             policy_digest=approval.policy_digest,
             provider=request.provider,
             final=True,
+            actual_transaction_cost_bps=(
+                request.policy_evidence.transaction_cost_bps
+                if self.actual_transaction_cost_bps is None
+                else self.actual_transaction_cost_bps
+            ),
+            actual_max_drawdown=(
+                request.policy_evidence.max_drawdown
+                if self.actual_max_drawdown is None
+                else self.actual_max_drawdown
+            ),
+            actual_turnover=(
+                request.policy_evidence.turnover
+                if self.actual_turnover is None
+                else self.actual_turnover
+            ),
         )
 
 
@@ -196,7 +215,14 @@ def test_platform_port_records_machine_gate1_and_exact_platform_lineage(tmp_path
 
     def verify_final(**kwargs):
         seen.append(("verify_final", kwargs))
-        return {"factor_id": "exact_factor"}
+        return {
+            "factor_id": "exact_factor",
+            "verified_policy_evidence": {
+                "transaction_cost_bps": 10.0,
+                "max_drawdown": 0.12,
+                "turnover": 1.2,
+            },
+        }
 
     port = PlatformFactorAutomationSlice2Port(
         policy_digest=loaded.policy_digest,
@@ -253,6 +279,8 @@ class _PromotionPort:
             local_head="c" * 40,
             pushed=False,
             promotion_scope="paper_only",
+            sleeve_id="sleeve-auto-0123456789abcdef",
+            allocated_cash=10_000.0,
         )
 
 
@@ -298,8 +326,126 @@ def test_full_paper_land_is_two_phase_and_never_pushes(tmp_path: Path) -> None:
     assert result.land.state == "landed"
     assert result.land.pushed is False
     assert result.land.promotion_scope == "paper_only"
+    assert result.land.allocated_cash == 10_000.0
     assert slice2.calls == ["propose", "machine_approve", "final_backtest"]
     assert promotion.calls == ["prepare_commit_land"]
+
+
+def test_platform_promotion_orders_quota_before_land_then_activates_sleeve(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    request = _request(tmp_path)
+    loaded = _policy()
+    slice2 = run_to_final_backtest(
+        request=request,
+        policy=loaded,
+        port=_Port(request, loaded.policy_digest),
+        allow_acceptance_machine_approval=True,
+    )
+    promotion_id = "promo-" + ("1" * 32)
+    base_commit = "2" * 40
+    reviewed_commit = "3" * 40
+    manifest_sha = "4" * 64
+    patch_sha = "5" * 64
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        "hqa.factor_automation.factor_repro.require_final_backtest_receipt",
+        lambda **_kwargs: {"factor_id": "auto_factor"},
+    )
+
+    def prepare(**_kwargs):
+        calls.append("prepare")
+        return 0, (
+            '{"manifest":"/tmp/manifest","patch":"/tmp/patch",'
+            f'"promotion_id":"{promotion_id}","worktree":"/tmp/worktree"}}\n'
+        )
+
+    def status_payload(state: str) -> str:
+        return (
+            "{"
+            f'"base_commit":"{base_commit}",'
+            f'"candidate_digest":"{slice2.candidate.manifest_digest}",'
+            f'"candidate_id":"{slice2.candidate.candidate_id}",'
+            f'"final_backtest_receipt_id":"{slice2.final_backtest.receipt_id}",'
+            f'"manifest_sha256":"{manifest_sha}",'
+            f'"patch_sha256":"{patch_sha}",'
+            f'"promotion_id":"{promotion_id}",'
+            '"reason":"reviewed",'
+            f'"reviewed_commit":"{reviewed_commit}",'
+            '"scoped_paths":["src/quant_system/factors/library/promoted/auto_factor.py",'
+            '"src/quant_system/factors/library/promoted/__init__.py",'
+            '"tests/test_auto_factor.py"],'
+            f'"status":"{state}"}}\n'
+        )
+
+    def commit(**_kwargs):
+        calls.append("commit")
+        return 0, status_payload("reviewed")
+
+    def authorize(**kwargs):
+        calls.append("authorize")
+        lineage = {
+            "automation_id": request.automation_id,
+            "candidate_id": slice2.candidate.candidate_id,
+            "candidate_digest": slice2.candidate.manifest_digest,
+            "factor_id": "auto_factor",
+            "manifest_digest": manifest_sha,
+            "automation_policy_digest": loaded.policy_digest,
+            "intake_contract_digest": request.intake_contract_digest,
+            "gate1_digest": request.source_sha256,
+            "gate2_digest": kwargs["gate2_digest"],
+            "gate3_digest": patch_sha,
+            "commit_sha": reviewed_commit,
+        }
+        import json
+
+        return 0, json.dumps(
+            {
+                "state": "land_authorized",
+                "lineage": lineage,
+                "audit": {
+                    "event_seq": 1,
+                    "event_day": "2026-08-10",
+                    "idempotent_replay": False,
+                },
+            },
+            sort_keys=True,
+        )
+
+    def land(**_kwargs):
+        calls.append("land")
+        return 0, status_payload("landed")
+
+    def activate(**kwargs):
+        calls.append("activate")
+        assert kwargs["lineage"]["factor_id"] == "auto_factor"
+        return 0, (
+            '{"allocated_cash":10000.0,"audit":{"event_seq":2},'
+            '"promotion_scope":"paper_only",'
+            '"sleeve_id":"sleeve-auto-0123456789abcdef",'
+            '"state":"sleeve_created"}\n'
+        )
+
+    result = PlatformFactorPromotionPort(
+        gate_dir=tmp_path / "gate",
+        experiment_output_dir=tmp_path / "experiments",
+        prepare_runner=prepare,
+        commit_runner=commit,
+        authorize_runner=authorize,
+        land_runner=land,
+        activate_runner=activate,
+        gate3_verifier=lambda *_args, **_kwargs: {},
+    ).prepare_commit_land(
+        slice2=slice2,
+        request=request,
+        base_commit=base_commit,
+    )
+
+    assert calls == ["prepare", "commit", "authorize", "land", "activate"]
+    assert result.state == "landed"
+    assert result.sleeve_id == "sleeve-auto-0123456789abcdef"
 
 
 def test_pipeline_policy_failure_makes_no_candidate_mutation(tmp_path: Path) -> None:
@@ -327,6 +473,34 @@ def test_pipeline_policy_failure_makes_no_candidate_mutation(tmp_path: Path) -> 
         )
 
     assert port.calls == []
+
+
+def test_final_artifact_policy_failure_stops_before_gate3(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    loaded = _policy()
+    slice2 = _Port(request, loaded.policy_digest)
+    slice2.actual_max_drawdown = 0.215
+    slice2.actual_turnover = 87.12
+    slice2.actual_transaction_cost_bps = 6.0
+    promotion = _PromotionPort()
+
+    with pytest.raises(
+        FactorAutomationError,
+        match="final_policy_refused:transaction_cost_assumption_too_low,"
+        "max_drawdown_exceeded,turnover_exceeded",
+    ):
+        run_to_paper_land(
+            request=request,
+            policy=loaded,
+            slice2_port=slice2,
+            promotion_port=promotion,
+            base_commit="b" * 40,
+            hqa_mode_enabled=True,
+            hqa_auto_land_enabled=True,
+        )
+
+    assert slice2.calls == ["propose", "machine_approve", "final_backtest"]
+    assert promotion.calls == []
 
 
 def test_pipeline_rejects_final_receipt_lineage_drift(tmp_path: Path) -> None:

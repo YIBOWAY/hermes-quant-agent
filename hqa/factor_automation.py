@@ -90,6 +90,9 @@ class FinalBacktestReceipt:
     policy_digest: str
     provider: Literal["futu", "tiingo"]
     final: Literal[True]
+    actual_transaction_cost_bps: float
+    actual_max_drawdown: float
+    actual_turnover: float
 
 
 @dataclass(frozen=True)
@@ -111,6 +114,8 @@ class AutomaticPaperLandResult:
     local_head: str
     pushed: Literal[False]
     promotion_scope: Literal["paper_only"]
+    sleeve_id: str
+    allocated_cash: float
 
 
 @dataclass(frozen=True)
@@ -239,24 +244,27 @@ def run_to_final_backtest(
     if allow_acceptance_machine_approval is not True:
         raise FactorAutomationDisabled("slice2_acceptance_machine_approval_disabled")
     _validate_request(request)
-    decision = evaluate_factor_automation_policy(policy, request.policy_evidence)
-    if not decision.accepted:
+    declared_decision = evaluate_factor_automation_policy(
+        policy,
+        request.policy_evidence,
+    )
+    if not declared_decision.accepted:
         raise FactorAutomationError(
-            "policy_refused:" + ",".join(decision.reasons)
+            "policy_refused:" + ",".join(declared_decision.reasons)
         )
     candidate = port.propose(request)
     _validate_candidate(candidate, request)
     approval = port.machine_approve(
         candidate_id=candidate.candidate_id,
         expected_manifest_digest=candidate.manifest_digest,
-        policy_digest=decision.policy_digest,
-        note=f"auto:policy:{decision.policy_digest}",
+        policy_digest=declared_decision.policy_digest,
+        note=f"auto:policy:{declared_decision.policy_digest}",
     )
     _validate_approval(
         approval,
         candidate=candidate,
         request=request,
-        policy_digest=decision.policy_digest,
+        policy_digest=declared_decision.policy_digest,
     )
     final_backtest = port.final_backtest(
         request=request,
@@ -269,12 +277,29 @@ def run_to_final_backtest(
         candidate=candidate,
         approval=approval,
     )
+    verified_evidence = FactorAutomationEvidence(
+        universe=request.policy_evidence.universe,
+        sample_rows=request.policy_evidence.sample_rows,
+        out_of_sample_rows=request.policy_evidence.out_of_sample_rows,
+        data_coverage_ratio=request.policy_evidence.data_coverage_ratio,
+        transaction_cost_bps=final_backtest.actual_transaction_cost_bps,
+        max_drawdown=final_backtest.actual_max_drawdown,
+        turnover=final_backtest.actual_turnover,
+        lookahead_static_check_passed=(
+            request.policy_evidence.lookahead_static_check_passed
+        ),
+    )
+    final_decision = evaluate_factor_automation_policy(policy, verified_evidence)
+    if not final_decision.accepted:
+        raise FactorAutomationError(
+            "final_policy_refused:" + ",".join(final_decision.reasons)
+        )
     return FactorAutomationSlice2Result(
         state="final_backtest_ready",
         candidate=candidate,
         approval=approval,
         final_backtest=final_backtest,
-        policy_decision=decision,
+        policy_decision=final_decision,
     )
 
 
@@ -581,6 +606,10 @@ class PlatformFactorAutomationSlice2Port:
                 request.end,
                 "--provider",
                 request.provider,
+                "--commission-bps",
+                str(request.policy_evidence.transaction_cost_bps / 2.0),
+                "--slippage-bps",
+                str(request.policy_evidence.transaction_cost_bps / 2.0),
                 "--final",
             ]
         )
@@ -603,7 +632,7 @@ class PlatformFactorAutomationSlice2Port:
             raise FactorAutomationError("final_backtest_failed")
         receipt_id = matches[0]
         try:
-            self._final_receipt_verifier(
+            verified = self._final_receipt_verifier(
                 gate_dir=self.gate_dir,
                 experiment_output_dir=self.experiment_output_dir,
                 receipt_id=receipt_id,
@@ -612,6 +641,13 @@ class PlatformFactorAutomationSlice2Port:
             )
         except (OSError, ValueError) as exc:
             raise FactorAutomationError("final_backtest_receipt_invalid") from exc
+        policy_evidence = verified.get("verified_policy_evidence")
+        if (
+            not isinstance(policy_evidence, dict)
+            or set(policy_evidence)
+            != {"transaction_cost_bps", "max_drawdown", "turnover"}
+        ):
+            raise FactorAutomationError("final_backtest_policy_evidence_invalid")
         return FinalBacktestReceipt(
             receipt_id=receipt_id,
             candidate_id=candidate.candidate_id,
@@ -621,6 +657,9 @@ class PlatformFactorAutomationSlice2Port:
             policy_digest=approval.policy_digest,
             provider=request.provider,
             final=True,
+            actual_transaction_cost_bps=policy_evidence["transaction_cost_bps"],
+            actual_max_drawdown=policy_evidence["max_drawdown"],
+            actual_turnover=policy_evidence["turnover"],
         )
 
 
@@ -652,14 +691,18 @@ class PlatformFactorPromotionPort:
         experiment_output_dir: Path,
         prepare_runner: PromotionRunner = quant_cli.run_auto_promote_prepare,
         commit_runner: PromotionRunner = quant_cli.run_auto_promote_commit,
+        authorize_runner: PromotionRunner = quant_cli.run_factor_automation_authorize_land,
         land_runner: PromotionRunner = quant_cli.run_auto_promote_land,
+        activate_runner: PromotionRunner = quant_cli.run_factor_automation_activate_sleeve,
         gate3_verifier: Gate3Verifier = factor_repro.verify_gate3_receipt,
     ) -> None:
         self.gate_dir = Path(gate_dir)
         self.experiment_output_dir = Path(experiment_output_dir)
         self._prepare_runner = prepare_runner
         self._commit_runner = commit_runner
+        self._authorize_runner = authorize_runner
         self._land_runner = land_runner
+        self._activate_runner = activate_runner
         self._gate3_verifier = gate3_verifier
 
     @staticmethod
@@ -733,7 +776,7 @@ class PlatformFactorPromotionPort:
         if (
             commit_code != 0
             or committed.get("promotion_id") != receipt["promotion_id"]
-            or committed.get("status") != "reviewed"
+            or committed.get("status") not in {"reviewed", "landed"}
             or committed.get("candidate_id") != candidate.candidate_id
             or committed.get("candidate_digest") != candidate.manifest_digest
             or committed.get("final_backtest_receipt_id") != final.receipt_id
@@ -742,6 +785,60 @@ class PlatformFactorPromotionPort:
             or _GIT_COMMIT_RE.fullmatch(reviewed_commit) is None
         ):
             raise FactorAutomationError("automatic_promotion_commit_failed")
+        gate2_digest = hashlib.sha256(
+            (
+                json.dumps(
+                    {
+                        "candidate_id": slice2.approval.candidate_id,
+                        "intake_contract_digest": (
+                            slice2.approval.intake_contract_digest
+                        ),
+                        "manifest_digest": slice2.approval.manifest_digest,
+                        "policy_digest": slice2.approval.policy_digest,
+                        "registration": slice2.approval.registration,
+                        "reviewer": slice2.approval.reviewer,
+                        "status": slice2.approval.status,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode("utf-8")
+        ).hexdigest()
+        try:
+            authorize_code, authorize_output = self._authorize_runner(
+                automation_id=request.automation_id,
+                promotion_id=receipt["promotion_id"],
+                policy_digest=slice2.policy_decision.policy_digest,
+                intake_contract_digest=request.intake_contract_digest,
+                gate1_digest=request.source_sha256,
+                gate2_digest=gate2_digest,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise FactorAutomationError("automatic_land_authority_failed") from exc
+        authorization = factor_repro.parse_json_payload(authorize_output)
+        lineage = authorization.get("lineage") if isinstance(authorization, dict) else None
+        expected_lineage = {
+            "automation_id": request.automation_id,
+            "candidate_id": candidate.candidate_id,
+            "candidate_digest": candidate.manifest_digest,
+            "factor_id": str(final_record["factor_id"]),
+            "manifest_digest": committed.get("manifest_sha256"),
+            "automation_policy_digest": slice2.policy_decision.policy_digest,
+            "intake_contract_digest": request.intake_contract_digest,
+            "gate1_digest": request.source_sha256,
+            "gate2_digest": gate2_digest,
+            "gate3_digest": committed.get("patch_sha256"),
+            "commit_sha": reviewed_commit,
+        }
+        if (
+            authorize_code != 0
+            or not isinstance(authorization, dict)
+            or set(authorization) != {"state", "lineage", "audit"}
+            or authorization.get("state") != "land_authorized"
+            or lineage != expected_lineage
+        ):
+            raise FactorAutomationError("automatic_land_authority_failed")
         try:
             land_code, land_output = self._land_runner(
                 promotion_id=receipt["promotion_id"],
@@ -759,6 +856,35 @@ class PlatformFactorPromotionPort:
             or landed.get("base_commit") != base_commit
         ):
             raise FactorAutomationError("automatic_promotion_land_failed")
+        try:
+            activate_code, activate_output = self._activate_runner(
+                lineage=expected_lineage,
+                promotion_id=receipt["promotion_id"],
+                universe=request.universe,
+                provider=request.provider,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise FactorAutomationError("automatic_sleeve_activation_failed") from exc
+        activated = factor_repro.parse_json_payload(activate_output)
+        if (
+            activate_code != 0
+            or not isinstance(activated, dict)
+            or set(activated)
+            != {
+                "state",
+                "sleeve_id",
+                "allocated_cash",
+                "promotion_scope",
+                "audit",
+            }
+            or activated.get("state") != "sleeve_created"
+            or activated.get("promotion_scope") != "paper_only"
+            or _SAFE_ID_RE.fullmatch(str(activated.get("sleeve_id", ""))) is None
+            or isinstance(activated.get("allocated_cash"), bool)
+            or not isinstance(activated.get("allocated_cash"), (int, float))
+            or float(activated["allocated_cash"]) <= 0
+        ):
+            raise FactorAutomationError("automatic_sleeve_activation_failed")
         return AutomaticPaperLandResult(
             state="landed",
             promotion_id=receipt["promotion_id"],
@@ -767,6 +893,8 @@ class PlatformFactorPromotionPort:
             local_head=reviewed_commit,
             pushed=False,
             promotion_scope="paper_only",
+            sleeve_id=str(activated["sleeve_id"]),
+            allocated_cash=float(activated["allocated_cash"]),
         )
 
 

@@ -449,6 +449,64 @@ def test_run_auto_promotion_commands_bind_two_phase_cas(monkeypatch):
     ]
 
 
+def test_run_factor_automation_authority_and_sleeve_bind_full_lineage(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv[1:])
+        return _FakeProc(0, '{}\n')
+
+    monkeypatch.setattr(quant_cli.subprocess, "run", fake_run)
+    lineage = {
+        "automation_id": "automation-0123456789abcdef",
+        "candidate_id": "candidate-1",
+        "candidate_digest": "a" * 64,
+        "factor_id": "auto_factor",
+        "manifest_digest": "b" * 64,
+        "automation_policy_digest": "c" * 64,
+        "intake_contract_digest": "d" * 64,
+        "gate1_digest": "e" * 64,
+        "gate2_digest": "f" * 64,
+        "gate3_digest": "1" * 64,
+        "commit_sha": "2" * 40,
+    }
+    quant_cli.run_factor_automation_authorize_land(
+        automation_id=lineage["automation_id"],
+        promotion_id="promo-abc",
+        policy_digest=lineage["automation_policy_digest"],
+        intake_contract_digest=lineage["intake_contract_digest"],
+        gate1_digest=lineage["gate1_digest"],
+        gate2_digest=lineage["gate2_digest"],
+    )
+    quant_cli.run_factor_automation_activate_sleeve(
+        lineage=lineage,
+        promotion_id="promo-abc",
+        universe=("SPY", "QQQ"),
+        provider="futu",
+    )
+
+    assert calls[0][:4] == [
+        "agent",
+        "factor-automation-authorize-land",
+        "--automation-id",
+        lineage["automation_id"],
+    ]
+    assert calls[1][:4] == [
+        "agent",
+        "factor-automation-activate-sleeve",
+        "--automation-id",
+        lineage["automation_id"],
+    ]
+    assert calls[1][-6:] == [
+        "--symbol",
+        "SPY",
+        "--symbol",
+        "QQQ",
+        "--provider",
+        "futu",
+    ]
+
+
 def test_run_experiment_config_default_provider_is_futu(monkeypatch):
     seen = {}
 

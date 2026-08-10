@@ -728,9 +728,20 @@ def verify_experiment_receipt(
     }
     if artifact_paths != expected_artifact_paths:
         raise ValueError("experiment artifacts escaped the unique experiment namespace")
+    commission_bps = persisted_config.get("commission_bps")
+    slippage_bps = persisted_config.get("slippage_bps")
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) < 0.0
+        or float(value) > 10_000.0
+        for value in (commission_bps, slippage_bps)
+    ):
+        raise ValueError("persisted experiment cost assumption is invalid")
     expected_config = {
         "candidate_binding": binding,
-        "commission_bps": 1.0,
+        "commission_bps": float(commission_bps),
         "end": end,
         "experiment_name": experiment_name,
         "factor_blend": {
@@ -744,7 +755,7 @@ def verify_experiment_receipt(
             "rebalance_every_n_bars": 1,
         },
         "initial_cash": 100_000.0,
-        "slippage_bps": 5.0,
+        "slippage_bps": float(slippage_bps),
         "start": start,
         "sweep": {},
         "symbols": symbols,
@@ -946,6 +957,11 @@ def verify_experiment_receipt(
         "report": str(artifact_paths["report"]),
         "report_sha256": receipt["report_sha256"],
         "metrics": metrics,
+        "verified_policy_evidence": {
+            "transaction_cost_bps": float(commission_bps) + float(slippage_bps),
+            "max_drawdown": float(best_run["max_drawdown"]),
+            "turnover": float(best_run["turnover"]),
+        },
     }
 
 
@@ -1180,7 +1196,7 @@ def require_final_backtest_receipt(
         )
         if hashlib.sha256(artifact).hexdigest() != digest:
             raise ValueError(f"final backtest artifact digest mismatch: {path}")
-    verify_experiment_receipt(
+    verified_experiment = verify_experiment_receipt(
         {
             "experiment_id": record["experiment_id"],
             "run_count": record["run_count"],
@@ -1209,7 +1225,12 @@ def require_final_backtest_receipt(
         start=record["start"],
         end=record["end"],
     )
-    return record
+    return {
+        **record,
+        "verified_policy_evidence": verified_experiment[
+            "verified_policy_evidence"
+        ],
+    }
 
 
 def verify_gate3_receipt(

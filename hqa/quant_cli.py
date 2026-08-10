@@ -379,3 +379,85 @@ def run_auto_promote_land(
         cwd=cwd,
         merge_stderr=False,
     )
+
+
+def run_factor_automation_authorize_land(
+    *,
+    automation_id: str,
+    promotion_id: str,
+    policy_digest: str,
+    intake_contract_digest: str,
+    gate1_digest: str,
+    gate2_digest: str,
+    bin_path: Optional[Path] = None,
+    cwd: Optional[Path] = None,
+) -> tuple[int, str]:
+    return _run(
+        [
+            "agent",
+            "factor-automation-authorize-land",
+            "--automation-id",
+            automation_id,
+            "--promotion-id",
+            promotion_id,
+            "--policy-digest",
+            policy_digest,
+            "--intake-contract-digest",
+            intake_contract_digest,
+            "--gate1-digest",
+            gate1_digest,
+            "--gate2-digest",
+            gate2_digest,
+        ],
+        bin_path=bin_path,
+        cwd=cwd,
+        merge_stderr=False,
+    )
+
+
+def run_factor_automation_activate_sleeve(
+    *,
+    lineage: dict[str, str],
+    promotion_id: str,
+    universe: tuple[str, ...],
+    provider: str,
+    bin_path: Optional[Path] = None,
+    cwd: Optional[Path] = None,
+) -> tuple[int, str]:
+    args = [
+        "agent",
+        "factor-automation-activate-sleeve",
+        "--automation-id",
+        lineage["automation_id"],
+        "--promotion-id",
+        promotion_id,
+        "--candidate-id",
+        lineage["candidate_id"],
+        "--candidate-digest",
+        lineage["candidate_digest"],
+        "--factor-id",
+        lineage["factor_id"],
+        "--manifest-digest",
+        lineage["manifest_digest"],
+        "--policy-digest",
+        lineage["automation_policy_digest"],
+        "--intake-contract-digest",
+        lineage["intake_contract_digest"],
+        "--gate1-digest",
+        lineage["gate1_digest"],
+        "--gate2-digest",
+        lineage["gate2_digest"],
+        "--gate3-digest",
+        lineage["gate3_digest"],
+        "--commit-sha",
+        lineage["commit_sha"],
+    ]
+    for symbol in universe:
+        args.extend(["--symbol", symbol])
+    args.extend(["--provider", provider])
+    return _run(
+        args,
+        bin_path=bin_path,
+        cwd=cwd,
+        merge_stderr=False,
+    )

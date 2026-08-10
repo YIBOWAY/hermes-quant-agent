@@ -32,6 +32,9 @@ def _write_experiment_config(
     symbols: list[str],
     start: str,
     end: str,
+    *,
+    commission_bps: float = 1.0,
+    slippage_bps: float = 5.0,
 ) -> None:
     experiment = {
         "experiment_name": f"factor-repro-{candidate_id}",
@@ -45,6 +48,8 @@ def _write_experiment_config(
             "candidate_id": candidate_id,
             "manifest_digest": manifest_digest,
         },
+        "commission_bps": commission_bps,
+        "slippage_bps": slippage_bps,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x", encoding="utf-8", newline="\n") as handle:
@@ -291,6 +296,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="data provider (default: validated HQA_DEFAULT_DATA_PROVIDER; futu unless explicitly configured)",
     )
     p_backtest.add_argument("--config-out", default=None)
+    p_backtest.add_argument(
+        "--commission-bps",
+        type=float,
+        default=1.0,
+        help="Research commission assumption in basis points.",
+    )
+    p_backtest.add_argument(
+        "--slippage-bps",
+        type=float,
+        default=5.0,
+        help="Research slippage assumption in basis points.",
+    )
     p_backtest.add_argument(
         "--final",
         action="store_true",
@@ -794,6 +811,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 args.symbols,
                 args.start,
                 effective_end,
+                commission_bps=args.commission_bps,
+                slippage_bps=args.slippage_bps,
             )
         except (OSError, ValueError) as exc:
             print(f"ERROR: experiment config write failed: {exc}", file=sys.stderr)
