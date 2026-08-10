@@ -217,10 +217,65 @@ Phase 1.2（同日交付，只读扩展）：
 | FE-02/FE-05/FE-07 前端口径展示与测试 | low/nit | **已修**：徽章显示 timezone/provenance；methodology 折叠层展示口径表；新增动态赢家/空态/视图源测试 |
 | F2/F3/F4/F5 测试可糊弄 | medium | **已修**：非 futu provenance、缺 ETF、短历史、赢家翻转、as_of 对齐均有断言；API 成功路径要求 timezone/provenance |
 
-### 2.6 后续阶段（本期 plan 可写清，不在 Phase 1 交付）
+### 2.6 后续阶段
 
-- **Phase 2**：扩展 Futu 多市场代码适配；接入日经/恒指/TWSE；韩国评估 Twelve Data 或 KRX 合同
+- **Phase 2**（plan 见 §2.6b，2026-08-11 定稿开工）：本地指数页签 + 龙头驱动映射
 - **Phase 3**：样本外验证的龙头映射（点时权重）、估值数据；HQA 定时 + market_foresight 告警
+
+#### 2.6b Phase 2 plan（2026-08-11 实测定稿）
+
+**数据源实测（2026-08-11，本机 OpenD `127.0.0.1:11111` + 公网无密钥接口）**：
+
+| 数据 | 通道 | 实测结果 |
+|---|---|---|
+| 恒指 `HK.800000` / 恒生科技 `HK.800700` | Futu | ✅ 真实日线 |
+| 日经225 `JP..N225`（注意双点格式） | Futu | ✅ 真实日线 |
+| 港股个股（0700/9988/00005…） | Futu | ✅ |
+| 沪深300 `SH.000300` 等 A 股指数 | Futu | ❌ 账户无 A 股指数行情权限（用户可在 Futu 侧开通后解锁） |
+| 日股个股（JP.7203 等） | Futu | ❌ 无权限 |
+| KOSPI / TAIEX / 韩台个股（KS./TW. 代码） | Futu | ❌ OpenD 根本不支持该市场格式 |
+| 台积电 2330 日线 | TWSE 官方无密钥 API | ✅（ROC 历日期，需转码） |
+| 韩国龙头（三星/海力士） | Twelve Data（需 key）/ KRX（合同未澄清） | ⏸ 需用户提供 key 或另行澄清 |
+
+**Slice 2A（已交付，2026-08-11，复审+实测通过）**：asia-radar 详情「指数」页签接入真实本地指数。
+- 平台 Futu 适配器**只读扩展**多市场代码：新增 `HK.` / `JP..` 白名单前缀（不动美股
+  normalize 行为；不引入 SH/SZ/KS/TW）；仅用于 asia-radar 本地指数通路，不向通用
+  `/ohlcv` 开口。
+- 映射：香港→`HK.800000`（恒指）、日本→`JP..N225`（日经225）。其余 10 个市场保持
+  明确「待接入」空态（各自原因：A 股指数权限未开 / Futu 不支持该市场），**绝不**用
+  ETF 代理曲线冒充指数。
+- 指数序列只作展示对照（本地币种、本地交易日历），不与 ETF 代理（美元、美股日历）
+  混合计算任何指标；页面以徽章区分「本地指数」与「ETF 代理」两种口径。
+- 指数数据同样 fail-closed：OpenD 失败 → 该市场指数页签显示错误/不可用，不回退。
+
+**Slice 2A 交付与验收记录（2026-08-11）**：
+- 实现：Futu 适配器 opt-in 本地市场通道（`fetch_local_market_ohlcv` +
+  `normalize_symbol(allow_local_markets=True)`；默认路径与通用 `/ohlcv` 一字未动，
+  现有契约测试零改动）；`LOCAL_INDEX_SPECS`（HK.800000/JP..N225）+ 其余 10 市场显式
+  pending 原因（permission_not_granted / market_format_unsupported / no_verified_channel）；
+  `attach_local_index_overlays` 在 ETF 指标全部算完后才挂载 overlay（schema_version→1.2），
+  有测试锁定 attach 前后 ETF 字段逐字节相等；指数 lane 任何异常不影响 ETF 主路径；
+  缓存 key 天然隔离（`HK.800000`/`JP..N225` 与美股 ETF 不同键）；指数用本地市场
+  已完成 session（HK 16:00 / TYO 15:00）。
+- 门禁：后端 asia_radar+cross_section 51 passed；受影响面回归 101 passed；前端
+  78 files / 478 tests；tsc/eslint 干净。
+- 实测（2026-08-11 真实 OpenD）：恒指 25937.49@2026-08-10（HKD）、日经 66970.22@2026-08-10
+  （JPY），90 根序列、provenance=futu_cache；通用 `fetch_ohlcv("HK.800000")` 仍拒绝；
+  中国香港详情「指数」页签截图确认双图并排（本地指数 HKD 黄线 / ETF 代理 USD 蓝线，
+  各自徽章与坐标）、pending 市场空态如实标注原因。
+- 留待 2B/2C 的已知项：指数窗口 90 根（约 4.5 个月）；节假日不建模（OpenD 自然少 bar
+  兜住）；`asia-radar-refresh` CLI 暖缓存清单未含指数（首访直打 OpenD 后自然入缓存）；
+  summary 路径顺带触发指数读取（+2 请求，可接受）。
+
+**Slice 2B（下一切片）**：龙头驱动映射，仅限数据已闭环的市场：
+- 台湾：台积电（TWSE 无密钥 API）vs TAIEX（TWSE 指数日行情端点），ROC 历转码 +
+  失败显式降级；韩国：**暂缓**（等用户提供 Twelve Data key 或 KRX 合同澄清）。
+- 香港：候选龙头篮（0700/9988/00005 等，权重需点时依据）vs 恒指。
+- 展示映射质量（相关/Beta/R²/跟踪误差/权重截止日），**不**把篮子收益当指数收益；
+  口径与 §0.7-6 的实测基线（三星+海力士 vs KOSPI 相关 0.956、台积电 vs TAIEX 0.901）对照。
+
+**Slice 2C（后续）**：用户在 Futu 开通 A 股指数权限后接入沪深300；HQA 定时 +
+foresight 发布仍属 Phase 3。
 
 ### 2.7 数据日更落库与晨报接入（Phase 1.2 已交付最小闭环）
 
