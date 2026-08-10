@@ -68,9 +68,38 @@
 
 | 优先级 | 项目 | 产品契合 | 可直接复制 | 修正后形态 |
 |---|---|---|---|---|
-| P1 | K型/泡沫监测器 | 4/5 | 1/5 | **保留产品形态+页面布局+指标设计，按现有数据契约重写**；universe 先做你常用的美股/AI 范围（SPY/QQQ/SOXX/IGV + 持仓行业与重点个股），亚洲 12 市场后续补数据源 |
+| P1 | Asia Radar（K型/泡沫监测器重写） | 4/5 | 1/5 | **独立页面 `/asia-radar`**；第一版用 Futu 12 国 ETF 真实闭环；不是完整泡沫判定器 |
 | P2 | DiffsFormer | 3/5 | 0/5 | **仅研究思路**，作为隔离实验，验证通过后走候选因子 Gate 链路；不生成展示报告 |
 | P3 | "花旗"板块轮动 | 2/5 | 0.5/5 | **只保留价格/成交量轮动概念**；修复前视/成本/复权后作为普通实验进统一结果页，不新增独立页面、不用花旗名称 |
+
+## 0.7 Codex 第三轮收敛（2026-08-10，独立验证后采纳）
+
+Codex 做了源码审查 + 联网检索 + **只读** Futu OpenD 行情实测，本机路径已核对：
+
+1. **导航落点**：活跃副本 `navConfig.ts` 有 `marketsSection`（id=`markets`，含 aiNews/polymarket/agentStudio）。
+   新路由 `/asia-radar` 加进该分组。原评估写的中文"市场与 AI"是产品名，代码 id 是 `markets`。
+2. **Futu 12 ETF 实测成功**（2026-08-10，OpenD `127.0.0.1:11111`）：
+   EWY/EWT/EWJ/ASHR/INDA/EIDO/EWH/EWS/THD/EWM/EWA/EPHE，各约 256 根日线（2025-08-01→2026-08-07），
+   来源 `futu`、复权 `qfq`，共 3,072 行。**Phase 1 数据条件具备。**
+3. **Futu 适配器只接受美股代码**（`futu.py:normalize_symbol` 对含 `.` 且非 `US.` 前缀的代码抛
+   `invalid_symbol`）→ Phase 1 只用 12 个美股国家 ETF，不碰 `JP..N225`/`HK.800000`。
+4. **通用 `/ohlcv` 有 sample 静默回退**（`api/routes/data.py:80-91`，provider 失败时用
+   `SampleOHLCVProvider`）→ Asia Radar **必须走专用 endpoint**，显式指定 provider=futu，
+   失败返回错误/stale，**绝不**静默 sample。
+5. **演示数据比我们原先判断更深**：
+   - 默认启动器：`start_dashboard.py` 根目录切到 `dashboard/`，网页请求 `../output/dashboard_data.json`
+     会 404 → 自动 `getDemoData()`；双击 HTML 也因 `file:` 切 demo。
+   - HTML 内还有直接写死的雷达图 `[88,70,55,0.5,0.3,0.2]`、正弦/余弦离散度、
+     `Math.random()` 拥挤度历史、虚拟代码 MY0001 等。
+   - 根目录 `dashboard_data.json` 的 `data_type:"real"` 与 demo_generator 默认种子结果一致
+     （ERP/相关矩阵/动量PE/盈利修正/经济K型），标签不可信。
+6. **龙头驱动映射（不是指数替代）**：
+   - 韩国：三星+海力士等权篮子 vs KOSPI 日收益相关 0.956；缩放映射样本外 R² 0.945、年化误差 16.7%。
+   - 台湾：台积电 vs TAIEX 相关约 0.901，比随意三股等权更好 → 不能统一"每市场两只股票"。
+   - Phase 1 只预留"驱动"页签与映射质量字段，**不把原始篮子收益当指数收益**。
+7. **其他链路**：TWSE 官方无密钥接口可用（Phase 2）；Twelve Data 覆盖 KRX/TWSE 但需 key（Phase 2）；
+   Yahoo chart 实验可用但不作生产主链路；KRX 官方 REST 合同待澄清。
+8. **法律**：仍无 LICENSE，不整目录复制；不使用伯恩斯坦/花旗品牌与研报原文。
 
 ## 1. 总体架构：三档接入
 
@@ -80,35 +109,84 @@ quark_program（外部源，只读参考，不整目录复制）
       ▼
 HQA 活跃副本 data/_runtime/agent-v02-work/
 ├─ ai-quant-platform（前端 Next.js + 后端 quant_system/FastAPI）
-│   ├─ P1：K型/拥挤度监测 → 重写 → Hermes 今日页摘要卡片 + market_foresight 详情
-│   ├─ P3：板块价格/成交量动量 → 修复后作为普通实验 → /strategies + /backtest（不新增首页入口）
+│   ├─ P1：/asia-radar 独立页面（markets 分组）+ 专用 API + Futu 12 ETF 真实数据
+│   ├─ P3：板块价格/成交量动量 → 修复后作为普通实验 → /strategies + /backtest
 │   └─ P2：DiffsFormer 思路 → 隔离研究实验 → Experiments / Factor Lab / Unified Results
-└─ Hermes-quant-agent（hqa 侧：定时任务、只读研判、发布 artifact）
+└─ Hermes-quant-agent（后续：定时分析、告警、发布 market_foresight artifact；Phase 1 不做）
 ```
 
-**P1 垂直切片（推荐的第一个交付）**：真实数据的 K型/拥挤度监测 → HQA 定时任务 →
-`market_foresight` artifact → Hermes 页面卡片 + 详情。平台已有可复用组件
-`components/hermes/artifacts/ForesightSummary.tsx` 与 `app/hermes/results/page.tsx`，
-因此第一步是**扩充现有数据契约，而不是复制三份静态 HTML**。
-验收必须包含：数据来源、时间、复权方式、覆盖范围、降级状态；禁止把模拟数据标成真实。
+**P1 垂直切片（第一个可开工交付）**：Asia Radar Phase 1 —— 12 市场真实 ETF 排名/收益/
+波动/回撤/K型分化独立页面。平台负责页面、API、数据适配；HQA 后续才接定时与 foresight。
 
-## 2. P1：K型/泡沫监测器 → 重写进 market_foresight（不新建孤立 tab）
+## 2. P1：Asia Radar Phase 1（独立页面 `/asia-radar`）
 
-**归属**：数据源/指标计算/持久化/GET API 在 `quant_system`（ai-quant-platform）；
-定时运行、形成只读研判、发布 artifact 在 hqa 侧。前端优先落在现有 Hermes 今日页摘要 +
-统一结果详情，而非另起 `/k-shape-monitor` 孤立页。
+### 2.1 产品定位
 
-- **指标实现**：参考其五个模块的方法论（市场K型、因子K型、行业拥挤、动量泡沫、综合信号），
-  按 `quant_system/factors/` 现有契约**重写**，不 copy 代码：
-  - 不引入 `demo_generator`；任何样本/降级数据必须显式标注，API 默认拒绝 demo；
-  - 取数走 `quant_system/data/providers/` 现有 provider（tiingo/csv 等），universe 先做
-    美股/AI 范围（SPY/QQQ/SOXX/IGV + 持仓行业与重点个股）；亚洲市场作为后续数据源扩展，
-    缺源时显式降级并标注，**不静默退回 demo**；
-  - 指标输出对齐 `market_foresight` artifact schema（扩充该契约容纳拥挤度/泡沫维度）。
-- **API**：扩充现有 foresight/results GET endpoint，而非另起 `/api/kshape/*`。
-- **前端**：复用 `ForesightSummary.tsx` 卡片 + `hermes/results` 详情，按 HQA 设计体系
-  呈现拥挤度/泡沫/分化视图；echarts 走 npm 依赖。
-- **刷新**：HQA 定时任务每日运行（对齐现有 automation 范式），失败保留上一版并标记 stale。
+> 亚洲 12 市场表现、AI 驱动分化和数据质量雷达
+
+**不是**完整泡沫判定器。价格/波动/回撤/K型分化可真实闭环；PE/PB、ERP、行业拥挤度、
+个股风险名单在可靠跨市场数据到位前**不展示**（或标"待接入"占位，绝不显示模拟结论）。
+
+### 2.2 页面结构（Phase 1）
+
+1. 12 市场热力图 + 排名
+2. 周/月/YTD 收益、波动率、最大回撤
+3. AI 赢家 vs 落后市场的**动态** K 型分化（禁止硬编码赢家/输家名单）
+4. 市场详情三页签：**指数**（Phase 1 可空/待接入）、**ETF 代理**、**龙头驱动**（Phase 1 仅预留字段与 UI 壳）
+5. 数据质量栏：provider、symbol、币种、时区、截至时间、是否代理、覆盖范围、限制
+6. 每张图强制徽章：`真实 / 代理 / 静态 / 演示` + 数据截至时间
+
+### 2.3 数据模式（显式三分）
+
+| 模式 | Phase 1 | 说明 |
+|---|---|---|
+| 跨市场可比 | ✅ 12 个 Futu 美股国家 ETF | 统一美元、美国收盘时间 |
+| 本地市场 | ❌ 延后 | 日经/恒指/TAIEX 等；需扩展 Futu 多市场代码或 TWSE/Twelve Data |
+| 龙头驱动 | ⬜ UI 预留 | 三星+海力士 / 台积电等；展示相关/Beta/R²/跟踪误差/训练截止日；**不替换指数收益** |
+
+12 ETF 映射（第一版代理）：
+
+| 市场 | ETF |
+|---|---|
+| 韩国 | EWY |
+| 台湾 | EWT |
+| 日本 | EWJ |
+| 中国沪深300 | ASHR |
+| 印度 | INDA |
+| 印尼 | EIDO |
+| 香港 | EWH |
+| 新加坡 | EWS |
+| 泰国 | THD |
+| 马来西亚 | EWM |
+| 澳大利亚 | EWA |
+| 菲律宾 | EPHE |
+
+### 2.4 技术归属与改造点
+
+- **前端**：`app/asia-radar/page.tsx` + 侧栏 `marketsSection` 增项；按 HQA 设计体系重做，
+  参考原 dashboard 信息架构与视觉密度，**不 iframe、不 copy HTML/JS**。
+- **后端**：
+  - 新增专用 API（建议 `/api/asia-radar/*`），**不得**复用通用 `/ohlcv` 的 sample 静默回退路径；
+  - 强制 `provider=futu`（或显式白名单），失败 → 400/stale + 前端错误态，永不 sample；
+  - 指标计算在 `quant_system/factors/asia_radar/`（或等价路径）**重写**：YTD/周/月收益、
+    波动、回撤、跨市场 K 型分化指数；不引入 demo_generator。
+- **数据适配**：Phase 1 只用现有 Futu 美股适配器（plain ticker）；不改 `normalize_symbol`
+  去接本地指数（那是 Phase 2）。
+- **HQA 侧**：Phase 1 **不做**定时任务与 foresight 发布；先把页面/API 真实闭环做通。
+
+### 2.5 验收标准（Phase 1 必须全过）
+
+- [ ] 12 个 ETF 全部来自 Futu 真实日线，响应 meta 含 provider/symbol/currency/as_of/adjustment
+- [ ] 关闭 OpenD 或强制 provider 失败时，页面显示错误/stale，**不会**出现 sample 曲线
+- [ ] 无 PE/PB/ERP/拥挤度/个股风险名单的模拟数字；若有占位，明确标"待接入"
+- [ ] K 型赢家/输家由当期收益动态计算，非硬编码
+- [ ] 侧栏 markets 分组可见 `/asia-radar`；不引入原项目品牌/研报原文/LICENSE 风险文件
+- [ ] 现有 pytest gate + 前端 lint/build 通过；新增 API/指标单测用录制样本，不依赖外网 CI
+
+### 2.6 后续阶段（本期 plan 可写清，不在 Phase 1 交付）
+
+- **Phase 2**：扩展 Futu 多市场代码适配；接入日经/恒指/TWSE；韩国评估 Twelve Data 或 KRX 合同
+- **Phase 3**：样本外验证的龙头映射（点时权重）、估值数据；HQA 定时 + market_foresight 告警
 
 ## 3. P3：板块价格/成交量动量 → 修复后作为普通实验（不用花旗名称）
 
@@ -138,27 +216,32 @@ HQA 活跃副本 data/_runtime/agent-v02-work/
 
 ## 5. 数据流与错误处理
 
-- 三档统一：取数失败 → 显式降级（stale 标记 / 报错），**绝不静默退回 demo 数据**；前端展示数据来源徽章（real/stale/demo）。
-- P1 universe 优先复用现有美股数据 provider；亚洲市场数据源作为后续扩展，缺源显式降级并标注。
-- 不加载来源不明的 `.pkl`/`.pt`（pickle/torch.load 可执行任意代码）；不把任何凭据复制进仓库。
-- 所有新增写操作（refresh、重跑）遵循本地 trust mode；对外 public write 默认 OFF 不变。
+- 三档统一：取数失败 → 显式降级（stale 标记 / 报错），**绝不静默退回 demo/sample 数据**；
+  前端展示数据来源徽章（真实/代理/静态/演示 + as_of）。
+- P1 Asia Radar 专用 API **禁止**走通用 `/ohlcv` 的 sample 回退；强制 provider=futu。
+- 不加载来源不明的 `.pkl`/`.pt`；不把任何凭据（含 neodata TOKEN）复制进仓库。
+- 所有新增写操作遵循本地 trust mode；对外 public write 默认 OFF；不动 live_trading。
 
 ## 6. 测试
 
-- P1：重写后的拥挤度/泡沫指标单元测试（录制样本，不依赖外网）；foresight/results API 契约测试；前端 Hermes 卡片与详情渲染测试。
-- P3：轮动信号单元测试（固定输入→固定持仓，验证次日执行对齐）；回测集成测试与库内基准同口径；结果落库 schema 校验。
-- P2：实验登记与 Gate 链路元数据校验（无回测断言，因本期不实现训练）。
+- P1：12 ETF 指标单测（录制样本）；专用 API 契约测试（含"provider 失败不得 sample"负例）；
+  `/asia-radar` 前端渲染与数据质量栏断言；OpenD 不可用时的错误态 E2E（可选）。
+- P3：轮动信号单测（次日执行对齐）；回测集成与库内基准同口径。
+- P2：实验登记元数据校验（本期不实现训练）。
 - 全部改动过现有 pytest gate 与前端 lint/build。
 
-## 7. 交付顺序（建议，一个 plan 内分批）
+## 7. 交付顺序
 
-1. **P1 垂直切片**（最高价值）：真实数据 K型/拥挤度监测 → HQA 定时任务 → market_foresight artifact → Hermes 页面卡片 + 详情。
-2. P3 板块动量实验（修复口径后重跑，进统一结果页）。
-3. P2 DiffsFormer 实验构想登记（仅文档 + 元数据，不实现训练）。
+1. **P1 Asia Radar Phase 1**（本轮可开工）：`/asia-radar` + 专用 API + Futu 12 ETF 真实闭环。
+2. P1 Phase 2/3（本地指数、龙头映射、HQA 定时）—— 另开 plan。
+3. P3 板块动量实验（修复口径后重跑）。
+4. P2 DiffsFormer 实验构想登记（仅文档 + 元数据）。
 
 ## 8. 明确不做（YAGNI）
 
-- 不做达摩院实时选股页、不生成其展示报告、不加载其模型权重；
-- 不做三个静态 HTML 的原样 iframe 嵌入、不整目录复制（无法律依据且含凭据/坏链路）；
-- 不为板块动量单独建首页 tab；不动 kill_switch/live_trading 任何配置；
-- P1 本期不做亚洲 12 市场数据源扩展（先做美股/AI universe）。
+- 不 copy 原项目源码/HTML/JS/JSON/品牌/研报原文；不整目录复制；
+- 不 iframe 原 dashboard；不把 demo/sample 标成真实；
+- Phase 1 不展示 PE/PB/ERP/行业拥挤度/个股风险名单的模拟结论；
+- Phase 1 不做 HQA 定时、不做 market_foresight 发布、不扩展 Futu 多市场代码；
+- 不为板块动量单独建首页 tab；不做达摩院实时选股/展示报告/加载模型权重；
+- 不动 kill_switch / live_trading / public write 默认。
