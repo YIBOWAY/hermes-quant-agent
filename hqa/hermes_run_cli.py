@@ -13,8 +13,10 @@ import math
 import re
 import sys
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
+from hqa import config
 from hqa.hermes_managed_session import (
     OfficialHermesManagedSessionPort,
     derive_managed_session_id,
@@ -25,6 +27,7 @@ from hqa.hermes_run_adapter import (
     evaluate_durable_run_availability,
     HermesRunError,
 )
+from hqa.paper_intake import build_execution_contract, execution_instructions
 
 _STDIN_LIMIT = 1_200_000
 _STDOUT_LIMIT = 4_194_304
@@ -389,34 +392,38 @@ def _submit(
     if not isinstance(metadata, Mapping):
         raise _InputError("run_invalid_request", "metadata must be an object")
     instructions = raw_body.get("instructions")
-    contract_fields = {
-        "execution_contract",
-        "execution_contract_digest",
-        "research_claim_digest",
-    }
-    contract_present = bool(contract_fields & set(metadata))
     if instructions is not None:
-        if (
-            type(instructions) is not str
-            or not instructions.startswith(
-                "This run is governed by hqa.paper_intake/v1."
+        marker = "exact absolute path: "
+        suffix = (
+            ". Do not claim completion unless all three tool-backed steps succeeded."
+        )
+        try:
+            if (
+                type(instructions) is not str
+                or len(instructions.encode("utf-8")) > 4_096
+            ):
+                raise ValueError
+            if instructions.count(marker) != 1 or not instructions.endswith(suffix):
+                raise ValueError
+            source_text = instructions.split(marker, 1)[1][: -len(suffix)]
+            source_path = Path(source_text)
+            if not source_path.is_absolute() or source_path.suffix != ".py":
+                raise ValueError
+            canonical_root = (config.PAPER_INTAKE_DIR / "drafts").resolve()
+            canonical_source = source_path.resolve()
+            canonical_source.relative_to(canonical_root)
+            if source_path != canonical_source:
+                raise ValueError
+            expected = execution_instructions(
+                build_execution_contract(source_file_ref=str(canonical_source))
             )
-            or len(instructions.encode("utf-8")) > 4_096
-            or metadata.get("execution_contract") != "hqa.paper_intake/v1"
-            or type(metadata.get("execution_contract_digest")) is not str
-            or _DIGEST_RE.fullmatch(metadata["execution_contract_digest"]) is None
-            or type(metadata.get("research_claim_digest")) is not str
-            or _DIGEST_RE.fullmatch(metadata["research_claim_digest"]) is None
-        ):
+            if instructions != expected:
+                raise ValueError
+        except (OSError, ValueError):
             raise _InputError(
                 "run_invalid_request",
-                "paper intake instructions are not contract-bound",
+                "paper intake instructions are not canonical",
             )
-    elif contract_present:
-        raise _InputError(
-            "run_invalid_request",
-            "paper intake metadata requires exact instructions",
-        )
     try:
         # Reject non-finite/non-JSON metadata and freeze a plain dict before the
         # adapter sends the body.  No conversation history is accepted here:

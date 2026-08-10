@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Optional, Union
 
 import pytest
@@ -303,19 +304,27 @@ def test_submit_receipt_keeps_root_and_resolved_tip_distinct(
     assert response["session_id"] == "web_tip"
 
 
-def test_submit_allows_only_contract_bound_paper_intake_instructions(
+def test_submit_allows_only_canonical_paper_intake_instructions(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     adapter = _FakeRunAdapter()
+    intake_root = tmp_path / "paper-intake"
+    source_path = intake_root / "drafts" / "factor.py"
+    monkeypatch.setattr("hqa.config.PAPER_INTAKE_DIR", intake_root)
     request_body = {
         "input": "private exact paper prompt",
         "session_id": "web_managed_1",
-        "metadata": {
-            "execution_contract": "hqa.paper_intake/v1",
-            "execution_contract_digest": "d" * 64,
-            "research_claim_digest": "e" * 64,
-        },
-        "instructions": "This run is governed by hqa.paper_intake/v1. Use tools.",
+        "metadata": {"command_id": "cmd-2", "source": "platform"},
+        "instructions": (
+            "This run is governed by hqa.paper_intake/v1. You must use web_search "
+            "to discover the requested paper unless the user supplied an exact URL; "
+            "you must use web_extract on the selected paper URL and inspect at least "
+            "4096 UTF-8 bytes of paper text. Then derive one Python factor "
+            "implementation and create it with the write_file tool at this exact "
+            f"absolute path: {source_path}. Do not claim completion unless all three "
+            "tool-backed steps succeeded."
+        ),
     }
 
     code, response, _ = _run(
@@ -331,22 +340,27 @@ def test_submit_allows_only_contract_bound_paper_intake_instructions(
 
 
 @pytest.mark.parametrize(
-    "metadata",
+    "instructions",
     [
-        {},
-        {"execution_contract": "hqa.paper_intake/v1"},
-        {
-            "execution_contract": "other/v1",
-            "execution_contract_digest": "d" * 64,
-            "research_claim_digest": "e" * 64,
-        },
+        "This run is governed by hqa.paper_intake/v1.",
+        (
+            "This run is governed by hqa.paper_intake/v1. You must use web_search "
+            "to discover the requested paper unless the user supplied an exact URL; "
+            "you must use web_extract on the selected paper URL and inspect at least "
+            "4096 UTF-8 bytes of paper text. Then derive one Python factor "
+            "implementation and create it with the write_file tool at this exact "
+            "absolute path: /tmp/outside.py. Do not claim completion unless all three "
+            "tool-backed steps succeeded."
+        ),
     ],
 )
-def test_submit_rejects_unbound_system_instructions(
+def test_submit_rejects_noncanonical_system_instructions(
     monkeypatch: pytest.MonkeyPatch,
-    metadata: dict[str, object],
+    tmp_path: Path,
+    instructions: str,
 ) -> None:
     adapter = _FakeRunAdapter()
+    monkeypatch.setattr("hqa.config.PAPER_INTAKE_DIR", tmp_path / "paper-intake")
 
     code, response, _ = _run(
         monkeypatch,
@@ -356,8 +370,8 @@ def test_submit_rejects_unbound_system_instructions(
             request_body={
                 "input": "paper prompt",
                 "session_id": "web_managed_1",
-                "metadata": metadata,
-                "instructions": "This run is governed by hqa.paper_intake/v1.",
+                "metadata": {"command_id": "cmd-2", "source": "platform"},
+                "instructions": instructions,
             },
         ),
         adapter=adapter,
