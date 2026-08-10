@@ -262,6 +262,40 @@ Phase 1.2（同日交付，只读扩展）：
   （Futu 真实/缓存、as_of、America/New_York）。无估值/拥挤/风险名单。
 - 测试：篮子合法性、缺 symbol fail-closed、provenance 缓存区分、排名动态性、前端渲染/错误态。
 
+### 2.8b Phase 1.5 独立复审与实测验收（2026-08-11，Kimi）
+
+交付后由第二个 agent 独立复审（只读）：后端/前端双 code review、测试门禁复跑、
+本机 stack 重启后真实 Futu 数据实测与中英文页面截图验收。**全部 findings 已于
+2026-08-11 当天修复并复验通过**（见文末状态列）。
+
+**已验证无问题**：fail-closed 闭合（无任何 sample/空数据回退路径，实测坏 basket → 400）；
+指标口径正确（周/月/YTD、63 日波动、回撤、rank，无前视）；共享 session 对齐与 Asia Radar
+逐行一致；provenance（futu/futu_cache）与缓存设计正确；测试非糊弄型但有空洞（见下）。
+实测：stack 重启需 `export USER HOME`（env 文件 `set -u` 引用）；重启前旧进程不挂新路由
+（`/api/market-cross-section` 404）——**验收前必须重启 stack**。
+真实数据抽查：`ai_watch` 12 行 as_of=2026-08-07，SOXX +73.4% YTD 居首、TSLA -25.0% 垫底；
+`us_sectors` XLK +30.6% 居首；中英文页面渲染与徽章（Futu 真实行情/缓存 bar/as_of/美股时段）完整。
+
+**Findings（2026-08-11 已全部修复 + 复验）**：
+
+| ID | 级别 | 问题 | 位置 | 修复（2026-08-11） |
+|---|---|---|---|---|
+| CS-B01 | high | 数据层校验失败（如 `BRK.B`、`US.SPY` 写法）被误报为 503 provider 故障，破坏 400/503 语义；实测 `symbols=A$%` 返回 503 `provider_unavailable` | `api/routes/market_cross_section.py:49` | ✅ `_CLIENT_ERROR_CODES` 同时覆盖 `historical_prices_invalid_request` → 400；实测 5 组非法输入全部 400 |
+| CS-B02 | high | 自定义 symbol 白名单用 `startswith(tuple)` 只校验首字符，形同虚设 | `factors/market_cross_section.py:74,168` | ✅ 改全字符正则 `[A-Z0-9]{1,12}` fullmatch；`BRK.B`/`US.SPY` 明确 400（与 normalize_symbol 接受集对齐，注释说明理由） |
+| CS-B03 | medium | 指标测试无数值断言（公式整体写错也会全绿）；缺 session 错位 / futu_cache provenance / symbols 参数负例 | `tests/test_market_cross_section.py` | ✅ 新增手算数值断言（等差/单阶跌序列精确比对）+ 6 个后端、5 个 API 负例 |
+| CS-B04 | medium | `basket` 与 `symbols` 同传时静默二选一；`symbols=,,,` 静默回退默认篮子（应 400） | `factors/market_cross_section.py:164`、`routes:44-45` | ✅ 两种歧义输入均 400，实测通过 |
+| CS-F01 | high | 切换篮子期间展示旧篮子数据且无 stale 提示（retry 路径清空了 data，切换路径漏了） | `MarketCrossSectionDashboard.tsx:75-119,174` | ✅ `handleBasketChange` 切换即清空 data 进 loading 态 |
+| CS-F02 | high | 每张卡片硬编码 "ETF" 角标，`ai_watch` 里 7 只个股（NVDA/MSFT/…）被错标 | `MarketCrossSectionDashboard.tsx:207-209` | ✅ 角标删除，截图复验个股卡片无 ETF 标 |
+| CS-F03 | medium | 排序测试无法失败（输入 rank 已升序、无顺序断言） | `MarketCrossSectionDashboard.test.tsx:50-67` | ✅ 乱序 rank fixture + DOM 顺序断言，删 sort 会红 |
+| CS-F04 | medium | 后端下发的 methodology/basket_label/history 前端全部丢弃，口径徽章名存实亡；文案双真相源漂移风险 | `MarketCrossSectionDashboard.tsx:41,69` | ✅ methodology 折叠层渲染（仿 asia-radar）；pill 标签改用后端 `basket_label` + 本地兜底 |
+| CS-F05 | low | URL `?basket=us_sectors` 被静默忽略（page.tsx 只用 searchParams 取 locale），深链失效 | `app/market-cross-section/page.tsx:8-11` | ✅ 白名单校验后作 initialBasket 传入；实测 `?basket=us_sectors` 深链生效 |
+
+**修复后复验门禁**：后端 `asia_radar or cross_section` 40 passed；前端 78 files / 473 tests
+passed；tsc / eslint 干净；stack 重启后非法输入 400×5、正常 basket 200、中英文截图复验通过。
+
+**结论**：Phase 1.5 功能与契约语义均可信任，可以进入下一阶段（Phase 2 本地指数 + 龙头映射，
+见 §2.6）。
+
 ## 3. P3：板块价格/成交量动量 → 修复后作为普通实验（不用花旗名称）
 
 - 只保留"板块动量轮动"概念；**重写**信号与执行对齐：

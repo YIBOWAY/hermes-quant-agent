@@ -32,6 +32,7 @@ Hermes 只能通过 `~/.hermes/scripts/hqa-hermes-update.sh check|apply` 受控�
 | 层级 | 权威文档 | 当前含义 |
 |---|---|---|
 | 产品路线 | [`design/2026-07-01-roadmap-phases-0b-4.md`](design/2026-07-01-roadmap-phases-0b-4.md) | Hermes 是个人量化 COO；`ai-quant-platform` 是领域后端。D-31 定义工作台方向，D-32 冻结 Agent v0.2 / 完整 `/hermes` Web Chat 目标。 |
+| quark 三项目接入 spec | [`superpowers/specs/2026-08-10-quark-program-integration-design.md`](superpowers/specs/2026-08-10-quark-program-integration-design.md) | quark_program 三个外部项目只吸收方法论、分三档接入：P1 Asia Radar（Phase 1–1.2 已交付）+ 市场横截面（Phase 1.5 已交付，2026-08-11 复审 findings 全部修复复验，见 §2.8b）；P2 DiffsFormer 仅研究思路走 Gate 链路；P3 板块轮动概念修复后作普通实验。 |
 | D-33 自动 paper 计划 | [`plans/2026-08-10-full-automation-paper-path.md`](plans/2026-08-10-full-automation-paper-path.md) | 论文正文收据 → 因子 → final backtest → 机器 Gate 1/2/3 → 本地 ff-land → 限额 sleeve；只写 `paper_only`，不 auto-push，live 永远人工。 |
 | D-33 运维 | [`runbooks/full-automation-paper.md`](runbooks/full-automation-paper.md) | 双 Flag、owner-private 入队、常驻 driver、029 配额、信号/执行时窗、pause/quarantine/demote 与回滚。 |
 | 已批准设计 | [`superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md`](superpowers/specs/2026-07-13-hermes-unified-research-workbench-design.md) | `/hermes` 为默认首页，逐步吞并 Factor Lab / Backtester / Experiments / Agent Studio 的体验，但不删除领域引擎/API/CLI/artifact。 |

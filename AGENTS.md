@@ -122,6 +122,12 @@ Rules for AI agents working in this repository.
   implementation plan is superseded material and must not be followed task-by-task.
 - Treat `ai-quant-platform/docs/phases/phase_15_iteration_roadmap.md` as
   reference material only. Do not use it as an independent product roadmap.
+- The quark_program three-project integration spec is
+  `docs/superpowers/specs/2026-08-10-quark-program-integration-design.md`
+  (P1 Asia Radar + `/market-cross-section` delivered; P2/P3 are research-only
+  tracks). Its Phase 1.5 review findings (§2.8b) were all fixed and
+  re-verified on 2026-08-11; Phase 2 (local indices + leader mapping) is the
+  next quark slice.
 
 ## Safety Rules
 
