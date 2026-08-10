@@ -38,6 +38,7 @@ Hermes 只能通过 `~/.hermes/scripts/hqa-hermes-update.sh check|apply` 受控�
 | V3 acceptance | [`audits/2026-07-19-agent-v0-2-v3-acceptance.md`](audits/2026-07-19-agent-v0-2-v3-acceptance.md) | encrypted intent + multi-Attempt workflow authority 已 source-accepted、本地暗态安装并注册唯一 no-agent retention；不等于 Web Chat 可写。 |
 | V3 运维 | [`runbooks/agent-v0-2-v3-authorities.md`](runbooks/agent-v0-2-v3-authorities.md) | authority 路径、只读 Hermes CLI、retention、backup/restore、audit/rebuild 与回滚边界。 |
 | Hermes 受控更新 | [`runbooks/hermes-controlled-update.md`](runbooks/hermes-controlled-update.md) | Desktop `main` 与 Gateway 集成工作树的人工 check/apply/rollback；候选隔离验证，禁止 cron/no-agent 自动更新。 |
+| Git 主线收敛 | [`audits/2026-08-10-git-branch-consolidation.md`](audits/2026-08-10-git-branch-consolidation.md) | 记录 runtime 分支辨识、恢复 tags/bundle、独有提交语义审查与单一 `main` 发布/退役边界。 |
 | Wave 3 前序交付记录 | [`superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md`](superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md) | 3A/3B、reconcile-only 3C、3C.1 code acceptance、3E-A 与 3F mechanism 的历史交付证据和 blocker 输入；不是当前执行队列。 |
 | 本机 Hermes 集成决策 | [`design/2026-07-15-local-hermes-integration-decision.md`](design/2026-07-15-local-hermes-integration-decision.md) | 正式方向是 platform BFF → PostgreSQL durable ledger → deterministic HQA worker → official Hermes API；禁止 Hermes/LLM cron 空轮询。 |
 | 历史 Hermes 0.18.2 只读合同 | [`contracts/hermes-api-server-0.18.2.md`](contracts/hermes-api-server-0.18.2.md) | 只保留当时 health/capabilities/sessions GET allowlist 的合同快照；不得用它覆盖 2026-08-01 managed Run/approval 实测或当作当前 runtime identity。 |
