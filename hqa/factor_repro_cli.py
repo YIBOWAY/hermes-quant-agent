@@ -35,6 +35,7 @@ def _write_experiment_config(
     *,
     commission_bps: float = 1.0,
     slippage_bps: float = 5.0,
+    automation_evidence_holdout_days: int | None = None,
 ) -> None:
     experiment = {
         "experiment_name": f"factor-repro-{candidate_id}",
@@ -51,6 +52,12 @@ def _write_experiment_config(
         "commission_bps": commission_bps,
         "slippage_bps": slippage_bps,
     }
+    if automation_evidence_holdout_days is not None:
+        if not 1 <= automation_evidence_holdout_days <= 3_650:
+            raise ValueError("automation evidence holdout days out of range")
+        experiment["automation_evidence"] = {
+            "holdout_days": automation_evidence_holdout_days
+        }
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(experiment, indent=2, sort_keys=True))
@@ -312,6 +319,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--final",
         action="store_true",
         help="run the FULL window once before promotion; non-final runs reserve the last 183 days (D-21)",
+    )
+    p_backtest.add_argument(
+        "--automation-evidence-holdout-days",
+        type=int,
+        default=None,
+        help=argparse.SUPPRESS,
     )
 
     p_promote = sub.add_parser(
@@ -813,6 +826,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 effective_end,
                 commission_bps=args.commission_bps,
                 slippage_bps=args.slippage_bps,
+                automation_evidence_holdout_days=(
+                    args.automation_evidence_holdout_days
+                ),
             )
         except (OSError, ValueError) as exc:
             print(f"ERROR: experiment config write failed: {exc}", file=sys.stderr)

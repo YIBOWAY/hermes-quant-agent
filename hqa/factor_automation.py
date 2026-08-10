@@ -8,10 +8,12 @@ added later; this module has no promotion method by design.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -90,6 +92,9 @@ class FinalBacktestReceipt:
     policy_digest: str
     provider: Literal["futu", "tiingo"]
     final: Literal[True]
+    actual_sample_rows: int
+    actual_out_of_sample_rows: int
+    actual_data_coverage_ratio: float
     actual_transaction_cost_bps: float
     actual_max_drawdown: float
     actual_turnover: float
@@ -180,6 +185,73 @@ def _validate_request(request: FactorAutomationRequest) -> None:
         raise FactorAutomationError("request_invalid")
 
 
+def _require_basic_lookahead_static_check(request: FactorAutomationRequest) -> None:
+    """Reject obvious future-data operators in the exact digest-bound source."""
+
+    source = Path(request.source_file_ref)
+    descriptor = -1
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(source, flags)
+        metadata = os.fstat(descriptor)
+        chunks: list[bytes] = []
+        remaining = 256_001
+        while remaining:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        tree = ast.parse(payload.decode("utf-8", errors="strict"))
+    except (OSError, UnicodeError, SyntaxError, ValueError) as exc:
+        raise FactorAutomationError("lookahead_static_check_failed") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or metadata.st_nlink != 1
+        or not payload
+        or len(payload) > 256_000
+        or hashlib.sha256(payload).hexdigest() != request.source_sha256
+    ):
+        raise FactorAutomationError("lookahead_static_check_failed")
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        method = node.func.attr
+        if method in {"bfill", "backfill"}:
+            raise FactorAutomationError("lookahead_static_check_failed")
+        if method == "rolling":
+            center = next(
+                (item.value for item in node.keywords if item.arg == "center"),
+                None,
+            )
+            if isinstance(center, ast.Constant) and center.value is True:
+                raise FactorAutomationError("lookahead_static_check_failed")
+        if method not in {"shift", "diff", "pct_change"}:
+            continue
+        periods = node.args[0] if node.args else next(
+            (item.value for item in node.keywords if item.arg == "periods"),
+            None,
+        )
+        if isinstance(periods, ast.UnaryOp) and isinstance(periods.op, ast.USub):
+            if isinstance(periods.operand, ast.Constant) and isinstance(
+                periods.operand.value, (int, float)
+            ):
+                raise FactorAutomationError("lookahead_static_check_failed")
+
+
+def validate_factor_automation_request(request: FactorAutomationRequest) -> None:
+    """Validate one exact source-bound request before queueing or mutation."""
+
+    _validate_request(request)
+    _require_basic_lookahead_static_check(request)
+
+
 def _validate_candidate(
     candidate: CandidateReceipt,
     request: FactorAutomationRequest,
@@ -243,10 +315,16 @@ def run_to_final_backtest(
 
     if allow_acceptance_machine_approval is not True:
         raise FactorAutomationDisabled("slice2_acceptance_machine_approval_disabled")
-    _validate_request(request)
+    validate_factor_automation_request(request)
+    declared_evidence = FactorAutomationEvidence(
+        **{
+            **request.policy_evidence.__dict__,
+            "lookahead_static_check_passed": True,
+        }
+    )
     declared_decision = evaluate_factor_automation_policy(
         policy,
-        request.policy_evidence,
+        declared_evidence,
     )
     if not declared_decision.accepted:
         raise FactorAutomationError(
@@ -279,15 +357,13 @@ def run_to_final_backtest(
     )
     verified_evidence = FactorAutomationEvidence(
         universe=request.policy_evidence.universe,
-        sample_rows=request.policy_evidence.sample_rows,
-        out_of_sample_rows=request.policy_evidence.out_of_sample_rows,
-        data_coverage_ratio=request.policy_evidence.data_coverage_ratio,
+        sample_rows=final_backtest.actual_sample_rows,
+        out_of_sample_rows=final_backtest.actual_out_of_sample_rows,
+        data_coverage_ratio=final_backtest.actual_data_coverage_ratio,
         transaction_cost_bps=final_backtest.actual_transaction_cost_bps,
         max_drawdown=final_backtest.actual_max_drawdown,
         turnover=final_backtest.actual_turnover,
-        lookahead_static_check_passed=(
-            request.policy_evidence.lookahead_static_check_passed
-        ),
+        lookahead_static_check_passed=True,
     )
     final_decision = evaluate_factor_automation_policy(policy, verified_evidence)
     if not final_decision.accepted:
@@ -610,6 +686,8 @@ class PlatformFactorAutomationSlice2Port:
                 str(request.policy_evidence.transaction_cost_bps / 2.0),
                 "--slippage-bps",
                 str(request.policy_evidence.transaction_cost_bps / 2.0),
+                "--automation-evidence-holdout-days",
+                "183",
                 "--final",
             ]
         )
@@ -645,7 +723,14 @@ class PlatformFactorAutomationSlice2Port:
         if (
             not isinstance(policy_evidence, dict)
             or set(policy_evidence)
-            != {"transaction_cost_bps", "max_drawdown", "turnover"}
+            != {
+                "sample_rows",
+                "out_of_sample_rows",
+                "data_coverage_ratio",
+                "transaction_cost_bps",
+                "max_drawdown",
+                "turnover",
+            }
         ):
             raise FactorAutomationError("final_backtest_policy_evidence_invalid")
         return FinalBacktestReceipt(
@@ -657,6 +742,9 @@ class PlatformFactorAutomationSlice2Port:
             policy_digest=approval.policy_digest,
             provider=request.provider,
             final=True,
+            actual_sample_rows=policy_evidence["sample_rows"],
+            actual_out_of_sample_rows=policy_evidence["out_of_sample_rows"],
+            actual_data_coverage_ratio=policy_evidence["data_coverage_ratio"],
             actual_transaction_cost_bps=policy_evidence["transaction_cost_bps"],
             actual_max_drawdown=policy_evidence["max_drawdown"],
             actual_turnover=policy_evidence["turnover"],

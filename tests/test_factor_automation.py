@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -36,12 +37,22 @@ def test_automation_gate1_authority_is_separate_from_human_gate() -> None:
 
 
 def _request(tmp_path: Path) -> FactorAutomationRequest:
+    source = tmp_path / "factor.py"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text(
+        "from quant_system.factors.base import BaseFactor\n"
+        "class SafeFactor(BaseFactor):\n"
+        "    factor_id = 'safe_factor'\n"
+        "    def _compute_values(self, frame):\n"
+        "        return frame.groupby('symbol')['close'].pct_change(20)\n",
+        encoding="utf-8",
+    )
     return FactorAutomationRequest(
         automation_id="automation-0123456789abcdef",
         intake_receipt_id="paper-intake-receipt:sha256:" + ("a" * 64),
         intake_contract_digest="b" * 64,
-        source_file_ref=str(tmp_path / "factor.py"),
-        source_sha256="c" * 64,
+        source_file_ref=str(source),
+        source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
         goal="reproduce exact paper factor",
         universe=("SPY", "QQQ"),
         provider="futu",
@@ -69,6 +80,9 @@ class _Port:
         self.actual_max_drawdown: float | None = None
         self.actual_turnover: float | None = None
         self.actual_transaction_cost_bps: float | None = None
+        self.actual_sample_rows: int | None = None
+        self.actual_out_of_sample_rows: int | None = None
+        self.actual_data_coverage_ratio: float | None = None
 
     def propose(self, request: FactorAutomationRequest) -> CandidateReceipt:
         self.calls.append("propose")
@@ -118,6 +132,21 @@ class _Port:
             policy_digest=approval.policy_digest,
             provider=request.provider,
             final=True,
+            actual_sample_rows=(
+                request.policy_evidence.sample_rows
+                if self.actual_sample_rows is None
+                else self.actual_sample_rows
+            ),
+            actual_out_of_sample_rows=(
+                request.policy_evidence.out_of_sample_rows
+                if self.actual_out_of_sample_rows is None
+                else self.actual_out_of_sample_rows
+            ),
+            actual_data_coverage_ratio=(
+                request.policy_evidence.data_coverage_ratio
+                if self.actual_data_coverage_ratio is None
+                else self.actual_data_coverage_ratio
+            ),
             actual_transaction_cost_bps=(
                 request.policy_evidence.transaction_cost_bps
                 if self.actual_transaction_cost_bps is None
@@ -218,6 +247,9 @@ def test_platform_port_records_machine_gate1_and_exact_platform_lineage(tmp_path
         return {
             "factor_id": "exact_factor",
             "verified_policy_evidence": {
+                "sample_rows": 756,
+                "out_of_sample_rows": 126,
+                "data_coverage_ratio": 0.995,
                 "transaction_cost_bps": 10.0,
                 "max_drawdown": 0.12,
                 "turnover": 1.2,
@@ -454,10 +486,10 @@ def test_pipeline_policy_failure_makes_no_candidate_mutation(tmp_path: Path) -> 
         **{
             **request.__dict__,
             "policy_evidence": FactorAutomationEvidence(
-                **{
-                    **request.policy_evidence.__dict__,
-                    "lookahead_static_check_passed": False,
-                }
+                    **{
+                        **request.policy_evidence.__dict__,
+                        "data_coverage_ratio": 0.50,
+                    }
             ),
         }
     )
@@ -468,6 +500,36 @@ def test_pipeline_policy_failure_makes_no_candidate_mutation(tmp_path: Path) -> 
         run_to_final_backtest(
             request=request,
             policy=loaded,
+            port=port,
+            allow_acceptance_machine_approval=True,
+        )
+
+    assert port.calls == []
+
+
+def test_pipeline_recomputes_lookahead_check_from_exact_source(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    source = Path(request.source_file_ref)
+    source.write_text(
+        "from quant_system.factors.base import BaseFactor\n"
+        "class LeakyFactor(BaseFactor):\n"
+        "    factor_id = 'leaky_factor'\n"
+        "    def _compute_values(self, frame):\n"
+        "        return frame.groupby('symbol')['close'].shift(-1)\n",
+        encoding="utf-8",
+    )
+    request = FactorAutomationRequest(
+        **{
+            **request.__dict__,
+            "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        }
+    )
+    port = _Port(request, _policy().policy_digest)
+
+    with pytest.raises(FactorAutomationError, match="lookahead_static_check_failed"):
+        run_to_final_backtest(
+            request=request,
+            policy=_policy(),
             port=port,
             allow_acceptance_machine_approval=True,
         )
@@ -501,6 +563,29 @@ def test_final_artifact_policy_failure_stops_before_gate3(tmp_path: Path) -> Non
 
     assert slice2.calls == ["propose", "machine_approve", "final_backtest"]
     assert promotion.calls == []
+
+
+def test_final_artifact_observed_sample_evidence_overrides_request_claims(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+    loaded = _policy()
+    port = _Port(request, loaded.policy_digest)
+    port.actual_sample_rows = 40
+    port.actual_out_of_sample_rows = 5
+    port.actual_data_coverage_ratio = 0.50
+
+    with pytest.raises(
+        FactorAutomationError,
+        match="final_policy_refused:sample_rows_below_minimum,"
+        "out_of_sample_rows_below_minimum,data_coverage_below_minimum",
+    ):
+        run_to_final_backtest(
+            request=request,
+            policy=loaded,
+            port=port,
+            allow_acceptance_machine_approval=True,
+        )
 
 
 def test_pipeline_rejects_final_receipt_lineage_drift(tmp_path: Path) -> None:

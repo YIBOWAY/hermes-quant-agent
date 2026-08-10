@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import hashlib
 import json
 import os
 import sys
@@ -16,6 +17,7 @@ from hqa.factor_automation import (
     PlatformFactorAutomationSlice2Port,
     PlatformFactorPromotionPort,
     run_to_paper_land,
+    validate_factor_automation_request,
 )
 from hqa.factor_automation_policy import (
     FactorAutomationEvidence,
@@ -135,6 +137,69 @@ def _write_result(path: Path, document: Mapping[str, Any]) -> None:
     os.chmod(path, 0o600)
 
 
+def _require_private_directory(path: Path) -> None:
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    metadata = path.lstat()
+    if (
+        path.is_symlink()
+        or not path.is_dir()
+        or metadata.st_uid != os.geteuid()
+        or metadata.st_mode & 0o077
+    ):
+        raise FactorAutomationDriverError("queue_unsafe")
+
+
+def enqueue_request(request_file: Path) -> dict[str, Any]:
+    mode, auto_land = _flags_enabled()
+    if not mode or not auto_land:
+        raise FactorAutomationDriverError("factor_automation_disabled")
+    document = _read_request(request_file)
+    request, _base_commit = parse_request(document)
+    validate_factor_automation_request(request)
+
+    queue = config.FACTOR_AUTOMATION_QUEUE_DIR
+    _require_private_directory(queue)
+    sources = queue / "sources"
+    _require_private_directory(sources)
+    source_payload = Path(request.source_file_ref).read_bytes()
+    if hashlib.sha256(source_payload).hexdigest() != request.source_sha256:
+        raise FactorAutomationDriverError("source_changed_before_enqueue")
+    staged = sources / f"{request.source_sha256}.py"
+    if staged.exists():
+        if staged.is_symlink() or staged.read_bytes() != source_payload:
+            raise FactorAutomationDriverError("staged_source_conflict")
+        idempotent_source = True
+    else:
+        with staged.open("xb") as handle:
+            handle.write(source_payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(staged, 0o600)
+        idempotent_source = False
+
+    queued_document = {**document, "source_file_ref": str(staged)}
+    queued_request, _base_commit = parse_request(queued_document)
+    validate_factor_automation_request(queued_request)
+    target = queue / f"{request.automation_id}.json"
+    payload = _canonical_bytes(queued_document)
+    if target.exists():
+        if target.is_symlink() or target.read_bytes() != payload:
+            raise FactorAutomationDriverError("queued_request_conflict")
+        idempotent_request = True
+    else:
+        with target.open("xb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(target, 0o600)
+        idempotent_request = False
+    return {
+        "state": "queued",
+        "automation_id": request.automation_id,
+        "idempotent_replay": idempotent_source and idempotent_request,
+    }
+
+
 def _flags_enabled() -> tuple[bool, bool]:
     return (
         os.environ.get("HQA_FACTOR_AUTOMATION_MODE") == "true",
@@ -199,10 +264,18 @@ def run_once() -> dict[str, Any]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hqa-factor-automation")
-    parser.add_argument("command", choices=("run-once",))
-    parser.parse_args(list(argv) if argv is not None else None)
+    parser.add_argument("command", choices=("run-once", "enqueue"))
+    parser.add_argument("--request-file")
+    args = parser.parse_args(list(argv) if argv is not None else None)
     try:
-        result = run_once()
+        if args.command == "enqueue":
+            if not args.request_file:
+                raise FactorAutomationDriverError("request_file_required")
+            result = enqueue_request(Path(args.request_file))
+        else:
+            if args.request_file:
+                raise FactorAutomationDriverError("unexpected_request_file")
+            result = run_once()
     except Exception as exc:  # noqa: BLE001 - launchd gets a bounded code only
         print(json.dumps({"state": "failed", "code": str(exc)}, sort_keys=True))
         return 1

@@ -441,8 +441,9 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
     assert names == [
         "hqa-aihot-alerts.sh",
         "hqa-artifacts.sh",
-        "hqa-doctor-watchdog.sh",
-        "hqa-factor-repro.sh",
+            "hqa-doctor-watchdog.sh",
+            "hqa-factor-automation.sh",
+            "hqa-factor-repro.sh",
         "hqa-full-9h-daily-close.sh",
         "hqa-full-9h-freshness.sh",
         "hqa-full-9h-notification-drain.sh",

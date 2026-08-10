@@ -979,6 +979,51 @@ def test_experiment_receipt_binds_persisted_config_summary_and_report(tmp_path) 
     assert evidence["report"] == receipt["report"]
 
 
+def test_experiment_receipt_returns_observed_automation_policy_evidence(
+    tmp_path,
+) -> None:
+    receipt = _experiment_receipt(tmp_path)
+    config_path = Path(receipt["config"])
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["automation_evidence"] = {"holdout_days": 183}
+    config_path.write_text(json.dumps(config, sort_keys=True), encoding="utf-8")
+    receipt["config_sha256"] = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    summary_path = Path(receipt["agent_summary"])
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["data"]["automation_evidence"] = {
+        "holdout_days": 183,
+        "sample_rows": 1_636,
+        "out_of_sample_rows": 126,
+        "data_coverage_ratio": 0.997,
+    }
+    summary_path.write_text(json.dumps(summary, sort_keys=True), encoding="utf-8")
+    receipt["agent_summary_sha256"] = hashlib.sha256(
+        summary_path.read_bytes()
+    ).hexdigest()
+
+    evidence = fr.verify_experiment_receipt(
+        receipt,
+        platform_dir=tmp_path,
+        experiment_output_dir=tmp_path,
+        candidate_id="factor-reviewed-1",
+        manifest_digest="a" * 64,
+        factor_id="reviewed_factor",
+        provider="futu",
+        symbols=["SPY", "QQQ"],
+        start="2020-01-02",
+        end="2026-06-30",
+    )
+
+    assert evidence["verified_policy_evidence"] == {
+        "sample_rows": 1_636,
+        "out_of_sample_rows": 126,
+        "data_coverage_ratio": 0.997,
+        "transaction_cost_bps": 6.0,
+        "max_drawdown": 0.06,
+        "turnover": 0.1,
+    }
+
+
 def test_experiment_receipt_rejects_artifacts_outside_authority_root(tmp_path) -> None:
     receipt = _experiment_receipt(tmp_path)
 
@@ -1094,9 +1139,12 @@ def test_experiment_receipt_rejects_huge_integer_metric_without_traceback(
     # Python 3.11.15 enforces the process-wide decimal digit limit during
     # json.dumps/loads. Disable it only around this adversarial fixture so the
     # test still reaches the production finite-float guard it is meant to lock.
-    previous_limit = sys.get_int_max_str_digits()
+    get_limit = getattr(sys, "get_int_max_str_digits", None)
+    set_limit = getattr(sys, "set_int_max_str_digits", None)
+    previous_limit = get_limit() if get_limit is not None else None
     try:
-        sys.set_int_max_str_digits(0)
+        if set_limit is not None:
+            set_limit(0)
         receipt = _experiment_receipt(tmp_path)
         summary_path = Path(receipt["agent_summary"])
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -1120,7 +1168,8 @@ def test_experiment_receipt_rejects_huge_integer_metric_without_traceback(
                 end="2026-06-30",
             )
     finally:
-        sys.set_int_max_str_digits(previous_limit)
+        if set_limit is not None and previous_limit is not None:
+            set_limit(previous_limit)
 
 
 def test_experiment_receipt_rejects_unrelated_report_with_matching_hash(tmp_path) -> None:

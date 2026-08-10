@@ -767,6 +767,17 @@ def verify_experiment_receipt(
             "validation_bars": 20,
         },
     }
+    automation_config = persisted_config.get("automation_evidence")
+    if automation_config is not None:
+        if (
+            not isinstance(automation_config, dict)
+            or set(automation_config) != {"holdout_days"}
+            or isinstance(automation_config.get("holdout_days"), bool)
+            or not isinstance(automation_config.get("holdout_days"), int)
+            or not 1 <= automation_config["holdout_days"] <= 3_650
+        ):
+            raise ValueError("persisted automation evidence config is invalid")
+        expected_config["automation_evidence"] = automation_config
     if persisted_config != expected_config:
         raise ValueError("persisted experiment config binding mismatch")
 
@@ -794,6 +805,42 @@ def verify_experiment_receipt(
         "start": start,
         "end": end,
     }
+    verified_automation_evidence: dict[str, float | int] | None = None
+    if automation_config is not None:
+        summary_data = agent_summary.get("data")
+        observed = (
+            summary_data.get("automation_evidence")
+            if isinstance(summary_data, dict)
+            else None
+        )
+        if (
+            not isinstance(observed, dict)
+            or set(observed)
+            != {
+                "holdout_days",
+                "sample_rows",
+                "out_of_sample_rows",
+                "data_coverage_ratio",
+            }
+            or observed.get("holdout_days") != automation_config["holdout_days"]
+            or isinstance(observed.get("sample_rows"), bool)
+            or not isinstance(observed.get("sample_rows"), int)
+            or observed["sample_rows"] <= 0
+            or isinstance(observed.get("out_of_sample_rows"), bool)
+            or not isinstance(observed.get("out_of_sample_rows"), int)
+            or not 0 < observed["out_of_sample_rows"] <= observed["sample_rows"]
+            or isinstance(observed.get("data_coverage_ratio"), bool)
+            or not isinstance(observed.get("data_coverage_ratio"), (int, float))
+            or not math.isfinite(float(observed["data_coverage_ratio"]))
+            or not 0.0 <= float(observed["data_coverage_ratio"]) <= 1.0
+        ):
+            raise ValueError("agent summary automation evidence is invalid")
+        verified_automation_evidence = {
+            "sample_rows": observed["sample_rows"],
+            "out_of_sample_rows": observed["out_of_sample_rows"],
+            "data_coverage_ratio": float(observed["data_coverage_ratio"]),
+        }
+        expected_data["automation_evidence"] = observed
     expected_notes = [
         "Scores are standardized cross-sectionally at each signal timestamp.",
         "Backtests execute on tradeable timestamps only.",
@@ -958,6 +1005,7 @@ def verify_experiment_receipt(
         "report_sha256": receipt["report_sha256"],
         "metrics": metrics,
         "verified_policy_evidence": {
+            **(verified_automation_evidence or {}),
             "transaction_cost_bps": float(commission_bps) + float(slippage_bps),
             "max_drawdown": float(best_run["max_drawdown"]),
             "turnover": float(best_run["turnover"]),
