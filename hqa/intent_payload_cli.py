@@ -20,6 +20,8 @@ from hqa.intent_payload_crypto import (
     MacOSKeychainCrypto,
 )
 from hqa.intent_payloads import IntentPayloadError, IntentPayloadStore
+from hqa.paper_intake import execution_contract_digest, execution_instructions
+from hqa.research_claim import research_claim_digest
 
 
 _STDIN_LIMIT = 600_000
@@ -192,7 +194,7 @@ def _bind_resolve(store: IntentPayloadStore, request: dict[str, Any]) -> dict[st
             "intent_payload_corrupt",
             "resolved intent envelope is missing prompt",
         )
-    return {
+    result = {
         "ok": True,
         "payload_ref": payload_ref,
         "payload_digest": envelope.get("payload_digest")
@@ -201,6 +203,18 @@ def _bind_resolve(store: IntentPayloadStore, request: dict[str, Any]) -> dict[st
         "prompt": prompt,
         "consumer_ref": consumer_ref,
     }
+    kind = envelope.get("kind")
+    if type(kind) is str:
+        result["kind"] = kind
+    claim = envelope.get("research_claim")
+    if claim is not None:
+        result["research_claim_digest"] = research_claim_digest(claim)
+    contract = envelope.get("execution_contract")
+    if contract is not None:
+        result["execution_contract"] = contract
+        result["execution_contract_digest"] = execution_contract_digest(contract)
+        result["execution_instructions"] = execution_instructions(contract)
+    return result
 
 
 def _key_command(

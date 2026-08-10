@@ -9,6 +9,11 @@ import pytest
 from hqa.intent_payload_cli import main
 from hqa.intent_payload_crypto import DeterministicCryptoFake
 from hqa.intent_payloads import IntentPayloadStore
+from hqa.paper_intake import (
+    build_execution_contract,
+    execution_contract_digest,
+)
+from hqa.research_claim import build_research_claim, research_claim_digest
 
 
 def _request(**overrides: object) -> dict[str, object]:
@@ -132,6 +137,52 @@ def test_bind_resolve_returns_prompt_once_bound(
     )
     assert code2 == 0
     assert again["prompt"] == "Reply with exactly: L2a-pong"
+
+
+def test_bind_resolve_exposes_only_dispatch_safe_paper_contract_metadata(
+    store: IntentPayloadStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = build_research_claim("Momentum Paper", ["SPY", "QQQ"])
+    contract = build_execution_contract(
+        source_file_ref=(tmp_path / "paper-intake" / "factor.py").resolve()
+    )
+    _, put_receipt = _run(
+        store,
+        "put",
+        _request(
+            kind="paper_intake",
+            research_claim=claim,
+            execution_contract=contract,
+        ),
+        monkeypatch=monkeypatch,
+    )
+
+    code, document = _run(
+        store,
+        "bind_resolve",
+        {
+            "payload_ref": put_receipt["payload_ref"],
+            "owner_id": "owner-local-root",
+            "workspace_id": "workspace:ws-local-main",
+            "session_id": "session:managed-1",
+            "consumer_ref": "command:cmd-paper-1",
+        },
+        monkeypatch=monkeypatch,
+    )
+
+    assert code == 0
+    assert document["kind"] == "paper_intake"
+    assert document["execution_contract"] == contract
+    assert document["execution_contract_digest"] == execution_contract_digest(contract)
+    assert document["execution_instructions"].startswith(
+        "This run is governed by hqa.paper_intake/v1."
+    )
+    assert document["research_claim_digest"] == research_claim_digest(claim)
+    serialized = json.dumps(document, ensure_ascii=False)
+    assert "Momentum Paper" not in serialized
+    assert "SPY" not in serialized
 
 
 def test_bind_resolve_consumer_conflict(

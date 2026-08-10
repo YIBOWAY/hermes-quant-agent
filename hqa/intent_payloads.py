@@ -19,12 +19,13 @@ import time
 from typing import Any, Callable, Iterator, Mapping, Optional
 
 from hqa.intent_payload_crypto import CryptoFailure, IntentPayloadCrypto
+from hqa.paper_intake import PaperIntakeError, normalize_execution_contract
 from hqa.research_claim import ResearchClaimError, normalize_research_claim
 
 
 _SCHEMA_VERSION = "2.0"
 _INTENT_KINDS = frozenset(
-    {"conversation_turn", "research_start", "research_continue"}
+    {"conversation_turn", "paper_intake", "research_start", "research_continue"}
 )
 _REQUEST_FIELDS = frozenset(
     {
@@ -40,6 +41,7 @@ _REQUEST_FIELDS = frozenset(
     }
 )
 _RESEARCH_CLAIM_FIELD = frozenset({"research_claim"})
+_EXECUTION_CONTRACT_FIELD = frozenset({"execution_contract"})
 _ENVELOPE_METADATA_FIELDS = {
     "provider_policy_digest",
     "created_at",
@@ -202,11 +204,15 @@ def _payload_digest_from_ref(payload_ref: Any) -> str:
 def _validate_consumer_for_kind(value: Any, kind: str) -> str:
     pattern = (
         _COMMAND_CONSUMER_RE
-        if kind == "conversation_turn"
+        if kind in {"conversation_turn", "paper_intake"}
         else _RESEARCH_CONSUMER_RE
     )
     if type(value) is not str or pattern.fullmatch(value) is None:
-        expected = "command:" if kind == "conversation_turn" else "attempt:"
+        expected = (
+            "command:"
+            if kind in {"conversation_turn", "paper_intake"}
+            else "attempt:"
+        )
         raise _invalid("consumer_ref must be an exact {} reference".format(expected))
     return value
 
@@ -215,6 +221,7 @@ def _normalize_request(request: Any) -> dict[str, Any]:
     if type(request) is not dict or set(request) not in {
         _REQUEST_FIELDS,
         _REQUEST_FIELDS | _RESEARCH_CLAIM_FIELD,
+        _REQUEST_FIELDS | _RESEARCH_CLAIM_FIELD | _EXECUTION_CONTRACT_FIELD,
     }:
         raise _invalid("intent request fields are invalid")
     if request["schema_version"] != _SCHEMA_VERSION:
@@ -258,7 +265,7 @@ def _normalize_request(request: Any) -> dict[str, Any]:
         "ttl_days": ttl_days,
     }
     if "research_claim" in request:
-        if kind not in {"research_start", "research_continue"}:
+        if kind not in {"paper_intake", "research_start", "research_continue"}:
             raise _invalid("research_claim is valid only for research intents")
         try:
             normalized["research_claim"] = normalize_research_claim(
@@ -266,6 +273,17 @@ def _normalize_request(request: Any) -> dict[str, Any]:
             )
         except ResearchClaimError as exc:
             raise _invalid("research_claim is invalid") from exc
+    if "execution_contract" in request:
+        if kind != "paper_intake" or "research_claim" not in normalized:
+            raise _invalid(
+                "execution_contract is valid only for claimed paper_intake intents"
+            )
+        try:
+            normalized["execution_contract"] = normalize_execution_contract(
+                request["execution_contract"]
+            )
+        except PaperIntakeError as exc:
+            raise _invalid("execution_contract is invalid") from exc
     if len(_canonical_bytes(normalized)) > _MAX_ENVELOPE_BYTES:
         raise _invalid("intent canonical envelope exceeds the maximum size")
     return normalized
@@ -2270,11 +2288,11 @@ class IntentPayloadStore:
         if _digest_bytes(plaintext) != entry["payload_digest"]:
             raise _corrupt("intent plaintext digest does not match its reference")
         envelope = self._decode_canonical_json(plaintext, "intent plaintext envelope")
-        request_fields = (
-            _REQUEST_FIELDS | _RESEARCH_CLAIM_FIELD
-            if type(envelope) is dict and "research_claim" in envelope
-            else _REQUEST_FIELDS
-        )
+        request_fields = _REQUEST_FIELDS
+        if type(envelope) is dict and "research_claim" in envelope:
+            request_fields |= _RESEARCH_CLAIM_FIELD
+        if type(envelope) is dict and "execution_contract" in envelope:
+            request_fields |= _EXECUTION_CONTRACT_FIELD
         if (
             type(envelope) is not dict
             or set(envelope) != request_fields | _ENVELOPE_METADATA_FIELDS

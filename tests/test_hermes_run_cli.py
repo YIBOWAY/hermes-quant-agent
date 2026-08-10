@@ -216,7 +216,7 @@ def test_capabilities_requires_durable_and_managed_history_contract(
             "session-fork",
         ],
         "write_contract": {
-            "run_submit_fields": ["input", "session_id", "metadata"],
+            "run_submit_fields": ["input", "session_id", "metadata", "instructions"],
             "platform_must_not_send": [
                 "conversation_history",
                 "previous_response_id",
@@ -301,6 +301,71 @@ def test_submit_receipt_keeps_root_and_resolved_tip_distinct(
     assert response["resolved_session_id"] == "web_tip"
     # Compatibility field remains the actual Session bound to the Run.
     assert response["session_id"] == "web_tip"
+
+
+def test_submit_allows_only_contract_bound_paper_intake_instructions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _FakeRunAdapter()
+    request_body = {
+        "input": "private exact paper prompt",
+        "session_id": "web_managed_1",
+        "metadata": {
+            "execution_contract": "hqa.paper_intake/v1",
+            "execution_contract_digest": "d" * 64,
+            "research_claim_digest": "e" * 64,
+        },
+        "instructions": "This run is governed by hqa.paper_intake/v1. Use tools.",
+    }
+
+    code, response, _ = _run(
+        monkeypatch,
+        "submit",
+        _body(idempotency_key="paper-key-1", request_body=request_body),
+        adapter=adapter,
+    )
+
+    assert code == 0
+    assert response["ok"] is True
+    assert adapter.calls[-1][1]["request_body"] == request_body  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {},
+        {"execution_contract": "hqa.paper_intake/v1"},
+        {
+            "execution_contract": "other/v1",
+            "execution_contract_digest": "d" * 64,
+            "research_claim_digest": "e" * 64,
+        },
+    ],
+)
+def test_submit_rejects_unbound_system_instructions(
+    monkeypatch: pytest.MonkeyPatch,
+    metadata: dict[str, object],
+) -> None:
+    adapter = _FakeRunAdapter()
+
+    code, response, _ = _run(
+        monkeypatch,
+        "submit",
+        _body(
+            idempotency_key="paper-key-invalid",
+            request_body={
+                "input": "paper prompt",
+                "session_id": "web_managed_1",
+                "metadata": metadata,
+                "instructions": "This run is governed by hqa.paper_intake/v1.",
+            },
+        ),
+        adapter=adapter,
+    )
+
+    assert code == 2
+    assert response["error"]["code"] == "run_invalid_request"
+    assert adapter.calls == []
 
 
 @pytest.mark.parametrize(

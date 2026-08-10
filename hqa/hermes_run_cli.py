@@ -39,7 +39,7 @@ HERMES_RUN_CLI_OPERATIONS = (
     "session-ensure",
     "session-fork",
 )
-HERMES_RUN_SUBMIT_FIELDS = ("input", "session_id", "metadata")
+HERMES_RUN_SUBMIT_FIELDS = ("input", "session_id", "metadata", "instructions")
 HERMES_RUN_FORBIDDEN_FIELDS = (
     "conversation_history",
     "previous_response_id",
@@ -374,7 +374,8 @@ def _submit(
         raise _InputError("run_invalid_request", "request_body must be an object")
     _require_exact_fields(
         raw_body,
-        required=set(HERMES_RUN_SUBMIT_FIELDS),
+        required={"input", "session_id", "metadata"},
+        optional={"instructions"},
     )
     prompt = raw_body.get("input")
     session_id = _require_session_id(raw_body.get("session_id"))
@@ -387,6 +388,35 @@ def _submit(
         raise _InputError("run_invalid_request", "input is invalid or oversized")
     if not isinstance(metadata, Mapping):
         raise _InputError("run_invalid_request", "metadata must be an object")
+    instructions = raw_body.get("instructions")
+    contract_fields = {
+        "execution_contract",
+        "execution_contract_digest",
+        "research_claim_digest",
+    }
+    contract_present = bool(contract_fields & set(metadata))
+    if instructions is not None:
+        if (
+            type(instructions) is not str
+            or not instructions.startswith(
+                "This run is governed by hqa.paper_intake/v1."
+            )
+            or len(instructions.encode("utf-8")) > 4_096
+            or metadata.get("execution_contract") != "hqa.paper_intake/v1"
+            or type(metadata.get("execution_contract_digest")) is not str
+            or _DIGEST_RE.fullmatch(metadata["execution_contract_digest"]) is None
+            or type(metadata.get("research_claim_digest")) is not str
+            or _DIGEST_RE.fullmatch(metadata["research_claim_digest"]) is None
+        ):
+            raise _InputError(
+                "run_invalid_request",
+                "paper intake instructions are not contract-bound",
+            )
+    elif contract_present:
+        raise _InputError(
+            "run_invalid_request",
+            "paper intake metadata requires exact instructions",
+        )
     try:
         # Reject non-finite/non-JSON metadata and freeze a plain dict before the
         # adapter sends the body.  No conversation history is accepted here:
@@ -399,6 +429,8 @@ def _submit(
         "session_id": session_id,
         "metadata": dict(metadata),
     }
+    if instructions is not None:
+        body["instructions"] = instructions
     handle = adapter.submit_or_get(
         idempotency_key=idempotency_key,
         request_body=body,

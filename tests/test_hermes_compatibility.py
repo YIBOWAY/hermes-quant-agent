@@ -282,7 +282,12 @@ def _platform_contract() -> dict[str, object]:
             },
         ],
         "write_contract": {
-            "run_submit_fields": ["input", "session_id", "metadata"],
+            "run_submit_fields": [
+                "input",
+                "session_id",
+                "metadata",
+                "instructions",
+            ],
             "platform_must_not_send": [
                 "conversation_history",
                 "previous_response_id",

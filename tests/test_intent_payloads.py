@@ -14,6 +14,8 @@ import pytest
 import hqa.intent_payloads as payloads_module
 from hqa.intent_payload_crypto import CryptoFailure, DeterministicCryptoFake
 from hqa.intent_payloads import IntentPayloadError, IntentPayloadStore
+from hqa.paper_intake import build_execution_contract
+from hqa.research_claim import build_research_claim
 
 
 class Clock:
@@ -167,6 +169,60 @@ def test_put_resolve_and_exact_replay_are_content_addressed_and_private(
     )
     assert "请分析我的组合".encode() not in disk
     assert b'"provider":"openai"' not in disk
+
+
+def test_claimed_research_start_round_trips_closed_paper_intake_contract(
+    tmp_path: Path,
+    clock: Clock,
+    crypto: DeterministicCryptoFake,
+) -> None:
+    store = IntentPayloadStore(tmp_path / "payload-authority", crypto=crypto, now=clock)
+    source = (tmp_path / "paper-intake" / "factor.py").resolve()
+    contract = build_execution_contract(source_file_ref=source)
+    research = request(
+        kind="paper_intake",
+        research_claim=build_research_claim("Momentum Paper", ["SPY", "QQQ"]),
+        execution_contract=contract,
+    )
+
+    receipt = store.put(research)
+    envelope = store.resolve(receipt["payload_ref"], **scope())
+
+    assert envelope["execution_contract"] == contract
+    assert envelope["research_claim"]["paper_title"] == "Momentum Paper"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"kind": "conversation_turn"},
+        {"kind": "research_start"},
+        {"kind": "research_continue"},
+        {"kind": "paper_intake", "research_claim": None},
+    ],
+)
+def test_paper_intake_contract_is_only_valid_for_claimed_research_start(
+    tmp_path: Path,
+    clock: Clock,
+    crypto: DeterministicCryptoFake,
+    overrides: dict[str, object],
+) -> None:
+    store = IntentPayloadStore(tmp_path / "payload-authority", crypto=crypto, now=clock)
+    body = request(
+        kind="paper_intake",
+        research_claim=build_research_claim("Momentum Paper", ["SPY"]),
+        execution_contract=build_execution_contract(
+            source_file_ref=(tmp_path / "factor.py").resolve()
+        ),
+    )
+    body.update(overrides)
+    if body.get("research_claim") is None:
+        body.pop("research_claim", None)
+
+    with pytest.raises(IntentPayloadError) as captured:
+        store.put(body)
+
+    assert captured.value.code == "intent_invalid_request"
 
 
 def test_same_client_identity_with_different_intent_conflicts_without_plaintext(
