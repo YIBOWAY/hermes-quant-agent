@@ -480,7 +480,21 @@ def test_install_copies_physical_executable_wrappers(tmp_path):
             or "hqa-paper-gate-show.py" in body
             or "quant-system" in body
             or "hermes send" in body
+            or "run_factor_automation_driver.sh" in body
         )
+
+
+def test_installed_factor_automation_ingress_uses_owner_env_driver(tmp_path):
+    dest = _install(tmp_path)
+
+    body = (dest / "hqa-factor-automation.sh").read_text(encoding="utf-8")
+
+    assert (
+        "/Users/sunyibo/programs/ai-quant-platform/"
+        "scripts/run_factor_automation_driver.sh"
+    ) in body
+    assert 'exec /bin/bash "$HQA_FACTOR_AUTOMATION_DRIVER" "$@"' in body
+    assert "/usr/bin/python3" not in body
 
 
 def test_install_builds_private_native_intent_crypto_helper(tmp_path) -> None:
