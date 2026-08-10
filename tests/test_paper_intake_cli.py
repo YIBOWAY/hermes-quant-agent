@@ -197,6 +197,7 @@ def _request() -> dict[str, object]:
             "api_key": "test-key",
             "timeout_seconds": 5.0,
         },
+        "owner_id": "owner-local-root",
         "workspace_id": "ws-local-main",
         "platform_session_id": "managed-1",
         "command_id": "cmd-paper-1",
@@ -256,9 +257,10 @@ def test_verify_persists_digest_only_receipt_and_returns_exact_ref(
     }
     receipt_root = tmp_path / "receipts"
 
+    store = _Store(envelope)
     code, document = _run(
         _request(),
-        store=_Store(envelope),
+        store=store,
         messages=_messages(source_path, source, prompt, title),
         receipt_root=receipt_root,
         monkeypatch=monkeypatch,
@@ -275,6 +277,15 @@ def test_verify_persists_digest_only_receipt_and_returns_exact_ref(
     assert title not in serialized
     assert source not in serialized
     assert document["_transcript_calls"] == ["web_paper_1"]
+    assert store.resolve_calls == [
+        {
+            "payload_ref": "payload:sha256:" + ("a" * 64),
+            "owner_id": "owner-local-root",
+            "workspace_id": "workspace:ws-local-main",
+            "session_id": "session:managed-1",
+            "consumer_ref": "command:cmd-paper-1",
+        }
+    ]
 
 
 def test_non_paper_intent_is_not_required_and_never_reads_transcript(
