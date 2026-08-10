@@ -9,6 +9,7 @@ added later; this module has no promotion method by design.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -292,7 +293,8 @@ class PlatformFactorAutomationSlice2Port:
         if _DIGEST_RE.fullmatch(policy_digest) is None:
             raise FactorAutomationError("policy_digest_invalid")
         self.policy_digest = policy_digest
-        self.gate_dir = Path(gate_dir)
+        self.gate_root = Path(gate_dir)
+        self.gate_dir = self.gate_root
         self.experiment_output_dir = Path(experiment_output_dir)
         self._propose_runner = propose_runner
         self._auto_review_runner = auto_review_runner
@@ -301,7 +303,111 @@ class PlatformFactorAutomationSlice2Port:
         self._request: FactorAutomationRequest | None = None
         self._candidate: CandidateReceipt | None = None
 
+    def _candidate_state(
+        self,
+        *,
+        request: FactorAutomationRequest,
+        confirmation_id: str,
+        candidate: CandidateReceipt,
+    ) -> dict[str, object]:
+        return {
+            "schema_version": "hqa.factor_automation_candidate/v1",
+            "automation_id": request.automation_id,
+            "intake_receipt_id": request.intake_receipt_id,
+            "intake_contract_digest": request.intake_contract_digest,
+            "policy_digest": self.policy_digest,
+            "confirmation_id": confirmation_id,
+            "candidate_id": candidate.candidate_id,
+            "manifest_digest": candidate.manifest_digest,
+            "source_sha256": candidate.source_sha256,
+            "status_at_creation": "pending",
+        }
+
+    @staticmethod
+    def _canonical_state_bytes(document: dict[str, object]) -> bytes:
+        return (
+            json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode("utf-8")
+
+    def _recover_candidate(
+        self,
+        *,
+        request: FactorAutomationRequest,
+        confirmation_id: str,
+    ) -> CandidateReceipt | None:
+        path = self.gate_dir / "automation-candidate.json"
+        if not path.exists():
+            return None
+        if path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1:
+            raise FactorAutomationError("automation_candidate_state_unsafe")
+        raw = path.read_bytes()
+        if not raw or len(raw) > 8_192:
+            raise FactorAutomationError("automation_candidate_state_invalid")
+        try:
+            payload = json.loads(raw.decode("utf-8", errors="strict"))
+        except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            raise FactorAutomationError("automation_candidate_state_invalid") from exc
+        if not isinstance(payload, dict) or raw != self._canonical_state_bytes(payload):
+            raise FactorAutomationError("automation_candidate_state_invalid")
+        candidate = CandidateReceipt(
+            candidate_id=str(payload.get("candidate_id", "")),
+            manifest_digest=str(payload.get("manifest_digest", "")),
+            source_sha256=str(payload.get("source_sha256", "")),
+            status=str(payload.get("status_at_creation", "")),  # type: ignore[arg-type]
+        )
+        expected = self._candidate_state(
+            request=request,
+            confirmation_id=confirmation_id,
+            candidate=candidate,
+        )
+        if payload != expected:
+            raise FactorAutomationError("automation_candidate_state_drift")
+        _validate_candidate(candidate, request)
+        try:
+            factor_repro.require_gate1_candidate_binding(
+                gate_dir=self.gate_dir,
+                candidate_id=candidate.candidate_id,
+                manifest_digest=candidate.manifest_digest,
+                confirmation_id=confirmation_id,
+                source_digest=request.source_sha256,
+            )
+        except (OSError, ValueError) as exc:
+            raise FactorAutomationError("machine_gate1_binding_failed") from exc
+        return candidate
+
+    def _persist_candidate(
+        self,
+        *,
+        request: FactorAutomationRequest,
+        confirmation_id: str,
+        candidate: CandidateReceipt,
+    ) -> None:
+        path = self.gate_dir / "automation-candidate.json"
+        raw = self._canonical_state_bytes(
+            self._candidate_state(
+                request=request,
+                confirmation_id=confirmation_id,
+                candidate=candidate,
+            )
+        )
+        try:
+            with path.open("xb") as handle:
+                handle.write(raw)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(path, 0o600)
+        except FileExistsError:
+            recovered = self._recover_candidate(
+                request=request,
+                confirmation_id=confirmation_id,
+            )
+            if recovered != candidate:
+                raise FactorAutomationError("automation_candidate_state_conflict")
+        except OSError as exc:
+            raise FactorAutomationError("automation_candidate_state_unavailable") from exc
+
     def propose(self, request: FactorAutomationRequest) -> CandidateReceipt:
+        self.gate_dir = self.gate_root / request.automation_id
         source = Path(request.source_file_ref)
         try:
             source_bytes = source.read_bytes()
@@ -321,6 +427,14 @@ class PlatformFactorAutomationSlice2Port:
                     gate_dir=self.gate_dir,
                 )
             )
+            recovered = self._recover_candidate(
+                request=request,
+                confirmation_id=confirmation_id,
+            )
+            if recovered is not None:
+                self._request = request
+                self._candidate = recovered
+                return recovered
             code, output = self._propose_runner(
                 request.goal,
                 staged_source,
@@ -348,6 +462,11 @@ class PlatformFactorAutomationSlice2Port:
             )
         except (OSError, ValueError) as exc:
             raise FactorAutomationError("machine_gate1_binding_failed") from exc
+        self._persist_candidate(
+            request=request,
+            confirmation_id=confirmation_id,
+            candidate=candidate,
+        )
         self._request = request
         self._candidate = candidate
         return candidate

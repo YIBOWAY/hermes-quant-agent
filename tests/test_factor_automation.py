@@ -219,7 +219,22 @@ def test_platform_port_records_machine_gate1_and_exact_platform_lineage(tmp_path
         "backtest",
         "verify_final",
     ]
-    assert any((tmp_path / "gate1" / "bindings").glob("binding-*.json"))
+    automation_gate = tmp_path / "gate1" / request.automation_id
+    assert any((automation_gate / "bindings").glob("binding-*.json"))
+
+    def refuse_duplicate_propose(*_args):
+        raise AssertionError("crash recovery must reuse the exact candidate")
+
+    resumed = PlatformFactorAutomationSlice2Port(
+        policy_digest=loaded.policy_digest,
+        gate_dir=tmp_path / "gate1",
+        experiment_output_dir=tmp_path / "experiments",
+        propose_runner=refuse_duplicate_propose,
+        auto_review_runner=approve,
+        backtest_runner=backtest,
+        final_receipt_verifier=verify_final,
+    ).propose(request)
+    assert resumed == result.candidate
 
 
 def test_pipeline_policy_failure_makes_no_candidate_mutation(tmp_path: Path) -> None:
