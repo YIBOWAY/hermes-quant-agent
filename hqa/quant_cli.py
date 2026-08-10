@@ -461,3 +461,16 @@ def run_factor_automation_activate_sleeve(
         cwd=cwd,
         merge_stderr=False,
     )
+
+
+def run_factor_automation_maintain(
+    *,
+    bin_path: Optional[Path] = None,
+    cwd: Optional[Path] = None,
+) -> tuple[int, str]:
+    return _run(
+        ["agent", "factor-automation-maintain"],
+        bin_path=bin_path,
+        cwd=cwd,
+        merge_stderr=False,
+    )

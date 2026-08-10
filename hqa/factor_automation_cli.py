@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from hqa import config
+from hqa import config, factor_repro, quant_cli
 from hqa.factor_automation import (
     FactorAutomationRequest,
     PlatformFactorAutomationSlice2Port,
@@ -146,14 +146,22 @@ def run_once() -> dict[str, Any]:
     mode, auto_land = _flags_enabled()
     if not mode or not auto_land:
         return {"state": "disabled", "mode": mode, "auto_land": auto_land}
+    maintenance_code, maintenance_output = quant_cli.run_factor_automation_maintain()
+    maintenance = factor_repro.parse_json_payload(maintenance_output)
+    if (
+        maintenance_code != 0
+        or not isinstance(maintenance, dict)
+        or maintenance.get("state") != "maintained"
+    ):
+        raise FactorAutomationDriverError("platform_maintenance_failed")
     queue = config.FACTOR_AUTOMATION_QUEUE_DIR
     if not queue.exists():
-        return {"state": "idle", "queued": 0}
+        return {"state": "idle", "queued": 0, "maintenance": maintenance}
     if queue.is_symlink() or not queue.is_dir():
         raise FactorAutomationDriverError("queue_unsafe")
     requests = sorted(path for path in queue.glob("*.json") if path.is_file())
     if not requests:
-        return {"state": "idle", "queued": 0}
+        return {"state": "idle", "queued": 0, "maintenance": maintenance}
     path = requests[0]
     request, base_commit = parse_request(_read_request(path))
     policy = load_factor_automation_policy(

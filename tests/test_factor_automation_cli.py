@@ -65,3 +65,35 @@ def test_request_parser_rejects_unbound_or_extra_fields(tmp_path: Path) -> None:
         assert str(exc) == "request_schema_invalid"
     else:
         raise AssertionError("extra request fields must fail closed")
+
+
+def test_run_once_enabled_maintains_sleeves_even_when_queue_is_empty(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    monkeypatch.setattr(cli.config, "FACTOR_AUTOMATION_QUEUE_DIR", queue)
+    monkeypatch.setenv("HQA_FACTOR_AUTOMATION_MODE", "true")
+    monkeypatch.setenv("HQA_FACTOR_AUTOMATION_AUTO_LAND", "true")
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_factor_automation_maintain",
+        lambda: (
+            0,
+            '{"checked":2,"paused":1,"quarantined":0,"state":"maintained"}\n',
+        ),
+    )
+
+    result = cli.run_once()
+
+    assert result == {
+        "state": "idle",
+        "queued": 0,
+        "maintenance": {
+            "state": "maintained",
+            "checked": 2,
+            "paused": 1,
+            "quarantined": 0,
+        },
+    }
