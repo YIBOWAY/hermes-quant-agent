@@ -237,12 +237,30 @@ Phase 1.2（同日交付，只读扩展）：
 3. **导语文案纪律**：刊出语不出现“平台模板提示/确定性模板”等实现性措辞；
    半导体 vs 软件与亚洲概括均按当日真实数据差值输出。
 
-### 2.8 行情浏览页热力化（设计讨论，另起 P1.5）
+### 2.8 行情浏览页热力化 → 定稿并交付：独立“市场横截面”视图（Phase 1.5）
 
-`data-explorer` 目前是单标的 OHLCV + K 线 + 质量栏。可行方向：新增“市场横截面”视图
-（自选/预设篮子 → 热力图 + 周/月/YTD/波动/回撤矩阵），复用 Asia Radar 的指标层与缓存，
-但不混用其 12 ETF 固定宇宙。需先定：标的池来源（自选、持仓、关注列表）、provider 策略
-（是否允许非 Futu 严格源）、与 Asia Radar 的产品边界。结论未定，先不动代码。
+`data-explorer` 保持单标的 OHLCV 诊断面，**不**在原页硬塞热力图。横截面做成独立只读视图，
+避免污染 K 线页、也避免和 Asia Radar 的固定 12 国宇宙混淆。
+
+三个边界已按推荐定案：
+
+1. **标的池来源**：Phase 1.5 用**预设篮子**（无自选/无持仓依赖、无写路径）：
+   - `ai_watch`：SPY QQQ SOXX IGV SMH NVDA MSFT GOOGL AMZN META AAPL TSLA
+   - `us_sectors`：SPY XLB XLE XLF XLI XLK XLP XLU XLV XLY XLC XLRE
+   - 另支持显式 symbol 列表（白名单、≤16 只）
+2. **provider 策略**：**强制严格 Futu**（与 Asia Radar 相同），失败 400/503，不回退 sample。
+   复用 `read_historical_prices(provider="futu")` + `EquityBarCache`，provenance 区分
+   `futu` / `futu_cache`。
+3. **与 Asia Radar 边界**：Asia Radar = 固定 12 国 ETF 代理宇宙，用于跨国家观察；
+   横截面 = 自定义/预设标的篮子（主题/板块），用于自选维度。两者共享数据通路，
+   不共享宇宙、不互替产品位。
+
+**已交付（2026-08-11，commit `844626e`）**：
+- 后端 `quant_system/factors/market_cross_section.py` + `GET /api/market-cross-section?basket=…&symbols=…`。
+- 指标与 Asia Radar 同口径：YTD/周/月收益、63 日波动、YTD 最大回撤、rank；共享 session 对齐。
+- 前端 `/market-cross-section` 视图（markets 分组入口）：热力图 + 排序表 + 徽章
+  （Futu 真实/缓存、as_of、America/New_York）。无估值/拥挤/风险名单。
+- 测试：篮子合法性、缺 symbol fail-closed、provenance 缓存区分、排名动态性、前端渲染/错误态。
 
 ## 3. P3：板块价格/成交量动量 → 修复后作为普通实验（不用花旗名称）
 
