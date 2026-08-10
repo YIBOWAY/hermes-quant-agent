@@ -8,7 +8,8 @@
 > updater 再检查为 `up_to_date`，focused integration 203 项和受控 updater 140 项通过。
 > PostgreSQL、Hermes API、Platform backend、Next.js production frontend、HQA connector
 > 与 factor-automation driver 已由 Docker + macOS user LaunchAgents 常驻，不依赖
-> Codex/Claude/终端生命周期。D-33 自动链默认关闭，只有 HQA/Platform 两对 Flag 同时
+> Codex/Claude/终端生命周期。D-33 源码默认关闭；本机 owner runtime 已在全量套件、
+> 安装和冷启动验收后于 2026-08-10 显式打开 HQA/Platform 两对 Flag。只有四项同时
 > 为 true 才会消费 owner-private queue，并且只允许 `paper_only`。Platform
 > 本地信任只省略单用户身份仪式，cookie 绑定 trust mode，运行态明确报告
 > `admission_mode=local_trust` 且没有 candidate ID/digest；`live_trading_enabled=false`、

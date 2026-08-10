@@ -14,8 +14,10 @@ Rules for AI agents working in this repository.
   (2026-08-01) bypasses only the candidate-admission **identity ritual**
   (preflight evidence, three-repo digests, clean checkout, connector ceremony)
   and reports `admission_mode=local_trust` without candidate identity. It does
-  does not authorize factor promotion. Factor automation is a separate,
-  default-OFF, dual-Flag path: when both HQA and Platform pairs are exactly
+  not authorize factor promotion. Factor automation is a separate,
+  source-default-OFF, dual-Flag path: the inspected owner runtime explicitly
+  enabled both pairs on 2026-08-10 after the full suites and cold-start check;
+  when both HQA and Platform pairs are exactly
   enabled it replaces Gate 1/2/3 with digest-bound machine policy for
   `paper_only` factors only. The manual Scene-B path and every live-trading,
   kill-switch, migration, and public-release boundary remain independent.

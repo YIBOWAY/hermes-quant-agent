@@ -2,9 +2,11 @@
 
 Hermes orchestration layer for the local `ai-quant-platform`. Phase 1a-4/9H is
 complete; D-32 targets a real Agent v0.2 Web Chat, while D-33 provides a
-default-OFF, local-only path from verified paper intake through machine policy,
+source-default-OFF, local-only path from verified paper intake through machine policy,
 final backtest, `paper_only` promotion, bounded sleeve activation, and resident
-paper execution. Live eligibility and every real order remain human-only.
+paper execution. The inspected owner runtime enabled all four flags on
+2026-08-10 after full acceptance; live eligibility and every real order remain
+human-only.
 
 ## Normal local operation
 

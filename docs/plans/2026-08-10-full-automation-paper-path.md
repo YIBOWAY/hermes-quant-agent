@@ -447,9 +447,14 @@ next-weekday plan 与到期 paper fill；手工 sleeve 不受影响。
 - P1、机器 policy、paper/live registry 分裂、029 authority、两阶段 land、限额 sleeve、
   risk/demote、五分钟 LaunchAgent、真实 backtest 证据复核和 paper signal→plan→fill 均已落地。
 - 029 在 backup + isolated restore 后只 apply 一次；禁止重放。双 Flag 在全量 suites、安装
-  与冷启动验收通过前保持关闭。
+  与冷启动验收通过前保持关闭；上述门已通过，owner runtime 四项 Flag 已显式启用。
 - 一次真实研究链已到 candidate/final receipt，但实际 cost/drawdown/turnover 不满足政策，
   因而正确拒绝、没有 land。它是负向安全证据，不冒充成功自动因子。
 - GitHub 不由自动链 push；浏览器 saga 仍是明确后置项，不阻塞 driver-only D-33。
+- 最终验收：HQA/Platform 的 Python 3.11 全量 suites 通过；前端 77 文件/468 测试、
+  type-check、lint、production build 通过；两仓各自的两个本地 checkout 均 ff 同步。
+  冷启动后 Docker、Hermes、backend、frontend、connector ready，自动 driver 首轮
+  `idle/queued=0`、launchd last exit 0；安全面仍为 dry-run + paper、live false、
+  kill-switch true、release 未授权。
 
 *实施以当前两仓 Git、测试输出、正式库 marker/trigger 和 runtime health 为证据；历史 audit 未改写。*

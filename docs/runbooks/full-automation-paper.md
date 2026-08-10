@@ -17,7 +17,8 @@ HQA_FACTOR_AUTOMATION_AUTO_LAND=true
 
 开关只写入 Platform runtime 的 owner-only
 `data/_runtime/agent-v0.2-backend.env`（普通文件、owner、`0600`）。不要写进 Git、shell
-profile、Codex/Claude 临时环境。默认值是 false。
+profile、Codex/Claude 临时环境。源码默认值是 false；本机 owner runtime 已在
+2026-08-10 完成全量测试与冷启动验收后显式启用四项。
 
 ## 2. 常驻方式
 
@@ -29,9 +30,10 @@ bash scripts/local_mac_stack.sh start
 bash scripts/local_mac_stack.sh status
 ```
 
-stack 会安装第五个 user LaunchAgent `com.aiquant.factor-automation`。它每 300 秒调用
+stack 会安装 D-33 的 user LaunchAgent `com.aiquant.factor-automation`。它每 300 秒调用
 repository-owned runner；runner从 owner env 解析稳定 HQA root/Python，明确拒绝
 `.codex`、`.claude` 或 ChatGPT.app 内的临时运行时，因此关闭 AI 工具或终端不影响服务。
+当前 stack 还独立安装 Asia Radar daily refresh；它与 D-33 队列及资格链无关。
 
 ## 3. 入队合同
 
@@ -104,3 +106,16 @@ tail -n 50 data/_runtime/logs/factor-automation.launchd.err.log
 driver 会报告 disabled，不继续自动 mutation；已有 paper 持仓不会因此假装消失。需要拆除
 某个因子时走 audited demote，默认 hold。Git 冲突、unknown outcome 或失败队列必须保留
 原 artifact 后按精确 ID 恢复，禁止删除证据后重跑。
+
+## 9. 2026-08-10 本机验收快照
+
+- HQA Python 3.11 全量 pytest 通过；Platform Python 3.11 全量 pytest 通过；
+- 前端 77 个测试文件 / 468 个测试、type-check、lint、production build 通过；
+- 两份 HQA checkout fast-forward 到同一 `main`，两份 Platform checkout
+  fast-forward 到同一 `main`；GitHub 未 push；
+- `local_mac_stack.sh start` 完成 production build 并安装常驻 jobs；Hermes/backend/
+  frontend/connector 均 ready；Docker `quantplatform-db` ready；
+- factor automation RunAtLoad 返回 `state=idle, queued=0`，launchd last exit 0；
+- `/api/health` 显示 `admission_mode=local_trust`、`release_authorized=false`；
+  `/api/safety/effective` 显示 `dry_run=true`、`paper_trading=true`、
+  `live_trading_enabled=false`、`kill_switch=true`。
