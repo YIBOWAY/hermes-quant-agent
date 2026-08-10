@@ -272,7 +272,7 @@ class PlatformFactorAutomationSlice2Port:
         self,
         *,
         policy_digest: str,
-        gate_dir: Path = config.FACTOR_GATE1_DIR,
+        gate_dir: Path = config.FACTOR_AUTOMATION_GATE1_DIR,
         experiment_output_dir: Path = config.FACTOR_EXPERIMENT_OUTPUT_DIR,
         propose_runner: ProposeRunner = quant_cli.run_propose_factor,
         auto_review_runner: AutoReviewRunner = quant_cli.run_agent_auto_review,

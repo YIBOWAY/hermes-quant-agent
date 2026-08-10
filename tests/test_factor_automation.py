@@ -26,6 +26,12 @@ def _policy():
     )
 
 
+def test_automation_gate1_authority_is_separate_from_human_gate() -> None:
+    from hqa import config
+
+    assert config.FACTOR_AUTOMATION_GATE1_DIR != config.FACTOR_GATE1_DIR
+
+
 def _request(tmp_path: Path) -> FactorAutomationRequest:
     return FactorAutomationRequest(
         automation_id="automation-0123456789abcdef",

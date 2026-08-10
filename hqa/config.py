@@ -117,6 +117,12 @@ WORKFLOW_OWNER_USER_ID = os.environ.get(
 FACTOR_GATE1_DIR = Path(
     os.environ.get("HQA_FACTOR_GATE1_DIR", str(RUNTIME_DIR / "factor-gate1"))
 )
+FACTOR_AUTOMATION_GATE1_DIR = Path(
+    os.environ.get(
+        "HQA_FACTOR_AUTOMATION_GATE1_DIR",
+        str(RUNTIME_DIR / "factor-automation-gate1"),
+    )
+)
 PAPER_INTAKE_DIR = Path(
     os.environ.get("HQA_PAPER_INTAKE_DIR", str(RUNTIME_DIR / "paper-intake"))
 )
