@@ -9,6 +9,7 @@ added later; this module has no promotion method by design.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -252,7 +253,15 @@ BacktestRunner = Callable[[list[str]], tuple[int, str]]
 FinalReceiptVerifier = Callable[..., dict[str, Any]]
 
 
-def _run_backtest_cli(argv: list[str]) -> tuple[int, str]:
+def _run_backtest_cli(
+    argv: list[str],
+    *,
+    gate_dir: Path,
+    experiment_output_dir: Path,
+) -> tuple[int, str]:
+    child_env = dict(os.environ)
+    child_env["HQA_FACTOR_GATE1_DIR"] = str(gate_dir)
+    child_env["HQA_FACTOR_EXPERIMENT_OUTPUT_DIR"] = str(experiment_output_dir)
     proc = subprocess.run(
         [sys.executable, "-m", "hqa.factor_repro_cli", *argv],
         cwd=str(config.REPO_DIR),
@@ -261,6 +270,7 @@ def _run_backtest_cli(argv: list[str]) -> tuple[int, str]:
         stderr=subprocess.STDOUT,
         timeout=1800,
         check=False,
+        env=child_env,
     )
     return proc.returncode, proc.stdout
 
@@ -276,7 +286,7 @@ class PlatformFactorAutomationSlice2Port:
         experiment_output_dir: Path = config.FACTOR_EXPERIMENT_OUTPUT_DIR,
         propose_runner: ProposeRunner = quant_cli.run_propose_factor,
         auto_review_runner: AutoReviewRunner = quant_cli.run_agent_auto_review,
-        backtest_runner: BacktestRunner = _run_backtest_cli,
+        backtest_runner: BacktestRunner | None = None,
         final_receipt_verifier: FinalReceiptVerifier = factor_repro.require_final_backtest_receipt,
     ) -> None:
         if _DIGEST_RE.fullmatch(policy_digest) is None:
@@ -426,7 +436,14 @@ class PlatformFactorAutomationSlice2Port:
             ]
         )
         try:
-            code, output = self._backtest_runner(argv)
+            if self._backtest_runner is None:
+                code, output = _run_backtest_cli(
+                    argv,
+                    gate_dir=self.gate_dir,
+                    experiment_output_dir=self.experiment_output_dir,
+                )
+            else:
+                code, output = self._backtest_runner(argv)
         except (OSError, subprocess.SubprocessError) as exc:
             raise FactorAutomationError("final_backtest_failed") from exc
         matches = re.findall(
