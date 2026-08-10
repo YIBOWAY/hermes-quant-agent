@@ -118,7 +118,15 @@ HQA 活跃副本 data/_runtime/agent-v02-work/
 **P1 垂直切片（第一个可开工交付）**：Asia Radar Phase 1 —— 12 市场真实 ETF 排名/收益/
 波动/回撤/K型分化独立页面。平台负责页面、API、数据适配；HQA 后续才接定时与 foresight。
 
-## 2. P1：Asia Radar Phase 1（独立页面 `/asia-radar`）
+## 2. P1：Asia Radar（独立页面 `/asia-radar`）
+
+### 2.0 状态
+
+- **Phase 1（2026-08-10，Codex 交付，我方复审通过）**：12 Futu ETF 真实闭环、fail-closed、
+  无模拟估值、动态 K 型、三页签空壳、markets 导航、徽章。验收清单见 §2.5。
+- **Phase 1.1（同日，我方补强）**：timezone 契约、k_shape 口径文案、EquityBarCache 复用
+  （futu vs futu_cache 可审计）、最新共享 session 对齐、盘中 bar 规则、空 K 型态、负例测试、
+  晨报导语“平台模板提示”泄漏修复。
 
 ### 2.1 产品定位
 
@@ -176,17 +184,55 @@ HQA 活跃副本 data/_runtime/agent-v02-work/
 
 ### 2.5 验收标准（Phase 1 必须全过）
 
-- [ ] 12 个 ETF 全部来自 Futu 真实日线，响应 meta 含 provider/symbol/currency/as_of/adjustment
-- [ ] 关闭 OpenD 或强制 provider 失败时，页面显示错误/stale，**不会**出现 sample 曲线
-- [ ] 无 PE/PB/ERP/拥挤度/个股风险名单的模拟数字；若有占位，明确标"待接入"
-- [ ] K 型赢家/输家由当期收益动态计算，非硬编码
-- [ ] 侧栏 markets 分组可见 `/asia-radar`；不引入原项目品牌/研报原文/LICENSE 风险文件
-- [ ] 现有 pytest gate + 前端 lint/build 通过；新增 API/指标单测用录制样本，不依赖外网 CI
+- [x] 12 个 ETF 全部来自 Futu 真实日线，响应 meta 含 provider/symbol/currency/as_of/adjustment
+- [x] 关闭 OpenD 或强制 provider 失败时，页面显示错误/stale，**不会**出现 sample 曲线
+- [x] 无 PE/PB/ERP/拥挤度/个股风险名单的模拟数字；若有占位，明确标"待接入"
+- [x] K 型赢家/输家由当期收益动态计算，非硬编码
+- [x] 侧栏 markets 分组可见 `/asia-radar`；不引入原项目品牌/研报原文/LICENSE 风险文件
+- [x] 现有 pytest gate + 前端 lint/build 通过；新增 API/指标单测用录制样本，不依赖外网 CI
+
+Phase 1.1 附加：
+- [x] overview 与 market.meta 含 `timezone=America/New_York` 与 `provenance=futu|futu_cache`
+- [x] 所有市场对齐到最新**共享** session 的 as_of；短历史/缺 ETF/非 Futu provenance → 503
+- [x] 响应体瘦身：history 仅保留最近 90 根 sparkline；K 型空序列显示明确空态
+- [x] 晨报导语不再出现“平台模板提示”；半导体/软件相对强弱按当日真实差值生成
+
+### 2.5b Phase 1 复审 findings（已处理/留档）
+
+| ID | 级别 | 处理 |
+|---|---|---|
+| AR-B01 跨 ETF 最新 bar 不对齐放行 | medium | **已修**：对齐 min(last_dates)，缺共享 session 即 503 |
+| AR-B02 短历史静默 clamp 出周/月收益 | medium | **已修**：`_MIN_HISTORY_BARS=64`，不足即 503 |
+| AR-B03 盘中未完成日 bar 无过滤 | medium | **已修**：按 America/New_York 16:00 收盘裁剪 end；当日未收盘不纳入 |
+| AR-B05/B06 负例少、串行直打 OpenD | low/medium | **已修**：补负例；默认接 `EquityBarCache`（TTL 1 天），provenance 区分 `futu`/`futu_cache` |
+| FE-01 空 K 型仍画空图 | low | **已修**：显示“当前自然年尚无可用的 K 型序列” |
+| FE-02/FE-05/FE-07 前端口径展示与测试 | low/nit | **已修**：徽章显示 timezone/provenance；methodology 折叠层展示口径表；新增动态赢家/空态/视图源测试 |
+| F2/F3/F4/F5 测试可糊弄 | medium | **已修**：非 futu provenance、缺 ETF、短历史、赢家翻转、as_of 对齐均有断言；API 成功路径要求 timezone/provenance |
 
 ### 2.6 后续阶段（本期 plan 可写清，不在 Phase 1 交付）
 
 - **Phase 2**：扩展 Futu 多市场代码适配；接入日经/恒指/TWSE；韩国评估 Twelve Data 或 KRX 合同
 - **Phase 3**：样本外验证的龙头映射（点时权重）、估值数据；HQA 定时 + market_foresight 告警
+
+### 2.7 数据日更落库与晨报接入（设计讨论，Phase 2 前菜）
+
+用户提出的方向，当前仅设计，不在 Phase 1.1 实现：
+
+1. **日更落库**：每日收盘后由调度任务调 `read_asia_radar_overview`，把 12 ETF QFQ 日线写入
+   `EquityBarCache`（DuckDB）并归档当日 overview 快照（as_of 为主键）。后续页面默认读库，
+   provenance 标 `futu_cache`；只有强制刷新或缓存缺口才回打 Futu。失败保留上一版并标 stale。
+2. **晨报接入**：晨报生成时读取当日 Asia Radar overview，给导语追加 1–2 句亚洲市场概括
+   （动态赢家/输家、最大 YTD 分化、数据截至）。必须复用同一 fail-closed 数据路径，
+   晨报缺数据时明示“亚洲雷达数据不可用”，不得生成模拟句子。
+3. **导语文案纪律**：刊出语不出现“平台模板提示/确定性模板”等实现性措辞；
+   本次已把半导体 vs 软件改为按当日 SOXX/IGV 真实差值输出。
+
+### 2.8 行情浏览页热力化（设计讨论，另起 P1.5）
+
+`data-explorer` 目前是单标的 OHLCV + K 线 + 质量栏。可行方向：新增“市场横截面”视图
+（自选/预设篮子 → 热力图 + 周/月/YTD/波动/回撤矩阵），复用 Asia Radar 的指标层与缓存，
+但不混用其 12 ETF 固定宇宙。需先定：标的池来源（自选、持仓、关注列表）、provider 策略
+（是否允许非 Futu 严格源）、与 Asia Radar 的产品边界。结论未定，先不动代码。
 
 ## 3. P3：板块价格/成交量动量 → 修复后作为普通实验（不用花旗名称）
 
