@@ -79,3 +79,23 @@ The archive tags and bundle are recovery evidence, not release authorization.
 - The consolidation is therefore acceptable for branch-topology convergence
   with no new source failure. It must not be described as a fully green HQA
   release, and the approval flake remains open after publication.
+
+## Closure result
+
+- Remote `main` was created at the accepted consolidation commit and made the
+  GitHub default branch. Branch protection requires linear history and disables
+  force-push and branch deletion; direct single-owner pushes remain available.
+- The clean runtime HQA clone switched to `main`, tracked `github/main`, rebuilt
+  its commit graph, and reinstalled all HQA wrappers and Hermes skills from that
+  checkout. Both of its stale local `codex/*` branches were fully contained in
+  `main` and removed.
+- Docker/PostgreSQL, Hermes 0.20.0, Platform backend, production frontend, and
+  connector remained running and ready after the switch. Safety remained
+  `dry_run=true`, `paper_trading=true`, `live_trading_enabled=false`,
+  `kill_switch=true`, and `release_authorized=false`.
+- GitHub and the root HQA checkout now expose only `main`; old full-9H, release,
+  WIP, remediation, limited-device, phase, and temporary consolidation branches
+  were deleted only after their pushed archive tags were revalidated.
+- The two obsolete root worktrees were removed. Existing untracked user/runtime
+  directories in the root checkout were preserved. The separate dirty Platform
+  runtime checkout and its running processes were not changed.
