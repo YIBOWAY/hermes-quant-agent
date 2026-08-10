@@ -120,6 +120,33 @@ def _strict_json(value: object) -> object:
         raise PaperIntakeError("paper_intake_invalid_evidence") from exc
 
 
+def _strict_tool_json(value: object, *, source: str) -> object:
+    """Decode bare JSON or Hermes' exact untrusted-result framing.
+
+    Hermes wraps high-risk web tool output before persisting it in the
+    transcript.  The wrapper is transport metadata, not part of the tool's
+    JSON receipt.  Bind the declared wrapper source to the authoritative tool
+    call name and accept no bytes after the closing delimiter.
+    """
+
+    if type(value) is not str:
+        raise PaperIntakeError("paper_intake_invalid_evidence")
+    opening = f'<untrusted_tool_result source="{source}">\n'
+    closing = "</untrusted_tool_result>"
+    if not value.startswith("<untrusted_tool_result"):
+        return _strict_json(value)
+    if not value.startswith(opening) or not value.endswith(closing):
+        raise PaperIntakeError("paper_intake_invalid_evidence")
+    framed = value[len(opening) : -len(closing)]
+    try:
+        _notice, payload = framed.split("\n\n", 1)
+    except ValueError as exc:
+        raise PaperIntakeError("paper_intake_invalid_evidence") from exc
+    if not payload.endswith("\n"):
+        raise PaperIntakeError("paper_intake_invalid_evidence")
+    return _strict_json(payload[:-1])
+
+
 def _exact_turn(
     messages: Sequence[Mapping[str, Any]],
     *,
@@ -191,7 +218,7 @@ def _search_receipts(
     for name, _arguments, raw in evidence:
         if name != "web_search":
             continue
-        parsed = _strict_json(raw)
+        parsed = _strict_tool_json(raw, source="web_search")
         if not isinstance(parsed, Mapping) or parsed.get("success") is not True:
             continue
         data = parsed.get("data")
@@ -227,7 +254,7 @@ def _full_text_receipt(
     for name, _arguments, raw in evidence:
         if name != "web_extract":
             continue
-        parsed = _strict_json(raw)
+        parsed = _strict_tool_json(raw, source="web_extract")
         results = parsed.get("results") if isinstance(parsed, Mapping) else None
         if not isinstance(results, list):
             continue

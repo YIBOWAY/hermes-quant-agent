@@ -43,6 +43,7 @@ _PAYLOAD_RE = re.compile(r"payload:sha256:[0-9a-f]{64}\Z")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _VERIFY_REQUEST_FIELDS = {
     "endpoint",
+    "owner_id",
     "workspace_id",
     "platform_session_id",
     "command_id",
@@ -162,6 +163,7 @@ def _validated_request(document: Mapping[str, Any]) -> dict[str, Any]:
             "timeout_seconds": float(timeout),
             **({"api_key": api_key} if api_key is not None else {}),
         },
+        "owner_id": _identifier(document, "owner_id"),
         "workspace_id": _identifier(document, "workspace_id"),
         "platform_session_id": _identifier(document, "platform_session_id"),
         "command_id": _identifier(document, "command_id"),
@@ -372,7 +374,7 @@ def main(
         store = store_factory()
         envelope = store.resolve(
             request["payload_ref"],
-            owner_id=config.WORKFLOW_OWNER_USER_ID,
+            owner_id=request["owner_id"],
             workspace_id=f"workspace:{request['workspace_id']}",
             session_id=f"session:{request['platform_session_id']}",
             consumer_ref=f"command:{request['command_id']}",
