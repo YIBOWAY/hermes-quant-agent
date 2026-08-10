@@ -9,10 +9,13 @@ Rules for AI agents working in this repository.
   bounded macOS cold-start socket-drain hardening. Normal Mac
   startup is the Platform runtime's `bash scripts/local_mac_stack.sh start`,
   which manages Docker plus Hermes/backend/frontend/connector LaunchAgents.
-  Do not make service lifetime depend on an AI-tool terminal. Local trust is an
-  identity convenience only and reports `admission_mode=local_trust` without
-  candidate identity; real-trading, kill-switch, migration, human-gate,
-  and public-release boundaries remain independent.
+  Do not make service lifetime depend on an AI-tool terminal. Local trust
+  (2026-08-01) bypasses only the candidate-admission **identity ritual**
+  (preflight evidence, three-repo digests, clean checkout, connector ceremony)
+  and reports `admission_mode=local_trust` without candidate identity. It does
+  **not** relax the factor-promotion human gates: the Scene-B Gate 1/2/3 chain
+  in the Safety Rules below still applies unchanged. Real-trading, kill-switch,
+  migration, human-gate, and public-release boundaries remain independent.
 
 - `Hermes-quant-agent` is the active orchestration/COO layer for the local
   `/Users/sunyibo/programs/ai-quant-platform` backend.
