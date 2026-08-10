@@ -43,6 +43,9 @@ repository-owned runner；runner从 owner env 解析稳定 HQA root/Python，明
 ~/.hermes/scripts/hqa-factor-automation.sh enqueue --request-file /absolute/path/request.json
 ```
 
+安装 wrapper 只允许该 exact enqueue，并转交同一个 Platform owner-env runner；因此四个
+Flag 来自 `0600` runtime env，而不是 Hermes、Codex/Claude 或调用终端的临时环境。
+
 request 必须是严格 schema `hqa.factor_automation_request/v1`，包含：
 
 - 唯一 `automation_id`、正文 intake receipt/digest；
