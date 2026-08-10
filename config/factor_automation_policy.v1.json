@@ -1,0 +1,20 @@
+{
+  "schema_version": "hqa.factor_automation_policy/v1",
+  "default_universe": [
+    "SPY",
+    "QQQ"
+  ],
+  "universe_allowlist": [
+    "SPY",
+    "QQQ",
+    "IWM",
+    "DIA"
+  ],
+  "minimum_sample_rows": 504,
+  "minimum_out_of_sample_rows": 63,
+  "minimum_data_coverage_ratio": 0.98,
+  "minimum_transaction_cost_bps": 10.0,
+  "maximum_absolute_drawdown": 0.2,
+  "maximum_turnover": 3.0,
+  "require_lookahead_static_check": true
+}
