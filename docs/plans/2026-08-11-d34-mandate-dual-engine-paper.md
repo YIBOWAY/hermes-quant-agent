@@ -144,8 +144,8 @@ LaunchAgent 安装也不是 migration apply、启用态 provider smoke 或 paper
 
 ## 10. Source 验收证据
 
-- Platform 最新 main + D-34 组合态：Python 3.11.15、显式 worktree `PYTHONPATH` 下全量
-  `2977 passed, 259 skipped`；其后的最终 Docker-context delta 另以 D-34 API/runtime 定向集合
+- Platform 当前 `31fd138` + D-34 组合态：Python 3.11.15、显式 worktree `PYTHONPATH` 下全量
+  `2985 passed, 259 skipped`；此前的最终 Docker-context delta 另以 D-34 API/runtime 定向集合
   `62 passed, 1 skipped` 验收。`95d908b` 的稳定 blocker delta 另以全部 `test_d34_*.py`
   `57 passed, 1 skipped`、preflight/env/LaunchAgent 相关 `23 passed` 和变更文件 Ruff 验收。
   `1df7c16` 的真实 safety-contract delta 以 D-34/API 定向 `64 passed, 1 skipped`、全量 Ruff、
@@ -154,7 +154,7 @@ LaunchAgent 安装也不是 migration apply、启用态 provider smoke 或 paper
 - HQA 与最新 main 的组合态全量：`2220 passed, 4 skipped, 0 failed`；恢复闭包 34 项定向测试
   通过。新增修复只接受 UV 管理根下、最终解析为同一 3.11 解释器且文件 digest 一致的
   minor alias；外部、内部跳转、越界、悬空和循环 symlink 仍 fail closed。
-- Frontend 与当前 Slice 0 source：Vitest `80 files / 485 tests`、typecheck、ESLint、Next
+- Frontend 与当前 Slice 0 source：Vitest `80 files / 486 tests`、typecheck、ESLint、Next
   production build 均通过；
   `PW_E2E=1` 的 D-34 浏览器流程 `1 passed`，覆盖 Mandate 续期、比较数值、canary P&L/回撤、
   sleeve 现金/持仓、风险限额和 live 按钮缺失；生成类型已同步。
