@@ -130,10 +130,11 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
 | 4 `/hermes` 工作台 | 已实现；双引擎数值、限额、P&L、真实 sleeve 现金/持仓均纳入显式浏览器 E2E，组件、类型、lint、build 通过 | 未部署 |
 | 5 主用/回退 | 机制已实现；10 周期/5 交易日运行门尚未开始 | 未切换 |
 
-当前 Platform purpose worktree tip 为 `9251559`；纵向实现链为 `2eccfbc`、`049d522`、
+当前 Platform purpose worktree tip 为 `5f93acd`；纵向实现链为 `2eccfbc`、`049d522`、
 `8fe8164`、`7fa46aa`、测试夹具修复 `1bb31bc`、hardened delta `6452803` 与 source completion
-delta `9251559`。HQA 的恢复验证兼容提交为 `ab977e9`。这些是 source 事实，不是 migration
-apply、LaunchAgent 安装或 paper 订单运行证据。
+delta `9251559`；`cb1cb92` 合入当时最新 Platform main，`5f93acd` 修正抽取式 Hermes copy
+的冻结测试。HQA 的恢复验证兼容提交为 `ab977e9`，与当时最新 HQA main 的组合验收锚为
+`414df6c`。这些是 source 事实，不是 migration apply、LaunchAgent 安装或 paper 订单运行证据。
 
 ## 10. Source 验收证据
 
@@ -142,10 +143,11 @@ apply、LaunchAgent 安装或 paper 订单运行证据。
   本轮新增的 runner/dirty/policy/UI 回归亦包含在全量中。并发 paper-account
   测试修正为显式 lifespan 后连续 `20 passed`；`ruff check src tests`、generated API type
   drift check 与 `git diff --check` 均通过。
-- HQA 全量：收集 2223 项，`2219 passed, 4 skipped, 0 failed`；恢复闭包 34 项定向测试
+- HQA 与最新 main 的组合态全量：`2220 passed, 4 skipped, 0 failed`；恢复闭包 34 项定向测试
   通过。新增修复只接受 UV 管理根下、最终解析为同一 3.11 解释器且文件 digest 一致的
   minor alias；外部、内部跳转、越界、悬空和循环 symlink 仍 fail closed。
-- Frontend：Vitest `79 files / 480 tests`、typecheck、ESLint、Next production build 均通过；
+- Frontend 与最新 main 的组合态：Vitest `80 files / 484 tests`、typecheck、ESLint、Next
+  production build 均通过；
   `PW_E2E=1` 的 D-34 浏览器流程 `1 passed`，覆盖 Mandate 续期、比较数值、canary P&L/回撤、
   sleeve 现金/持仓、风险限额和 live 按钮缺失；生成类型已同步。
 - PostgreSQL：一次性隔离数据库从 001 顺序 apply 到 032，并以受限 runtime role 运行 D-34
