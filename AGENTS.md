@@ -21,8 +21,16 @@ Rules for AI agents working in this repository.
   enabled it replaces Gate 1/2/3 with digest-bound machine policy for
   `paper_only` factors only. The manual Scene-B path and every live-trading,
   kill-switch, migration, and public-release boundary remain independent.
+- **D-34 source snapshot (2026-08-11):** D-34 is being developed on the paired
+  `codex/d34-mandate-paper` source worktrees. It replaces step-by-step owner
+  approval on its own paper path with one durable Mandate plus deterministic
+  data, budget, comparison, exposure, emergency-stop and recovery policies.
+  Migration 030–032 and its LaunchAgent are source-only until a separate
+  migration/deployment window; the formal database and runtime have not been
+  changed. See `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.
 - **Checkout role boundary:** development is allowed only in the primary HQA
-  and Platform checkouts under `/Users/sunyibo/programs/`. Both checkouts under
+  and Platform checkouts or purpose-named source worktrees under
+  `/Users/sunyibo/programs/.worktrees/`. Both checkouts under
   `data/_runtime/agent-v02-work/` are deployment mirrors: fetch and
   fast-forward only; never edit, commit, rebase, or push from them.
 
@@ -37,6 +45,9 @@ Rules for AI agents working in this repository.
   approved paper-automation implementation and acceptance record is
   `docs/plans/2026-08-10-full-automation-paper-path.md`; its operator contract is
   `docs/runbooks/full-automation-paper.md`.
+  D-34's current source implementation plan is
+  `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`; it does not supersede
+  D-32 public Web Chat work and is not runtime acceptance evidence.
   `docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md` is the
   predecessor Wave 3 delivery record and blocker input, not an active queue;
   the full 9H record is also completed historical delivery evidence.
@@ -172,12 +183,16 @@ Rules for AI agents working in this repository.
   candidate source approval, and promotion diff review/commit. All three are
   implemented in the HQA wrappers; raw platform APIs/CLI remain generic
   primitives and do not independently prove HQA Gate 1 provenance. D-33's
-  dual-Flag automatic paper path is the only exception: it uses `reviewer=auto`,
+  dual-Flag automatic paper path is one exception: it uses `reviewer=auto`,
   `registration=auto_promote`, a versioned policy digest, verified final-backtest
   evidence, two-phase commit, local ff-only land, and immutable
   `promotion_scope=paper_only`. It never auto-pushes and cannot populate the
-  live registry. With either Flag pair off, this exception fails closed and the
-  following manual rules apply. For the
+  live registry. D-34 is a second, separate paper-only exception: an active
+  Mandate may autonomously run Futu → RD-Agent/Qlib → Platform replay →
+  Artifact/Policy → canary, but execution is still rechecked against the
+  durable Mandate, emergency stop, budget, digest and paper exposure policies.
+  D-34 artifacts have no live upgrade operation. The following manual rules
+  continue to apply to manual Scene-B and every live qualification. For the
   final paper task, plan confirmation is a separate human stop and is not Gate
   1; the coordinator must pause independently at plan confirmation and Gates
   1/2/3, and it cannot complete the Task before the human Gate 3 commit.
