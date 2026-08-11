@@ -226,7 +226,9 @@ Rules for AI agents working in this repository.
 
 ## Local Commands
 
-- HQA tests: `./.venv/bin/pytest`
+- HQA tests: `./.venv/bin/python -m pytest` (use the venv `python` entrypoint;
+  the generated `pytest` console script may resolve through `python3` and lose
+  the exact uv-managed interpreter path required by recovery tests)
 - Install Hermes wrappers: `bash scripts/install.sh`
 - Persistent Mac stack:
   `bash /Users/sunyibo/programs/Hermes-quant-agent/data/_runtime/agent-v02-work/ai-quant-platform/scripts/local_mac_stack.sh start`
