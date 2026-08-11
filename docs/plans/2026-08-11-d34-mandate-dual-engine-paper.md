@@ -89,11 +89,20 @@ canary，再决定是否启动研究：
 1. 对 running/paused/demoted/rolled-back canary 继续估值和记录 P&L/回撤；风险越线时
    先暂停本地 sleeve，再 CAS 更新 Registry。
 2. 若 paper 权限有效，按 next-open 时窗生成/执行 D-34 paper 计划；执行前再次读取
-   emergency stop 与 Mandate，旧 pending plan 不能穿透新 stop。
-3. 若研究权限有效，恢复 expired lease/outcome unknown，或创建下一次 snapshot/job。
-4. 作业状态固定为
+   emergency stop 与 Mandate，并用实际价格/订单金额重新运行统一 Policy；旧 pending plan
+   不能穿透新 stop，也不能与其他 canary 累计越过账户级单标的上限。
+3. 已完成研究但尚未写完 Artifact/canary 的 terminal phase 可幂等恢复；expired lease 收敛为
+   `outcome_unknown` 并保留 receipt 等待核对，不盲目重跑无法证明结果的研究。
+4. 只有上海时区周二至周六 06:00 以后才创建新 snapshot/job；canary 维护和 terminal
+   recovery 不受研究窗口限制。
+5. 作业状态固定为
    `queued → leased → running → succeeded/rejected/outcome_unknown/cancelled`。
-5. job key、attempt、receipt、Artifact、canary 和预算消费均幂等；重启不得重复下单。
+6. job key、attempt、receipt、Artifact、canary 和预算消费均幂等；重启不得重复下单。
+
+Mandate 的 `max_concurrent_jobs` 在数据库 lease 时锁定并计数。新 canary 先以
+`paused/awaiting_registry` 持久化，Registry 成功后才恢复执行。D-34 的 `top_k=1` 语义不套用
+D-33 的单 sleeve 40% 分散化限制；它仍受单 sleeve 1%、自动合计 10% 和账户级单标的 5%
+限制。D-33 与 D-34 都走 `paper-execution-policy/v2`。
 
 ## 8. 本地 owner 接口与工作台
 
@@ -112,18 +121,21 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
 | 0 开放 Docker + pins | 固定镜像、versions、Qlib、Futu socket、Docker child smoke 已通过；真实 LLM/embedding round-trip 缺 owner provider 配置，明确 BLOCKED | 未安装 |
 | 1 纵向闭环 + 030–032 | 已实现并通过一次性 PostgreSQL 001–032/最小权限测试 | 正式库未 apply |
 | 2 snapshot/adapter/双引擎 | 已实现；真实 Futu snapshot、Qlib provider、Qlib 回测和 Platform replay 闭环通过 | 未部署 |
-| 3 Policy/worker/canary | 已实现；含执行前 stop 重验、P&L/回撤 pause | 未部署 |
+| 3 Policy/worker/canary | 已实现；含并发 lease、研究时窗、执行时 Policy 重验、崩溃安全 canary、P&L/回撤 pause 和 rollback 预算释放 | 未部署 |
 | 4 `/hermes` 工作台 | 已实现；组件、类型、lint、build 与显式浏览器 E2E 通过 | 未部署 |
 | 5 主用/回退 | 机制已实现；10 周期/5 交易日运行门尚未开始 | 未切换 |
 
-当前 Platform 分支提交为 `2eccfbc`、`049d522`、`8fe8164`、`7fa46aa`；HQA 的
-恢复验证兼容提交为 `ab977e9`。这些是 source 事实，不是 migration apply、LaunchAgent
-安装或 paper 订单运行证据。
+当前 Platform purpose worktree tip 为 `6452803`；纵向实现链为 `2eccfbc`、`049d522`、
+`8fe8164`、`7fa46aa`、测试夹具修复 `1bb31bc` 与 hardened delta `6452803`。HQA 的恢复验证
+兼容提交为 `ab977e9`。这些是 source 事实，不是 migration apply、LaunchAgent 安装或 paper
+订单运行证据。
 
 ## 10. Source 验收证据
 
-- Platform 全量：`2950 passed, 259 skipped`；`ruff check src tests` 与 `git diff --check`
-  通过。
+- Platform 当前 source：Python 3.11.15、显式 worktree `PYTHONPATH` 下全量
+  `2959 passed, 259 skipped`；D-34/unified-paper 定向集合 `76 passed`。并发 paper-account
+  测试修正为显式 lifespan 后连续 `20 passed`；`ruff check src tests`、generated API type
+  drift check 与 `git diff --check` 均通过。
 - HQA 全量：收集 2223 项，`2219 passed, 4 skipped, 0 failed`；恢复闭包 34 项定向测试
   通过。新增修复只接受 UV 管理根下、最终解析为同一 3.11 解释器且文件 digest 一致的
   minor alias；外部、内部跳转、越界、悬空和循环 symlink 仍 fail closed。
@@ -144,7 +156,8 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
   round-trip。
 - BLOCKED：当前没有 owner 配置的 D-34 LiteLLM chat/embedding 模型及 provider secret；
   只验证了 pinned `APIBackend` 可导入/实例化，没有发送伪请求，也没有挪用 Hermes OAuth。
-  启用前必须用权限 `0600` 的 `QS_D34_ENV_FILE` 完成真实 `llm-smoke`。
+  启用前必须用权限严格为 `0600` 且不是 symlink 的普通 `QS_D34_ENV_FILE` 完成真实
+  `llm-smoke`。
 
 ## 11. Runtime 完成门
 
