@@ -33,7 +33,7 @@ paper 限额、emergency stop、审计和恢复所需的约束。
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
 - 当前 Slice 0 分支为 `codex/d34-slice0-hqa` 与 `codex/d34-slice0-platform`；Platform 分支从
   本地 `main` 起步，并已将并行进入 main 的 AsiaRadar `d69dc8a` 纳入组合验证；当前 source
-  tip 为 `a00ec37`。两个主 checkout 均未承载本轮 D-34 dirty，便于继续并行开发。
+  tip 为 `95d908b`。两个主 checkout 均未承载本轮 D-34 dirty，便于继续并行开发。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
 - 在 migration 030–032 获得单独 apply 授权且 runtime fast-forward 之前，
@@ -127,7 +127,7 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
 
 | 切片 | Source 状态 | Runtime 状态 |
 |---|---|---|
-| 0 开放 Docker + pins | pinned RD-Agent env 契约、完整 runtime preflight、可离线重建镜像、versions、Qlib、Futu socket、Docker child smoke 已通过；真实 LLM/embedding round-trip 缺 owner provider 配置，明确 BLOCKED | 未安装 |
+| 0 开放 Docker + pins | pinned RD-Agent env 契约、完整 runtime preflight、可离线重建镜像、versions、Qlib、Futu socket、Docker child smoke 已通过；真实 LLM/embedding round-trip 缺 owner provider 配置，明确 BLOCKED | runtime mirror 已 ff 到 `95d908b`；disabled LaunchAgent 已安装并以 exit 0 报告 `enabled=false`，未启动研究或订单 |
 | 1 纵向闭环 + 030–032 | 已实现并通过一次性 PostgreSQL 001–032/最小权限测试 | 正式库未 apply |
 | 2 snapshot/adapter/双引擎 | 已实现；真实 Futu snapshot、Qlib provider、Qlib 回测和 Platform replay 闭环通过 | 未部署 |
 | 3 Policy/worker/canary | 已实现；含并发 lease、研究时窗、执行时 Policy 重验与 append-only 决策、崩溃安全 canary、P&L/回撤 pause、rollback 预算释放、Python 3.11 pin 和仓库 dirty 取证 | 未部署 |
@@ -137,15 +137,18 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
 既有 D-34 纵向实现已在 Platform `main`；本轮 Slice 0 在并行 AsiaRadar 合入后重排为：
 `79f968c` 加入启用态 preflight，`01bf05b` 修正 pinned RD-Agent env，`db2068f` 让 Platform
 wheel 在固定构建工具下无需临时下载 build dependency，`ce9fc28` 同步 operator 文档，
-`a00ec37` 排除 frontend build artifact 对 image context/digest 的污染。HQA 的恢复验证兼容提交
-仍为 `ab977e9`。这些都是 source 事实，不是 migration apply、LaunchAgent 安装或 paper 订单
-运行证据。
+`a00ec37` 排除 frontend build artifact 对 image context/digest 的污染，`95d908b` 让 owner-env
+阻塞通过 preflight 公共 JSON 返回稳定的 `d34_env_*` code。HQA 的恢复验证兼容提交仍为
+`ab977e9`。这些都是 source 事实；disabled LaunchAgent 安装也不是 migration apply、启用态
+provider smoke 或 paper 订单运行证据。
 
 ## 10. Source 验收证据
 
 - Platform 最新 main + D-34 组合态：Python 3.11.15、显式 worktree `PYTHONPATH` 下全量
   `2977 passed, 259 skipped`；其后的最终 Docker-context delta 另以 D-34 API/runtime 定向集合
-  `62 passed, 1 skipped` 验收。`ruff check src tests` 与 `git diff --check` 均通过。
+  `62 passed, 1 skipped` 验收。`95d908b` 的稳定 blocker delta 另以全部 `test_d34_*.py`
+  `57 passed, 1 skipped`、preflight/env/LaunchAgent 相关 `23 passed` 和变更文件 Ruff 验收。
+  `ruff check src tests` 与 `git diff --check` 均通过。
 - HQA 与最新 main 的组合态全量：`2220 passed, 4 skipped, 0 failed`；恢复闭包 34 项定向测试
   通过。新增修复只接受 UV 管理根下、最终解析为同一 3.11 解释器且文件 digest 一致的
   minor alias；外部、内部跳转、越界、悬空和循环 symlink 仍 fail closed。
@@ -179,8 +182,8 @@ wheel 在固定构建工具下无需临时下载 build dependency，`ce9fc28` �
 
 ## 11. Runtime 完成门
 
-- 两个本地 `main` 已合入；下一步仍须另行授权 apply 030–032，再以 source→runtime
-  fast-forward 部署。
+- 两个本地 `main` 已合入，Platform runtime mirror 也已 fast-forward 到 `95d908b`；下一步仍须
+  另行授权 apply 030–032。当前只安装了明确禁用的 D-34 LaunchAgent，不能算启用态部署。
 - 配置 owner-only LLM/embedding provider 并通过真实 round-trip；不得把确定性 proposal smoke
   记作这一项通过。
 - `QS_D34_WORKER_ENABLED=true` 后先运行 `scripts/run_d34_worker.sh --check`；它必须同时证明
