@@ -21,6 +21,10 @@ Rules for AI agents working in this repository.
   enabled it replaces Gate 1/2/3 with digest-bound machine policy for
   `paper_only` factors only. The manual Scene-B path and every live-trading,
   kill-switch, migration, and public-release boundary remain independent.
+- **Checkout role boundary:** development is allowed only in the primary HQA
+  and Platform checkouts under `/Users/sunyibo/programs/`. Both checkouts under
+  `data/_runtime/agent-v02-work/` are deployment mirrors: fetch and
+  fast-forward only; never edit, commit, rebase, or push from them.
 
 - `Hermes-quant-agent` is the active orchestration/COO layer for the local
   `/Users/sunyibo/programs/ai-quant-platform` backend.

@@ -1,15 +1,18 @@
 .venv/
 __pycache__/
 *.pyc
+*.egg-info/
 .pytest_cache/
 .tmp-pytest/
+.tmp*/
+.codegraph/
 logs/*.jsonl
 review/entries.jsonl
 review/entries.md
 predictions/
 opportunities/
 market_foresight/
-artifacts/hermes-feed/
+artifacts/
 automation/
 # Ignore runtime data, but track Scene-A threshold config (audit PR-5).
 # Must use `data/*` (not `data/`) so negation of children works.
