@@ -28,8 +28,12 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 
 ## 3. 仓库与部署边界
 
-- HQA 与 Platform 的 `codex/d34-mandate-paper` worktree 已完成组合回归，并分别 fast-forward
-  合入本地 `main`；后续功能开发继续以主 checkout 的 `main` 为唯一源。
+- 两个本地 `main` 仍是唯一集成与 GitHub 发布基线；D-34 后续切片在
+  `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
+  purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
+- 当前 Slice 0 分支为 `codex/d34-slice0-hqa` 与 `codex/d34-slice0-platform`；Platform 分支从
+  本地 `main` `7c28c00` 起步，当前 source tip 为 `9fce3af`。两个主 checkout 均未承载本轮
+  D-34 dirty，便于 AsiaRadar 并行开发。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
 - 在 migration 030–032 获得单独 apply 授权且 runtime fast-forward 之前，
@@ -123,41 +127,40 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
 
 | 切片 | Source 状态 | Runtime 状态 |
 |---|---|---|
-| 0 开放 Docker + pins | 固定镜像、versions、Qlib、Futu socket、Docker child smoke 已通过；真实 LLM/embedding round-trip 缺 owner provider 配置，明确 BLOCKED | 未安装 |
+| 0 开放 Docker + pins | pinned RD-Agent env 契约、完整 runtime preflight、可离线重建镜像、versions、Qlib、Futu socket、Docker child smoke 已通过；真实 LLM/embedding round-trip 缺 owner provider 配置，明确 BLOCKED | 未安装 |
 | 1 纵向闭环 + 030–032 | 已实现并通过一次性 PostgreSQL 001–032/最小权限测试 | 正式库未 apply |
 | 2 snapshot/adapter/双引擎 | 已实现；真实 Futu snapshot、Qlib provider、Qlib 回测和 Platform replay 闭环通过 | 未部署 |
 | 3 Policy/worker/canary | 已实现；含并发 lease、研究时窗、执行时 Policy 重验与 append-only 决策、崩溃安全 canary、P&L/回撤 pause、rollback 预算释放、Python 3.11 pin 和仓库 dirty 取证 | 未部署 |
 | 4 `/hermes` 工作台 | 已实现；双引擎数值、限额、P&L、真实 sleeve 现金/持仓均纳入显式浏览器 E2E，组件、类型、lint、build 通过 | 未部署 |
 | 5 主用/回退 | 机制已实现；10 周期/5 交易日运行门尚未开始 | 未切换 |
 
-当前 Platform `main` 的 D-34 合入 tip 为 `5f93acd`；纵向实现链为 `2eccfbc`、`049d522`、
-`8fe8164`、`7fa46aa`、测试夹具修复 `1bb31bc`、hardened delta `6452803` 与 source completion
-delta `9251559`；`cb1cb92` 合入当时最新 Platform main，`5f93acd` 修正抽取式 Hermes copy
-的冻结测试。HQA 的恢复验证兼容提交为 `ab977e9`，与当时最新 HQA main 的组合验收锚为
-`414df6c`。这些是 source 事实，不是 migration apply、LaunchAgent 安装或 paper 订单运行证据。
+既有 D-34 纵向实现已在 Platform `main`；本轮 Slice 0 delta 位于 purpose branch：`d3060ae`
+加入启用态 preflight，`a78bc76` 修正 pinned RD-Agent env，`ca8aea9` 让 Platform wheel 在固定
+构建工具下无需临时下载 build dependency，`9fce3af` 同步 operator 文档。HQA 的恢复验证兼容
+提交仍为 `ab977e9`。这些都是 source 事实，不是 migration apply、LaunchAgent 安装或 paper
+订单运行证据。
 
 ## 10. Source 验收证据
 
-- Platform 当前 source：Python 3.11.15、显式 worktree `PYTHONPATH` 下全量
-  `2961 passed, 259 skipped`（3220 collected）；D-34/unified-paper 定向集合此前 `76 passed`，
-  本轮新增的 runner/dirty/policy/UI 回归亦包含在全量中。并发 paper-account
-  测试修正为显式 lifespan 后连续 `20 passed`；`ruff check src tests`、generated API type
-  drift check 与 `git diff --check` 均通过。
+- Platform 当前 Slice 0 source：Python 3.11.15、显式 worktree `PYTHONPATH` 下全量
+  `2967 passed, 259 skipped`（3226 collected）；D-34 API/runtime 定向集合
+  `61 passed, 1 skipped`。`ruff check src tests` 与 `git diff --check` 均通过。
 - HQA 与最新 main 的组合态全量：`2220 passed, 4 skipped, 0 failed`；恢复闭包 34 项定向测试
   通过。新增修复只接受 UV 管理根下、最终解析为同一 3.11 解释器且文件 digest 一致的
   minor alias；外部、内部跳转、越界、悬空和循环 symlink 仍 fail closed。
-- Frontend 与最新 main 的组合态：Vitest `80 files / 484 tests`、typecheck、ESLint、Next
+- Frontend 与当前 Slice 0 source：Vitest `80 files / 484 tests`、typecheck、ESLint、Next
   production build 均通过；
   `PW_E2E=1` 的 D-34 浏览器流程 `1 passed`，覆盖 Mandate 续期、比较数值、canary P&L/回撤、
   sleeve 现金/持仓、风险限额和 live 按钮缺失；生成类型已同步。
 - PostgreSQL：一次性隔离数据库从 001 顺序 apply 到 032，并以受限 runtime role 运行 D-34
   authority 测试，`1 passed`；覆盖实际 order-batch policy append-only/幂等/跨 execution 身份与
   Artifact comparison 列表投影。临时数据库已删除，正式库没有改变。
-- Docker：镜像 `hqa-d34-rdagent-qlib:0.1.0` 的 ID 为
-  `sha256:c0b84994192abba79b05fd7f4485e4c5c6c3de1a3996ba783ac4628f907239db`；
+- Docker：镜像 `hqa-d34-rdagent-qlib:0.1.0` 从当前 Slice 0 source 重建，ID 为
+  `sha256:82f149e3f635f9df180cb0d736027301aeabdb110184b5e58c13c123aba74721`；
   固定 RD-Agent `274e274d5dbb72cc2ea139d1a7c93d73ce9b1198`、Qlib
-  `da920b7f954f48ab1bb64117c976710de198373e`。真实 Qlib provider/backtest、宿主 Futu
-  socket 与 Docker socket child smoke 通过。
+  `da920b7f954f48ab1bb64117c976710de198373e`。Python 3.11.15、Qlib backtest 30/15 行、
+  宿主 Futu socket 与 Docker socket child smoke 通过。首次重建真实复现了 Platform wheel
+  build-isolation 的网络依赖；修复后该 wheel 步骤不再访问 package index，并重建成功。
 - 真实 Futu snapshot 为 4 个标的、27 个交易日、108 行，digest
   `e1ea96bbec3a386e26e0814e32b9ab3b4e0b3892ec9b53f7dcdd95d4fd1cdb31`。
   最终镜像内的确定性 proposal 闭环真实运行 Qlib 与 Platform replay：日收益相关性
@@ -165,9 +168,11 @@ delta `9251559`；`cb1cb92` 合入当时最新 Platform main，`5f93acd` 修正�
   accepted。这里替代的只有 LLM proposal，用于验证数据/双引擎集成，不能冒充真实 LLM
   round-trip。
 - BLOCKED：当前没有 owner 配置的 D-34 LiteLLM chat/embedding 模型及 provider secret；
-  只验证了 pinned `APIBackend` 可导入/实例化，没有发送伪请求，也没有挪用 Hermes OAuth。
-  启用前必须用权限严格为 `0600` 且不是 symlink 的普通 `QS_D34_ENV_FILE` 完成真实
-  `llm-smoke`。
+  未发送伪请求，也没有挪用 Hermes OAuth。启用入口现在要求非空
+  `LITELLM_CHAT_MODEL`/`LITELLM_EMBEDDING_MODEL`，并拒绝会被 pinned RD-Agent settings 日志
+  展开的 `LITELLM_*` secret。当前真实 `d34 preflight` 以 exit 1 返回
+  `d34_env_file_required`；启用前必须用权限严格为 `0600` 且不是 symlink 的普通
+  `QS_D34_ENV_FILE` 完成真实 LLM JSON/embedding smoke。
 
 ## 11. Runtime 完成门
 
@@ -175,6 +180,9 @@ delta `9251559`；`cb1cb92` 合入当时最新 Platform main，`5f93acd` 修正�
   fast-forward 部署。
 - 配置 owner-only LLM/embedding provider 并通过真实 round-trip；不得把确定性 proposal smoke
   记作这一项通过。
+- `QS_D34_WORKER_ENABLED=true` 后先运行 `scripts/run_d34_worker.sh --check`；它必须同时证明
+  正式 D-34 authority、`live_execution_enabled=false`、pinned image、Qlib、LLM/embedding、Futu
+  与 Docker child，并持久化 `hqa.d34_preflight/v1` receipt 后才允许安装/重载 LaunchAgent。
 - 至少 10 次完整自动周期、5 个交易日 canary；覆盖 restart、Futu/LLM/Docker 失败、digest
   mismatch、emergency stop、重复运行与 outcome unknown。
 - 证明零重复订单/Artifact/预算消费，且无 live eligibility、无自动 GitHub push。
