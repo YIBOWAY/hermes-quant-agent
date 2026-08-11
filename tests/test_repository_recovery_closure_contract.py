@@ -681,6 +681,47 @@ def test_verifier_performs_an_independent_fresh_rebuild(
     assert proof["python_version"] == [3, 11]
 
 
+def test_write_inventory_accepts_uv_minor_alias_for_exact_managed_python(
+    tmp_path: Path,
+) -> None:
+    managed_root = tmp_path / ".local" / "share" / "uv" / "python"
+    resolved_root = managed_root / "cpython-3.11.15-macos-aarch64-none"
+    resolved_python = resolved_root / "bin" / "python3.11"
+    resolved_python.parent.mkdir(parents=True)
+    resolved_python.write_bytes(b"exact-managed-python\n")
+    resolved_python.chmod(0o700)
+    alias_root = managed_root / "cpython-3.11-macos-aarch64-none"
+    alias_root.symlink_to(resolved_root, target_is_directory=True)
+
+    repository = tmp_path / "repository"
+    bin_dir = repository / ".venv" / "runtime" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "python").symlink_to(alias_root / "bin" / "python3.11")
+    (bin_dir / "python3").symlink_to("python")
+    (bin_dir / "python3.11").symlink_to("python")
+
+    inventory = repository_recovery._bounded_write_inventory(
+        repository,
+        [".venv"],
+        {
+            "path": str(resolved_python),
+            "resolved_path": str(resolved_python),
+            "sha256": hashlib.sha256(resolved_python.read_bytes()).hexdigest(),
+            "version": "3.11",
+        },
+    )
+
+    symlinks = [entry for entry in inventory if entry["type"] == "symlink"]
+    assert [entry["path"] for entry in symlinks] == [
+        ".venv/runtime/bin/python",
+        ".venv/runtime/bin/python3",
+        ".venv/runtime/bin/python3.11",
+    ]
+    assert {entry["resolved_target"] for entry in symlinks} == {
+        str(resolved_python)
+    }
+
+
 def test_rebuild_probe_does_not_execute_wheel_pth_code(
     tmp_path: Path,
 ) -> None:

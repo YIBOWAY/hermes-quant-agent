@@ -2401,6 +2401,7 @@ def _bounded_write_inventory(
         or _sha256(_read_regular(managed_resolved)) != managed_sha256
     ):
         raise RepositoryRecoveryError("managed interpreter identity mismatch")
+    managed_root = _uv_managed_python_root(managed_resolved)
     write_roots = [repository / root for root in roots]
     allowed_link_paths = {
         repository / _CLOSED_REBUILD_ENVIRONMENT / "bin" / "python",
@@ -2412,6 +2413,21 @@ def _bounded_write_inventory(
         return any(
             candidate == root or root in candidate.parents
             for root in write_roots
+        )
+
+    def is_managed_absolute_target(candidate: Path) -> bool:
+        if candidate in {managed_path, managed_resolved}:
+            return True
+        try:
+            relative = candidate.relative_to(managed_root)
+        except ValueError:
+            return False
+        parts = relative.parts
+        return (
+            len(parts) == 3
+            and parts[0].startswith(f"cpython-{managed_version}-")
+            and parts[1] == "bin"
+            and parts[2] == f"python{managed_version}"
         )
 
     def symlink_final_target(path: Path, link_text: str) -> Path:
@@ -2428,7 +2444,7 @@ def _bounded_write_inventory(
             seen.add(current_link)
             if os.path.isabs(current_text):
                 candidate = Path(os.path.abspath(current_text))
-                if candidate != managed_path:
+                if not is_managed_absolute_target(candidate):
                     raise RepositoryRecoveryError(
                         "absolute rehearsal symlink target is not managed"
                     )
