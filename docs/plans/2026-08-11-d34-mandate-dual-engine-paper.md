@@ -32,8 +32,8 @@ paper 限额、emergency stop、审计和恢复所需的约束。
   `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
 - 当前 Slice 0 分支为 `codex/d34-slice0-hqa` 与 `codex/d34-slice0-platform`；Platform 分支从
-  本地 `main` `7c28c00` 起步，当前 source tip 为 `9fce3af`。两个主 checkout 均未承载本轮
-  D-34 dirty，便于 AsiaRadar 并行开发。
+  本地 `main` 起步，并已将并行进入 main 的 AsiaRadar `d69dc8a` 纳入组合验证；当前 source
+  tip 为 `a00ec37`。两个主 checkout 均未承载本轮 D-34 dirty，便于继续并行开发。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
 - 在 migration 030–032 获得单独 apply 授权且 runtime fast-forward 之前，
@@ -134,21 +134,22 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
 | 4 `/hermes` 工作台 | 已实现；双引擎数值、限额、P&L、真实 sleeve 现金/持仓均纳入显式浏览器 E2E，组件、类型、lint、build 通过 | 未部署 |
 | 5 主用/回退 | 机制已实现；10 周期/5 交易日运行门尚未开始 | 未切换 |
 
-既有 D-34 纵向实现已在 Platform `main`；本轮 Slice 0 delta 位于 purpose branch：`d3060ae`
-加入启用态 preflight，`a78bc76` 修正 pinned RD-Agent env，`ca8aea9` 让 Platform wheel 在固定
-构建工具下无需临时下载 build dependency，`9fce3af` 同步 operator 文档。HQA 的恢复验证兼容
-提交仍为 `ab977e9`。这些都是 source 事实，不是 migration apply、LaunchAgent 安装或 paper
-订单运行证据。
+既有 D-34 纵向实现已在 Platform `main`；本轮 Slice 0 在并行 AsiaRadar 合入后重排为：
+`79f968c` 加入启用态 preflight，`01bf05b` 修正 pinned RD-Agent env，`db2068f` 让 Platform
+wheel 在固定构建工具下无需临时下载 build dependency，`ce9fc28` 同步 operator 文档，
+`a00ec37` 排除 frontend build artifact 对 image context/digest 的污染。HQA 的恢复验证兼容提交
+仍为 `ab977e9`。这些都是 source 事实，不是 migration apply、LaunchAgent 安装或 paper 订单
+运行证据。
 
 ## 10. Source 验收证据
 
-- Platform 当前 Slice 0 source：Python 3.11.15、显式 worktree `PYTHONPATH` 下全量
-  `2967 passed, 259 skipped`（3226 collected）；D-34 API/runtime 定向集合
-  `61 passed, 1 skipped`。`ruff check src tests` 与 `git diff --check` 均通过。
+- Platform 最新 main + D-34 组合态：Python 3.11.15、显式 worktree `PYTHONPATH` 下全量
+  `2977 passed, 259 skipped`；其后的最终 Docker-context delta 另以 D-34 API/runtime 定向集合
+  `62 passed, 1 skipped` 验收。`ruff check src tests` 与 `git diff --check` 均通过。
 - HQA 与最新 main 的组合态全量：`2220 passed, 4 skipped, 0 failed`；恢复闭包 34 项定向测试
   通过。新增修复只接受 UV 管理根下、最终解析为同一 3.11 解释器且文件 digest 一致的
   minor alias；外部、内部跳转、越界、悬空和循环 symlink 仍 fail closed。
-- Frontend 与当前 Slice 0 source：Vitest `80 files / 484 tests`、typecheck、ESLint、Next
+- Frontend 与当前 Slice 0 source：Vitest `80 files / 485 tests`、typecheck、ESLint、Next
   production build 均通过；
   `PW_E2E=1` 的 D-34 浏览器流程 `1 passed`，覆盖 Mandate 续期、比较数值、canary P&L/回撤、
   sleeve 现金/持仓、风险限额和 live 按钮缺失；生成类型已同步。
@@ -156,11 +157,13 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
   authority 测试，`1 passed`；覆盖实际 order-batch policy append-only/幂等/跨 execution 身份与
   Artifact comparison 列表投影。临时数据库已删除，正式库没有改变。
 - Docker：镜像 `hqa-d34-rdagent-qlib:0.1.0` 从当前 Slice 0 source 重建，ID 为
-  `sha256:82f149e3f635f9df180cb0d736027301aeabdb110184b5e58c13c123aba74721`；
+  `sha256:de57c7561f636f1d16b7ff34815cff0ed52848993d0fc6657ccd3a5b724a7242`；
   固定 RD-Agent `274e274d5dbb72cc2ea139d1a7c93d73ce9b1198`、Qlib
   `da920b7f954f48ab1bb64117c976710de198373e`。Python 3.11.15、Qlib backtest 30/15 行、
   宿主 Futu socket 与 Docker socket child smoke 通过。首次重建真实复现了 Platform wheel
-  build-isolation 的网络依赖；修复后该 wheel 步骤不再访问 package index，并重建成功。
+  build-isolation 的网络依赖；修复后该 wheel 步骤不再访问 package index，并重建成功。最终
+  build context 从 frontend build 后的 416.93 MB 收敛为只含 Python package 的 77.84 kB，
+  `.next/.tmp/node_modules` 不再改变 D-34 image digest。
 - 真实 Futu snapshot 为 4 个标的、27 个交易日、108 行，digest
   `e1ea96bbec3a386e26e0814e32b9ab3b4e0b3892ec9b53f7dcdd95d4fd1cdb31`。
   最终镜像内的确定性 proposal 闭环真实运行 Qlib 与 Platform replay：日收益相关性
