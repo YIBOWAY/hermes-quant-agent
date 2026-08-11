@@ -21,11 +21,12 @@ Rules for AI agents working in this repository.
   enabled it replaces Gate 1/2/3 with digest-bound machine policy for
   `paper_only` factors only. The manual Scene-B path and every live-trading,
   kill-switch, migration, and public-release boundary remain independent.
-- **D-34 source snapshot (2026-08-11):** D-34 is being developed on the paired
-  `codex/d34-mandate-paper` source worktrees. It replaces step-by-step owner
+- **D-34 source snapshot (2026-08-11):** the paired
+  `codex/d34-mandate-paper` worktrees passed cross-repo acceptance and were
+  fast-forwarded into both local `main` checkouts. D-34 replaces step-by-step owner
   approval on its own paper path with one durable Mandate plus deterministic
   data, budget, comparison, exposure, emergency-stop and recovery policies.
-  Migration 030–032 and its LaunchAgent are source-only until a separate
+  Migration 030–032 and its LaunchAgent remain source-only until a separate
   migration/deployment window; the formal database and runtime have not been
   changed. See `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.
 - **Checkout role boundary:** development is allowed only in the primary HQA

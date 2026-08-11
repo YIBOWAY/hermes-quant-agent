@@ -28,11 +28,11 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 
 ## 3. 仓库与部署边界
 
-- HQA D-34 source：`codex/d34-mandate-paper` worktree。
-- Platform D-34 source：`codex/d34-mandate-paper` worktree。
-- `main` 可并行开发 AsiaRadar；D-34 完整回归后再以可审查的方式合回 `main`。
+- HQA 与 Platform 的 `codex/d34-mandate-paper` worktree 已完成组合回归，并分别 fast-forward
+  合入本地 `main`；后续功能开发继续以主 checkout 的 `main` 为唯一源。
+- AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
-- 在 migration 030–032 获得单独 apply 授权、D-34 分支合入且 runtime fast-forward 之前，
+- 在 migration 030–032 获得单独 apply 授权且 runtime fast-forward 之前，
   不得把 source 测试通过写成“本机 D-34 已常驻运行”。
 
 ## 4. 正式契约与权威
@@ -130,7 +130,7 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
 | 4 `/hermes` 工作台 | 已实现；双引擎数值、限额、P&L、真实 sleeve 现金/持仓均纳入显式浏览器 E2E，组件、类型、lint、build 通过 | 未部署 |
 | 5 主用/回退 | 机制已实现；10 周期/5 交易日运行门尚未开始 | 未切换 |
 
-当前 Platform purpose worktree tip 为 `5f93acd`；纵向实现链为 `2eccfbc`、`049d522`、
+当前 Platform `main` 的 D-34 合入 tip 为 `5f93acd`；纵向实现链为 `2eccfbc`、`049d522`、
 `8fe8164`、`7fa46aa`、测试夹具修复 `1bb31bc`、hardened delta `6452803` 与 source completion
 delta `9251559`；`cb1cb92` 合入当时最新 Platform main，`5f93acd` 修正抽取式 Hermes copy
 的冻结测试。HQA 的恢复验证兼容提交为 `ab977e9`，与当时最新 HQA main 的组合验收锚为
@@ -171,7 +171,8 @@ delta `9251559`；`cb1cb92` 合入当时最新 Platform main，`5f93acd` 修正�
 
 ## 11. Runtime 完成门
 
-- 合回两个 `main` 后，另行授权 apply 030–032，再以 source→runtime fast-forward 部署。
+- 两个本地 `main` 已合入；下一步仍须另行授权 apply 030–032，再以 source→runtime
+  fast-forward 部署。
 - 配置 owner-only LLM/embedding provider 并通过真实 round-trip；不得把确定性 proposal smoke
   记作这一项通过。
 - 至少 10 次完整自动周期、5 个交易日 canary；覆盖 restart、Futu/LLM/Docker 失败、digest
