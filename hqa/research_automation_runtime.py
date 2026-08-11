@@ -381,37 +381,51 @@ class Full9HServices:
                     continue
                 if parsed <= as_of_date:
                     available.append(source_date)
-        if not available:
-            return {
-                "status": "empty",
-                "source_date": None,
-                "candidate_count": 0,
-                "signal_count": 0,
-            }
-        source_date = max(available)
-        candidates = signals.load_scan_candidates(self.paths.scan_dir, source_date)
-        thresholds = config.load_signal_thresholds(self.paths.thresholds_path)
-        records = signals.build_signal_records(
-            candidates,
-            min_score=thresholds["min_score"],
-            min_iv_rank=thresholds["min_iv_rank"],
-            source_date=source_date,
-            observed_at=as_of,
-        )
-        for record in records:
-            self.opportunity_tracker.record(
-                {
-                    "event": "signal_observed",
-                    "request_id": f"options-scan:{record['signal_id']}",
-                    "payload": record,
-                }
+        # Newest first. Empty/torn scan files must not fail the whole daily_close
+        # cycle when an older readable artifact is available.
+        skipped_unreadable: list[str] = []
+        for source_date in sorted(available, reverse=True):
+            try:
+                candidates = signals.load_scan_candidates(
+                    self.paths.scan_dir, source_date
+                )
+            except ValueError:
+                skipped_unreadable.append(source_date)
+                continue
+            thresholds = config.load_signal_thresholds(self.paths.thresholds_path)
+            records = signals.build_signal_records(
+                candidates,
+                min_score=thresholds["min_score"],
+                min_iv_rank=thresholds["min_iv_rank"],
+                source_date=source_date,
+                observed_at=as_of,
             )
-        return {
-            "status": "available" if records else "empty",
-            "source_date": source_date,
-            "candidate_count": len(candidates),
-            "signal_count": len(records),
+            for record in records:
+                self.opportunity_tracker.record(
+                    {
+                        "event": "signal_observed",
+                        "request_id": f"options-scan:{record['signal_id']}",
+                        "payload": record,
+                    }
+                )
+            result: dict[str, Any] = {
+                "status": "available" if records else "empty",
+                "source_date": source_date,
+                "candidate_count": len(candidates),
+                "signal_count": len(records),
+            }
+            if skipped_unreadable:
+                result["skipped_unreadable_source_dates"] = skipped_unreadable
+            return result
+        empty: dict[str, Any] = {
+            "status": "empty",
+            "source_date": None,
+            "candidate_count": 0,
+            "signal_count": 0,
         }
+        if skipped_unreadable:
+            empty["skipped_unreadable_source_dates"] = skipped_unreadable
+        return empty
 
     def portfolio_risk(self, as_of: str) -> dict[str, Any]:
         log_path = self.paths.log_dir / "portfolio_risk.jsonl"

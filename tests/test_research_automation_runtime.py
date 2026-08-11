@@ -132,6 +132,36 @@ def test_signal_catchup_uses_latest_existing_scan_and_is_idempotent(tmp_path) ->
     assert observations == []
 
 
+def test_signal_catchup_skips_unreadable_newest_scan(tmp_path) -> None:
+    paths = _paths(tmp_path)
+    paths.scan_dir.mkdir()
+    # Newest date is empty/torn and must not fail the step.
+    (paths.scan_dir / "2026-07-11.jsonl").write_bytes(b"")
+    (paths.scan_dir / "2026-07-10.jsonl").write_text(
+        json.dumps(_candidate()) + "\n",
+        encoding="utf-8",
+    )
+    paths.thresholds_path.write_text(
+        json.dumps({"min_score": 90, "min_iv_rank": None}),
+        encoding="utf-8",
+    )
+    services = research_automation_runtime.Full9HServices(
+        paths,
+        now=lambda: AS_OF,
+        run_snapshot=lambda account: (1, "unavailable"),
+        run_history=lambda symbols, start, end: (1, "unavailable"),
+        run_observations=lambda **kwargs: (1, ""),
+        notification_target="local",
+    )
+
+    result = services.signal_catchup(AS_OF)
+
+    assert result["status"] == "available"
+    assert result["source_date"] == "2026-07-10"
+    assert result["signal_count"] == 1
+    assert result["skipped_unreadable_source_dates"] == ["2026-07-11"]
+
+
 def test_projection_feed_and_local_notification_are_real_but_read_only(
     tmp_path,
 ) -> None:
