@@ -23,7 +23,7 @@ Rules for AI agents working in this repository.
   kill-switch, migration, and public-release boundary remain independent.
 - **D-34 runtime snapshot (2026-08-12):** migration 030–032 are applied exactly
   once after owner backup and isolated restore; the current Platform runtime is
-  `31fd138`. The enabled D-34
+  `0be9f32`. The enabled D-34
   LaunchAgent reuses the installed Hermes xAI OAuth session through the persistent
   local proxy on `127.0.0.1:8645`;
   the research chain does not require a separate embedding provider. One real
@@ -32,8 +32,16 @@ Rules for AI agents working in this repository.
   below 1% NAV. A full Docker/database/LaunchAgent cold restart preserved the
   Mandate, jobs, Artifact, canary and budget without duplicates. D-33 maintenance
   and trading now select only `automation_source=d33`, while D-34 selects only
-  `automation_source=d34`. The 10-cycle/5-trading-day soak remains open; this is
-  not live eligibility. See `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.
+  `automation_source=d34`. Durable failure acceptance covers Futu unavailable,
+  tampered job input, research timeout, Docker exit 137, and expired external-effect
+  leases without leaking a lease or duplicating work. The 10-cycle/5-trading-day
+  soak remains open; this is not live eligibility. See
+  `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.
+  The owner has standing authorization for normal reversible local development,
+  migrations, configuration, service/LaunchAgent restarts, tests, test data and
+  local commits; do not pause to request those actions again. Live trading,
+  automatic GitHub push and unrecoverable deletion remain outside that standing
+  authorization.
 - **Checkout role boundary:** development is allowed only in the primary HQA
   and Platform checkouts or purpose-named source worktrees under
   `/Users/sunyibo/programs/.worktrees/`. Both checkouts under

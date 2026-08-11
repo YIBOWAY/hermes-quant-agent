@@ -21,7 +21,9 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 ## 2. 不变边界
 
 - D-34 Artifact 永远是 `paper_only`，不能原地升级到 live；live 仍走全新的人工资格链。
-- 不自动 push GitHub，不自动 apply migration。
+- 不自动 push GitHub。无人值守 worker 不自动 apply migration；计划内的正常本地 migration、
+  配置、服务/LaunchAgent 重启、测试、测试数据和本地提交已有 owner standing authorization，
+  实施时直接执行，不再逐项暂停询问。
 - emergency stop 优先级最高；它停止新研究和新 paper 订单，但不伪造平仓。
 - paper 单 sleeve、总暴露、单标的、日配额、日亏与回撤限制始终生效。
 - D-33 保留为回退路径；切换或回滚默认 hold，不自动 flatten。
@@ -31,7 +33,7 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 - 两个本地 `main` 仍是唯一集成与 GitHub 发布基线；D-34 后续切片在
   `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
-- D-34 Platform 当前集成 tip 为 `31fd138`；主 checkout 与 runtime mirror 完全一致。
+- D-34 Platform 当前集成 tip 为 `0be9f32`；主 checkout 与 runtime mirror 完全一致。
   HQA 文档分支仅承载本记录。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
@@ -144,13 +146,18 @@ LaunchAgent 安装也不是 migration apply、启用态 provider smoke 或 paper
 
 ## 10. Source 验收证据
 
-- Platform 当前 `31fd138` + D-34 组合态：Python 3.11.15、显式 worktree `PYTHONPATH` 下全量
+- Platform `31fd138` + D-34 组合态：Python 3.11.15、显式 worktree `PYTHONPATH` 下全量
   `2985 passed, 259 skipped`；此前的最终 Docker-context delta 另以 D-34 API/runtime 定向集合
   `62 passed, 1 skipped` 验收。`95d908b` 的稳定 blocker delta 另以全部 `test_d34_*.py`
   `57 passed, 1 skipped`、preflight/env/LaunchAgent 相关 `23 passed` 和变更文件 Ruff 验收。
   `1df7c16` 的真实 safety-contract delta 以 D-34/API 定向 `64 passed, 1 skipped`、全量 Ruff、
   frontend typecheck/ESLint 与 Chromium D-34 E2E `1 passed` 验收。`ruff check src tests` 与
   `git diff --check` 均通过。
+- 当前 Platform tip `0be9f32` 的故障恢复 delta：全部非 PostgreSQL D-34 测试 `64 passed`，
+  PostgreSQL 030–032 authority/lease 集成 `2 passed`，变更文件 Ruff 与 `git diff --check`
+  通过。覆盖 Futu 不可用不入队、durable input digest 篡改时拒绝且释放 lease、研究容器
+  timeout 转 `outcome_unknown`、Docker exit 137 清理容器并持久化 returncode、外部效果开始后
+  lease 过期只结算一次且不再重新租赁。临时 PostgreSQL 测试库已删除。
 - HQA 与最新 main 的组合态全量：`2220 passed, 4 skipped, 0 failed`；恢复闭包 34 项定向测试
   通过。新增修复只接受 UV 管理根下、最终解析为同一 3.11 解释器且文件 digest 一致的
   minor alias；外部、内部跳转、越界、悬空和循环 symlink 仍 fail closed。
@@ -159,7 +166,8 @@ LaunchAgent 安装也不是 migration apply、启用态 provider smoke 或 paper
   `PW_E2E=1` 的 D-34 浏览器流程 `1 passed`，覆盖 Mandate 续期、比较数值、canary P&L/回撤、
   sleeve 现金/持仓、风险限额和 live 按钮缺失；生成类型已同步。
 - PostgreSQL：一次性隔离数据库从 001 顺序 apply 到 032，并以受限 runtime role 运行 D-34
-  authority 测试，`1 passed`；覆盖实际 order-batch policy append-only/幂等/跨 execution 身份与
+  authority 测试，当前 `2 passed`；覆盖实际 order-batch policy append-only/幂等/跨 execution 身份、
+  expired lease 的 durable `outcome_unknown` 与
   Artifact comparison 列表投影。临时数据库已删除，正式库没有改变。
 - Docker：镜像 `hqa-d34-rdagent-qlib:0.1.0` 从当前 Slice 0 source 重建，ID 为
   `sha256:de57c7561f636f1d16b7ff34815cff0ed52848993d0fc6657ccd3a5b724a7242`；
@@ -188,11 +196,15 @@ LaunchAgent 安装也不是 migration apply、启用态 provider smoke 或 paper
 - Emergency stop 真实开关验收：打开后 paper/research 同时 disabled，worker 返回
   `emergency_stop_active` 且不创建新工作；关闭后两者恢复，`live_execution_enabled` 全程为
   false。冷启动后的 `/zh/hermes` 真实浏览器重验无 HTTP 4xx/5xx 或 page error。
+- `0be9f32` 部署后手动运行正式 worker：返回 `d34_research_window_closed`，仍检查 1 个
+  running canary，零 signal、零 execution；数据库仍为 1 Mandate、2 jobs（1 succeeded、
+  1 outcome_unknown）、1 Artifact、1 canary、1 PolicyDecision，无重复。
 
 ## 11. 剩余运行验收
 
-- 至少 10 次完整自动周期、5 个交易日 canary；继续观察自然运行中的 Futu/LLM/Docker、
-  digest mismatch、重复运行与恢复事实。restart、emergency stop 与 outcome unknown 已验收。
+- 至少 10 次完整自动周期、5 个交易日 canary；继续观察自然运行中的重复运行与恢复事实。
+  Futu unavailable、digest mismatch、Docker timeout/OOM、expired lease、restart、emergency stop
+  与 outcome unknown 的有界失败行为已验收；自然发生的故障仍按真实记录保留。
 - 在完整观察窗结束时再次证明零重复订单/Artifact/预算消费，且无 live eligibility、无自动
   GitHub push；当前冷启动与重复 worker 快照已满足这些条件。
 - 达标后 D-34 成为新研究入口；D-33 只监控旧 sleeve 并保留一键回退。
