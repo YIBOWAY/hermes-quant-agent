@@ -31,8 +31,8 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 - 两个本地 `main` 仍是唯一集成与 GitHub 发布基线；D-34 后续切片在
   `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
-- D-34 Platform 修正截止 `2640dbc`，已 fast-forward 进本地 `main`；并行前端修正合入后，
-  当前主 checkout 与 runtime mirror 均为 `9f453c9`。HQA 文档分支仅承载本记录。
+- D-34 Platform 当前集成 tip 为 `31fd138`；主 checkout 与 runtime mirror 完全一致。
+  HQA 文档分支仅承载本记录。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
 - 2026-08-12 正式库已按 030 → 031 → 032 应用，runtime mirror 与主 checkout
@@ -129,9 +129,9 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
 | 0 开放 Docker + pins | 已复用 Hermes xAI OAuth，移除无实际使用的 embedding 依赖；真实 JSON/Qlib/Futu/Docker child smoke 通过 | `com.aiquant.hermes-oauth-proxy` 与 D-34 worker 已常驻 |
 | 1 纵向闭环 + 030–032 | 已实现 | 正式库 030–032 已顺序 apply，受限 runtime role 已验证 |
 | 2 snapshot/adapter/双引擎 | 已实现 | 真实 Futu snapshot、Qlib provider、Qlib 回测和 Platform replay 已运行 |
-| 3 Policy/worker/canary | 已实现 | Artifact `artifact-ca04678e7f6ce784878cbbc989507747` 通过比较并创建运行中 canary，额度 `9986.08` |
+| 3 Policy/worker/canary | 已实现 | Artifact `artifact-ca04678e7f6ce784878cbbc989507747` 通过比较并创建运行中 canary，额度 `9986.08`；D-33/D-34 维护与交易循环已按 `automation_source` 隔离 |
 | 4 `/hermes` 工作台 | 已实现，frontend production build 通过 | 已随 runtime 部署 |
-| 5 主用/回退 | 机制已实现 | 首个周期已完成；10 周期/5 交易日运行门尚未完成 |
+| 5 主用/回退 | 机制已实现 | 首个周期与完整冷启动已完成；10 周期/5 交易日运行门尚未完成 |
 
 既有 D-34 纵向实现已在 Platform `main`；本轮 Slice 0 在并行 AsiaRadar 合入后重排为：
 `79f968c` 加入启用态 preflight，`01bf05b` 修正 pinned RD-Agent env，`db2068f` 让 Platform
@@ -180,10 +180,19 @@ LaunchAgent 安装也不是 migration apply、启用态 provider smoke 或 paper
   `0.9999993722`、NAV 差 `0.507243 bps`、最大权重差 `11.743665 bps`，
   `exact_inputs=true` 且 accepted。首次坏 schema 已保留为 `outcome_unknown`；修复后
   retry 完成研究，并从 canary activation 的 float/Decimal 边界失败中幂等恢复。
+- 冷启动验收：标准 `local_mac_stack.sh stop` 停止 PostgreSQL 容器并卸载全部项目
+  LaunchAgent，随后 `start` 重新构建并加载 8 个任务；Mandate、2 个 job、1 个 Artifact、
+  1 个 canary、预算和 PolicyDecision 数量均未变化。重复 worker 仍为 2/1/1，零 signal、
+  零 execution。期间修复了 launchctl 已加载却返回 EIO 时 connector 安装提前中断，以及
+  D-33 把 D-34 sleeve 当成自身 lineage 的来源混淆；相关定向测试与 Ruff 通过。
+- Emergency stop 真实开关验收：打开后 paper/research 同时 disabled，worker 返回
+  `emergency_stop_active` 且不创建新工作；关闭后两者恢复，`live_execution_enabled` 全程为
+  false。冷启动后的 `/zh/hermes` 真实浏览器重验无 HTTP 4xx/5xx 或 page error。
 
 ## 11. 剩余运行验收
 
-- 至少 10 次完整自动周期、5 个交易日 canary；覆盖 restart、Futu/LLM/Docker 失败、digest
-  mismatch、emergency stop、重复运行与 outcome unknown。
-- 证明零重复订单/Artifact/预算消费，且无 live eligibility、无自动 GitHub push。
+- 至少 10 次完整自动周期、5 个交易日 canary；继续观察自然运行中的 Futu/LLM/Docker、
+  digest mismatch、重复运行与恢复事实。restart、emergency stop 与 outcome unknown 已验收。
+- 在完整观察窗结束时再次证明零重复订单/Artifact/预算消费，且无 live eligibility、无自动
+  GitHub push；当前冷启动与重复 worker 快照已满足这些条件。
 - 达标后 D-34 成为新研究入口；D-33 只监控旧 sleeve 并保留一键回退。
