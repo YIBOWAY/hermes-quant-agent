@@ -21,14 +21,15 @@ Rules for AI agents working in this repository.
   enabled it replaces Gate 1/2/3 with digest-bound machine policy for
   `paper_only` factors only. The manual Scene-B path and every live-trading,
   kill-switch, migration, and public-release boundary remain independent.
-- **D-34 source snapshot (2026-08-11):** the paired
-  `codex/d34-mandate-paper` worktrees passed cross-repo acceptance and were
-  fast-forwarded into both local `main` checkouts. D-34 replaces step-by-step owner
-  approval on its own paper path with one durable Mandate plus deterministic
-  data, budget, comparison, exposure, emergency-stop and recovery policies.
-  Migration 030–032 and its LaunchAgent remain source-only until a separate
-  migration/deployment window; the formal database and runtime have not been
-  changed. See `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.
+- **D-34 runtime snapshot (2026-08-12):** migration 030–032 are applied exactly
+  once after owner backup and isolated restore; the Platform runtime is
+  fast-forwarded to `2640dbc`. The enabled D-34 LaunchAgent reuses the installed
+  Hermes xAI OAuth session through the persistent local proxy on `127.0.0.1:8645`;
+  the research chain does not require a separate embedding provider. One real
+  Futu → Grok/RD-Agent → Qlib → Platform replay → Artifact → paper canary
+  cycle completed with exact-input comparison accepted and canary allocation
+  below 1% NAV. The 10-cycle/5-trading-day soak remains open; this is not live
+  eligibility. See `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.
 - **Checkout role boundary:** development is allowed only in the primary HQA
   and Platform checkouts or purpose-named source worktrees under
   `/Users/sunyibo/programs/.worktrees/`. Both checkouts under

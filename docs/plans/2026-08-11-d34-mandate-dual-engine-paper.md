@@ -31,13 +31,12 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 - 两个本地 `main` 仍是唯一集成与 GitHub 发布基线；D-34 后续切片在
   `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
-- 当前 Slice 0 分支为 `codex/d34-slice0-hqa` 与 `codex/d34-slice0-platform`；Platform 分支从
-  本地 `main` 起步，并已将并行进入 main 的 AsiaRadar `d69dc8a` 纳入组合验证；当前 source
-  tip 为 `1df7c16`。两个主 checkout 均未承载本轮 D-34 dirty，便于继续并行开发。
+- D-34 Platform 开发分支为 `codex/d34-slice0-platform`，已 fast-forward 进本地
+  `main@2640dbc` 和 runtime mirror；HQA 文档分支继续仅承载本记录。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
-- 在 migration 030–032 获得单独 apply 授权且 runtime fast-forward 之前，
-  不得把 source 测试通过写成“本机 D-34 已常驻运行”。
+- 2026-08-12 正式库已按 030 → 031 → 032 应用，runtime mirror 与主 checkout
+  SHA 一致；开发仍禁止直接在 runtime mirror 进行。
 
 ## 4. 正式契约与权威
 
@@ -123,16 +122,16 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
 差异、paper canary P&L/回撤、真实 sleeve 现金/持仓、风险限额与异常。UI 不提供 live 升级
 按钮，emergency stop 始终可见；持仓仍从 paper sleeve 权威读取，不复制到 Artifact Registry。
 
-## 9. 交付状态（2026-08-11 source snapshot）
+## 9. 交付状态（2026-08-12 runtime snapshot）
 
 | 切片 | Source 状态 | Runtime 状态 |
 |---|---|---|
-| 0 开放 Docker + pins | pinned RD-Agent env 契约、完整 runtime preflight、可离线重建镜像、versions、Qlib、Futu socket、Docker child smoke 已通过；真实 LLM/embedding round-trip 缺 owner provider 配置，明确 BLOCKED | runtime mirror 已 ff 到 `1df7c16`；disabled LaunchAgent 已安装并以 exit 0 报告 `enabled=false`，未启动研究或订单 |
-| 1 纵向闭环 + 030–032 | 已实现并通过一次性 PostgreSQL 001–032/最小权限测试 | 正式库未 apply |
-| 2 snapshot/adapter/双引擎 | 已实现；真实 Futu snapshot、Qlib provider、Qlib 回测和 Platform replay 闭环通过 | 未部署 |
-| 3 Policy/worker/canary | 已实现；含并发 lease、研究时窗、执行时 Policy 重验与 append-only 决策、崩溃安全 canary、P&L/回撤 pause、rollback 预算释放、Python 3.11 pin 和仓库 dirty 取证 | 未部署 |
-| 4 `/hermes` 工作台 | 已实现；双引擎数值、限额、P&L、真实 sleeve 现金/持仓均纳入显式浏览器 E2E，组件、类型、lint、build 通过 | 未部署 |
-| 5 主用/回退 | 机制已实现；10 周期/5 交易日运行门尚未开始 | 未切换 |
+| 0 开放 Docker + pins | 已复用 Hermes xAI OAuth，移除无实际使用的 embedding 依赖；真实 JSON/Qlib/Futu/Docker child smoke 通过 | `com.aiquant.hermes-oauth-proxy` 与 D-34 worker 已常驻 |
+| 1 纵向闭环 + 030–032 | 已实现 | 正式库 030–032 已顺序 apply，受限 runtime role 已验证 |
+| 2 snapshot/adapter/双引擎 | 已实现 | 真实 Futu snapshot、Qlib provider、Qlib 回测和 Platform replay 已运行 |
+| 3 Policy/worker/canary | 已实现 | Artifact `artifact-ca04678e7f6ce784878cbbc989507747` 通过比较并创建运行中 canary，额度 `9986.08` |
+| 4 `/hermes` 工作台 | 已实现，frontend production build 通过 | 已随 runtime 部署 |
+| 5 主用/回退 | 机制已实现 | 首个周期已完成；10 周期/5 交易日运行门尚未完成 |
 
 既有 D-34 纵向实现已在 Platform `main`；本轮 Slice 0 在并行 AsiaRadar 合入后重排为：
 `79f968c` 加入启用态 preflight，`01bf05b` 修正 pinned RD-Agent env，`db2068f` 让 Platform
@@ -176,22 +175,14 @@ LaunchAgent 安装也不是 migration apply、启用态 provider smoke 或 paper
   `0.9999974003`、NAV 差 `0.073594 bps`、最大权重差 `42.428420 bps`，comparison
   accepted。这里替代的只有 LLM proposal，用于验证数据/双引擎集成，不能冒充真实 LLM
   round-trip。
-- BLOCKED：当前没有 owner 配置的 D-34 LiteLLM chat/embedding 模型及 provider secret；
-  未发送伪请求，也没有挪用 Hermes OAuth。启用入口现在要求非空
-  `LITELLM_CHAT_MODEL`/`LITELLM_EMBEDDING_MODEL`，并拒绝会被 pinned RD-Agent settings 日志
-  展开的 `LITELLM_*` secret。当前真实 `d34 preflight` 以 exit 1 返回
-  `d34_env_file_required`；启用前必须用权限严格为 `0600` 且不是 symlink 的普通
-  `QS_D34_ENV_FILE` 完成真实 LLM JSON/embedding smoke。
+- Runtime 验收：Hermes xAI OAuth 代理的 `grok-4.5` 真实 JSON round-trip 通过，
+  D-34 不再需要单独 embedding provider。首个周期的 comparison 为 correlation
+  `0.9999993722`、NAV 差 `0.507243 bps`、最大权重差 `11.743665 bps`，
+  `exact_inputs=true` 且 accepted。首次坏 schema 已保留为 `outcome_unknown`；修复后
+  retry 完成研究，并从 canary activation 的 float/Decimal 边界失败中幂等恢复。
 
-## 11. Runtime 完成门
+## 11. 剩余运行验收
 
-- 两个本地 `main` 已合入，Platform runtime mirror 也已 fast-forward 到 `1df7c16`；下一步仍须
-  另行授权 apply 030–032。当前只安装了明确禁用的 D-34 LaunchAgent，不能算启用态部署。
-- 配置 owner-only LLM/embedding provider 并通过真实 round-trip；不得把确定性 proposal smoke
-  记作这一项通过。
-- `QS_D34_WORKER_ENABLED=true` 后先运行 `scripts/run_d34_worker.sh --check`；它必须同时证明
-  正式 D-34 authority、`live_execution_enabled=false`、pinned image、Qlib、LLM/embedding、Futu
-  与 Docker child，并持久化 `hqa.d34_preflight/v1` receipt 后才允许安装/重载 LaunchAgent。
 - 至少 10 次完整自动周期、5 个交易日 canary；覆盖 restart、Futu/LLM/Docker 失败、digest
   mismatch、emergency stop、重复运行与 outcome unknown。
 - 证明零重复订单/Artifact/预算消费，且无 live eligibility、无自动 GitHub push。
