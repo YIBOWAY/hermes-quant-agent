@@ -98,11 +98,15 @@ canary，再决定是否启动研究：
 5. 作业状态固定为
    `queued → leased → running → succeeded/rejected/outcome_unknown/cancelled`。
 6. job key、attempt、receipt、Artifact、canary 和预算消费均幂等；重启不得重复下单。
+7. 每个 Docker 子任务前后记录 Platform/HQA Git status 与 tracked diff；本次作业造成 dirty 时
+   写 durable anomaly，但不 reset、删除或自动提交。常驻 runner 只接受 Python 3.11。
 
 Mandate 的 `max_concurrent_jobs` 在数据库 lease 时锁定并计数。新 canary 先以
 `paused/awaiting_registry` 持久化，Registry 成功后才恢复执行。D-34 的 `top_k=1` 语义不套用
 D-33 的单 sleeve 40% 分散化限制；它仍受单 sleeve 1%、自动合计 10% 和账户级单标的 5%
-限制。D-33 与 D-34 都走 `paper-execution-policy/v2`。
+限制。D-33 与 D-34 都走 `paper-execution-policy/v2`。D-34 每个实际 accepted/rejected order
+batch 在订单变更前追加写入 `d34_policy_decisions`；同一 execution 幂等，不同 execution 即使
+输入相同也有独立审计记录。审计写入失败时订单保持 blocked。
 
 ## 8. 本地 owner 接口与工作台
 
@@ -111,8 +115,9 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
 `GET /api/hermes/artifacts` 合同保持兼容；D-34 专属血缘使用
 `GET /api/hermes/d34/artifacts`，再由工作台统一呈现。
 
-`/hermes` D-34 工作台显示 Mandate、预算、当前 job、Artifact 双引擎结论、paper canary、
-风险与异常。UI 不提供 live 升级按钮，emergency stop 始终可见。
+`/hermes` D-34 工作台显示 Mandate、预算、当前 job、Artifact 双引擎 correlation/NAV/weight
+差异、paper canary P&L/回撤、真实 sleeve 现金/持仓、风险限额与异常。UI 不提供 live 升级
+按钮，emergency stop 始终可见；持仓仍从 paper sleeve 权威读取，不复制到 Artifact Registry。
 
 ## 9. 交付状态（2026-08-11 source snapshot）
 
@@ -121,28 +126,31 @@ canary pause/demote、D-34 rollback、emergency stop 与 `/api/safety/effective/
 | 0 开放 Docker + pins | 固定镜像、versions、Qlib、Futu socket、Docker child smoke 已通过；真实 LLM/embedding round-trip 缺 owner provider 配置，明确 BLOCKED | 未安装 |
 | 1 纵向闭环 + 030–032 | 已实现并通过一次性 PostgreSQL 001–032/最小权限测试 | 正式库未 apply |
 | 2 snapshot/adapter/双引擎 | 已实现；真实 Futu snapshot、Qlib provider、Qlib 回测和 Platform replay 闭环通过 | 未部署 |
-| 3 Policy/worker/canary | 已实现；含并发 lease、研究时窗、执行时 Policy 重验、崩溃安全 canary、P&L/回撤 pause 和 rollback 预算释放 | 未部署 |
-| 4 `/hermes` 工作台 | 已实现；组件、类型、lint、build 与显式浏览器 E2E 通过 | 未部署 |
+| 3 Policy/worker/canary | 已实现；含并发 lease、研究时窗、执行时 Policy 重验与 append-only 决策、崩溃安全 canary、P&L/回撤 pause、rollback 预算释放、Python 3.11 pin 和仓库 dirty 取证 | 未部署 |
+| 4 `/hermes` 工作台 | 已实现；双引擎数值、限额、P&L、真实 sleeve 现金/持仓均纳入显式浏览器 E2E，组件、类型、lint、build 通过 | 未部署 |
 | 5 主用/回退 | 机制已实现；10 周期/5 交易日运行门尚未开始 | 未切换 |
 
-当前 Platform purpose worktree tip 为 `6452803`；纵向实现链为 `2eccfbc`、`049d522`、
-`8fe8164`、`7fa46aa`、测试夹具修复 `1bb31bc` 与 hardened delta `6452803`。HQA 的恢复验证
-兼容提交为 `ab977e9`。这些是 source 事实，不是 migration apply、LaunchAgent 安装或 paper
-订单运行证据。
+当前 Platform purpose worktree tip 为 `9251559`；纵向实现链为 `2eccfbc`、`049d522`、
+`8fe8164`、`7fa46aa`、测试夹具修复 `1bb31bc`、hardened delta `6452803` 与 source completion
+delta `9251559`。HQA 的恢复验证兼容提交为 `ab977e9`。这些是 source 事实，不是 migration
+apply、LaunchAgent 安装或 paper 订单运行证据。
 
 ## 10. Source 验收证据
 
 - Platform 当前 source：Python 3.11.15、显式 worktree `PYTHONPATH` 下全量
-  `2959 passed, 259 skipped`；D-34/unified-paper 定向集合 `76 passed`。并发 paper-account
+  `2961 passed, 259 skipped`（3220 collected）；D-34/unified-paper 定向集合此前 `76 passed`，
+  本轮新增的 runner/dirty/policy/UI 回归亦包含在全量中。并发 paper-account
   测试修正为显式 lifespan 后连续 `20 passed`；`ruff check src tests`、generated API type
   drift check 与 `git diff --check` 均通过。
 - HQA 全量：收集 2223 项，`2219 passed, 4 skipped, 0 failed`；恢复闭包 34 项定向测试
   通过。新增修复只接受 UV 管理根下、最终解析为同一 3.11 解释器且文件 digest 一致的
   minor alias；外部、内部跳转、越界、悬空和循环 symlink 仍 fail closed。
 - Frontend：Vitest `79 files / 480 tests`、typecheck、ESLint、Next production build 均通过；
-  `PW_E2E=1` 的 D-34 浏览器流程 `1 passed`，生成类型前后 digest 相同。
+  `PW_E2E=1` 的 D-34 浏览器流程 `1 passed`，覆盖 Mandate 续期、比较数值、canary P&L/回撤、
+  sleeve 现金/持仓、风险限额和 live 按钮缺失；生成类型已同步。
 - PostgreSQL：一次性隔离数据库从 001 顺序 apply 到 032，并以受限 runtime role 运行 D-34
-  authority 测试，`1 passed`；临时数据库已删除，正式库没有改变。
+  authority 测试，`1 passed`；覆盖实际 order-batch policy append-only/幂等/跨 execution 身份与
+  Artifact comparison 列表投影。临时数据库已删除，正式库没有改变。
 - Docker：镜像 `hqa-d34-rdagent-qlib:0.1.0` 的 ID 为
   `sha256:c0b84994192abba79b05fd7f4485e4c5c6c3de1a3996ba783ac4628f907239db`；
   固定 RD-Agent `274e274d5dbb72cc2ea139d1a7c93d73ce9b1198`、Qlib
