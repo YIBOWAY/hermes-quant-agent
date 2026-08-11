@@ -1,0 +1,80 @@
+<h2>Hermes Quant Agent v0.3：研究闭环架构</h2>
+<p class="subtitle">建议方向：稳定底座之上，构建“可复现研究 → 证据比较 → Paper 决策 → Hermes 解释”的单人量化工作台。</p>
+
+<div class="section">
+  <div class="label">核心数据流</div>
+  <div class="mockup">
+    <div class="mockup-header">所有输出都绑定输入快照、代码版本与证据摘要</div>
+    <div class="mockup-body">
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:stretch">
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+          <strong>① 研究输入</strong>
+          <p style="font-size:13px">行情快照<br>公司/新闻证据<br>研究假设<br>风险约束</p>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+          <strong>② 可复现实验</strong>
+          <p style="font-size:13px">因子计算<br>回测/Walk-forward<br>成本与容量<br>敏感性分析</p>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+          <strong>③ 研究登记册</strong>
+          <p style="font-size:13px">候选比较<br>失败实验保留<br>结论与谱系<br>复核状态</p>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+          <strong>④ Paper 决策</strong>
+          <p style="font-size:13px">观察清单<br>模拟组合<br>风险检查<br>事后归因</p>
+        </div>
+      </div>
+      <div style="text-align:center;margin:14px 0;color:var(--muted)">↓ 统一投影到 Hermes；Hermes 解释和编排，但不改变原始研究事实 ↓</div>
+      <div style="border:2px solid var(--accent);border-radius:12px;padding:16px;background:color-mix(in srgb,var(--accent) 8%,var(--surface))">
+        <strong>⑤ Hermes Research Workbench</strong>
+        <p style="font-size:13px;margin-bottom:0">今日研究队列 · 实验进度 · 证据与反证 · 候选比较 · Paper 风险 · 可恢复失败 · 操作审计</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">模块边界</div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-body"><h3>Research Run</h3><p>一次不可变的研究运行：输入快照、参数、代码 SHA、环境、输出 digest。</p></div>
+    </div>
+    <div class="card">
+      <div class="card-body"><h3>Evidence Ledger</h3><p>保存支持与反对证据、失败原因、过期时间；不让失败实验“消失”。</p></div>
+    </div>
+    <div class="card">
+      <div class="card-body"><h3>Candidate Registry</h3><p>跨实验比较候选因子/策略，只有满足门槛者进入 paper 观察。</p></div>
+    </div>
+    <div class="card">
+      <div class="card-body"><h3>Paper Decision Journal</h3><p>记录建议、风险检查、模拟结果与复盘；不连接真实 broker。</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">v0.3 建议切片</div>
+  <ol>
+    <li><strong>V3.1 运行稳定性：</strong>健康快照、任务状态机、幂等恢复、升级前检查。</li>
+    <li><strong>V3.2 研究运行契约：</strong>数据快照、代码/环境身份、内容寻址输出。</li>
+    <li><strong>V3.3 因子实验台：</strong>标准化实验、基准比较、成本/容量、walk-forward。</li>
+    <li><strong>V3.4 证据与候选登记册：</strong>反证、失败保留、晋级规则、谱系查询。</li>
+    <li><strong>V3.5 Paper 决策闭环：</strong>观察清单、模拟组合、风险检查、事后归因。</li>
+    <li><strong>V3.6 Hermes 工作台：</strong>统一队列、实验详情、比较视图、失败恢复入口。</li>
+    <li><strong>V3.7 有界自动化：</strong>日收盘/周复盘任务，默认只读，预算与超时硬限制。</li>
+    <li><strong>V3.8 评测与发布：</strong>固定 fixtures、回归基线、可解释性检查、sealed evidence。</li>
+  </ol>
+</div>
+
+<div class="pros-cons">
+  <div class="pros"><h4>为什么这样设计</h4><ul><li>研究事实与聊天展示解耦</li><li>每个结果都能复现和追溯</li><li>失败可恢复，不靠无限 agent 循环</li><li>Paper-only 安全边界清晰</li></ul></div>
+  <div class="cons"><h4>明确不做</h4><ul><li>真实 broker 下单</li><li>公网/多用户访问</li><li>无证据自动晋级策略</li><li>无限 token 或无限重试任务</li></ul></div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve-architecture" onclick="toggleSelect(this)">
+    <div class="letter">✓</div><div class="content"><h3>认可这套架构</h3><p>继续展开 Hermes 工作台的具体页面与交互。</p></div>
+  </div>
+  <div class="option" data-choice="revise-architecture" onclick="toggleSelect(this)">
+    <div class="letter">↺</div><div class="content"><h3>需要调整</h3><p>在终端中告诉我希望增删或调整优先级的部分。</p></div>
+  </div>
+</div>

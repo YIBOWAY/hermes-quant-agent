@@ -1,0 +1,94 @@
+<h2>/hermes 工作台 v4：消除四项冲突</h2>
+<p class="subtitle">本版遵守 F2、D-31、Slice 0–8 和 spec §6.2：宽主舞台、单一全局侧栏、轻量 Hermes 页内导航、诚实的事件状态；不把未来合同伪装成现有能力。</p>
+
+<div class="section">
+  <div class="label">平台外壳（既有，不新增第二侧栏）</div>
+  <div class="mockup">
+    <div class="mockup-header">全局平台 Sidebar 仍是唯一重量级侧栏 · Hermes 只是其中一个入口</div>
+    <div class="mockup-body">
+      <div style="display:grid;grid-template-columns:210px minmax(0,1fr);gap:14px;min-height:600px">
+        <aside style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface)">
+          <strong>全局平台导航</strong>
+          <div style="margin-top:14px;padding:8px">Research</div>
+          <div style="padding:8px;border-radius:8px;background:color-mix(in srgb,var(--accent) 12%,var(--surface))">Hermes</div>
+          <div style="padding:8px">Paper</div>
+          <div style="padding:8px">Options</div>
+          <div style="padding:8px">Markets / AI News</div>
+          <div style="padding:8px">Settings</div>
+          <small style="display:block;margin-top:18px;color:var(--muted)">这是现有共享 Sidebar，<br>不是 Hermes 本地导航。</small>
+        </aside>
+
+        <main style="min-width:0;display:flex;flex-direction:column;gap:12px">
+          <nav style="display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding:4px 0 10px">
+            <span style="padding:7px 12px;border-radius:7px;background:color-mix(in srgb,var(--accent) 12%,var(--surface))">今日</span>
+            <span style="padding:7px 12px">对话</span><span style="padding:7px 12px">任务</span><span style="padding:7px 12px">待我确认</span><span style="padding:7px 12px">结果</span>
+          </nav>
+
+          <div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface)">
+            <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><strong>安全与注意事项</strong><small>Kill switch ON · Live OFF · Release closed</small></div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,.72fr);gap:12px">
+            <section style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+              <strong>研究对话与任务</strong>
+              <p style="font-size:13px"><strong>你：</strong>分析候选 A 的已有证据，并创建新的研究任务。</p>
+              <p style="font-size:13px"><strong>Hermes：</strong>任务已提交。当前权威状态：<em>running</em>；最近事件：<em>run_observed</em>（10:42）。</p>
+              <div style="padding:10px;border:1px dashed var(--border);border-radius:8px;font-size:12px">
+                <strong>任务 hqa-1842</strong><br>
+                运行中 · 最近事件 10:42 · 尚无可计算的完成比例<br>
+                <span style="color:var(--muted)">不显示 3/5、百分比或虚构里程碑。</span>
+              </div>
+            </section>
+            <section style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+              <strong>单项候选证据</strong>
+              <p style="font-size:12px">Candidate ref / manifest digest / Gate 状态 / 已链接结果。</p>
+              <p style="font-size:12px;color:var(--muted)">跨市场状态、交易成本排名和自动晋级尚无合同，因此不展示比较表。</p>
+              <button class="mock-button">查看现有证据</button>
+            </section>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+            <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)"><strong>待我确认</strong><p style="font-size:12px">只显示已有权威 approval 状态。Hermetic seam 必须标记“模拟”，不冒充 live write。</p></div>
+            <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)"><strong>结果与谱系</strong><p style="font-size:12px">展示 individual result links、candidate provenance 和分层 stop receipt。</p></div>
+          </div>
+
+          <div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface)">
+            <strong>值守 / 恢复（底部条）</strong>
+            <span style="font-size:12px;margin-left:12px">无常驻右栏；需要详情时打开抽屉，不挤压主舞台。</span>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros"><h4>当前可真实呈现</h4><ul><li>Task / Attempt / Run 生命周期状态</li><li>cursor-paged 事件与最近事件</li><li>单项 candidate provenance 和 digest</li><li>结果链接、审批状态、分层 stop receipt</li><li>明确的未知、未对账和空状态</li></ul></div>
+  <div class="cons"><h4>先做合同，暂不展示</h4><ul><li>百分比与 completed/total 进度</li><li>任务 token/cost/time 预算</li><li>跨 regime / 成本候选比较</li><li>自动排名与晋级</li><li>生产 live approval / stop 写操作</li></ul></div>
+</div>
+
+<div class="section">
+  <div class="label">页面迁移是独立决策，不随布局批准</div>
+  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
+    <div style="border:1px solid var(--border);border-radius:9px;padding:12px"><strong>1 Expand</strong><p style="font-size:12px">新增 Hermes read-only 表面；旧页面保留。</p></div>
+    <div style="border:1px solid var(--border);border-radius:9px;padding:12px"><strong>2 Parity</strong><p style="font-size:12px">逐页证明读、写、深链、异步、取消和交接 parity。</p></div>
+    <div style="border:1px solid var(--border);border-radius:9px;padding:12px"><strong>3 Cutover</strong><p style="font-size:12px">书面批准后，单页软重定向；独立 rollback。</p></div>
+    <div style="border:1px solid var(--border);border-radius:9px;padding:12px"><strong>4 Contract</strong><p style="font-size:12px">观察期通过后才物理删除。</p></div>
+  </div>
+  <p style="font-size:13px"><code>legacyRedirects=false</code> 继续保持。顺序：Agent Studio → Factor Lab → Experiments → Backtester；Backtester 最后。</p>
+</div>
+
+<div class="section">
+  <div class="label">断点规则</div>
+  <ul>
+    <li>1440：Hermes 页面可用主内容目标 ≥1100px；无永久 288px 右栏。</li>
+    <li>1280：一个强主栏；不保留挤压式双/三栏。</li>
+    <li>768：纵向堆叠，Hermes 轻量导航转紧凑 tabs。</li>
+    <li>390：完全堆叠；抽屉按需覆盖，不机械缩放桌面网格。</li>
+  </ul>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve-conflict-free-layout" onclick="toggleSelect(this)"><div class="letter">✓</div><div class="content"><h3>认可冲突修正版</h3><p>以此为 UI 边界，继续定义合同、安全门和测试。</p></div></div>
+  <div class="option" data-choice="revise-conflict-free-layout" onclick="toggleSelect(this)"><div class="letter">↺</div><div class="content"><h3>继续调整</h3><p>请指出仍与既有拍板冲突或信息层级不合适之处。</p></div></div>
+</div>

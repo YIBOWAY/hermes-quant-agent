@@ -1,0 +1,80 @@
+<h2>/hermes 统一工作台：推荐布局</h2>
+<p class="subtitle">延续 Kimi 的 Direction A 思路，但把研究、证据、Paper 与恢复能力收敛为一个“对话驱动、任务可见、证据可展开”的工作空间。</p>
+
+<div class="mockup">
+  <div class="mockup-header">Hermes · Today / Research Workspace</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:220px minmax(420px,1fr) minmax(300px,0.72fr);gap:14px;min-height:560px">
+      <aside style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface)">
+        <strong>Hermes</strong>
+        <div style="margin-top:14px;padding:9px;border-radius:8px;background:color-mix(in srgb,var(--accent) 12%,var(--surface))">今日</div>
+        <div style="padding:9px">对话与任务　<span style="float:right">4</span></div>
+        <div style="padding:9px">研究记录</div>
+        <div style="padding:9px">Paper 观察</div>
+        <div style="padding:9px">运行与恢复　<span style="color:#b7791f;float:right">1</span></div>
+        <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+        <div class="label">安全状态</div>
+        <p style="font-size:12px;line-height:1.7">● Kill switch ON<br>● Live trading OFF<br>● Release closed<br>● Connector healthy</p>
+      </aside>
+
+      <main style="display:flex;flex-direction:column;gap:12px">
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+          <div style="display:flex;justify-content:space-between;gap:12px"><strong>研究对话</strong><small style="color:var(--muted)">绑定会话与 Research Run</small></div>
+          <p style="font-size:13px"><strong>你：</strong>比较这三个候选因子在不同市场状态下的稳定性，并检查交易成本。</p>
+          <p style="font-size:13px"><strong>Hermes：</strong>我会派生三个不可变运行，共享同一数据快照。预算 12 分钟，失败不会自动无限重试。</p>
+          <div style="display:flex;gap:8px"><input class="mock-input" style="flex:1" placeholder="继续提问或创建研究任务"><button class="mock-button">发送</button></div>
+        </div>
+
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+          <div style="display:flex;justify-content:space-between"><strong>活动任务</strong><span style="color:var(--accent)">3 / 4 完成</span></div>
+          <div style="height:8px;border-radius:99px;background:var(--border);margin:10px 0"><div style="width:75%;height:100%;border-radius:99px;background:var(--accent)"></div></div>
+          <small>快照 ✓　计算 ✓　成本 ✓　状态分层 …　证据封存</small>
+          <div style="margin-top:10px;display:flex;gap:8px"><button class="mock-button">查看日志</button><button class="mock-button">暂停</button><button class="mock-button">保留结果并停止</button></div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          <div style="border:2px solid var(--accent);border-radius:10px;padding:12px;background:var(--surface)"><strong>候选 A</strong><p style="font-size:12px">稳定性较高<br>成本后仍为正<br>容量中等</p><small>建议：Paper 观察</small></div>
+          <div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface)"><strong>候选 B</strong><p style="font-size:12px">牛市依赖明显<br>换手偏高<br>反证 2 条</p><small>建议：补充实验</small></div>
+          <div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface)"><strong>候选 C</strong><p style="font-size:12px">成本后失效<br>小样本敏感<br>失败已保留</p><small>建议：停止</small></div>
+        </div>
+      </main>
+
+      <section style="display:flex;flex-direction:column;gap:12px">
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+          <div class="label">当前选中 · 候选 A</div>
+          <h3 style="margin-top:6px">证据与限制</h3>
+          <p style="font-size:12px;line-height:1.7">✓ 3 个市场状态保持正向<br>✓ 成本敏感性通过<br>△ 2022 回撤期表现较弱<br>✕ 小盘容量不足</p>
+          <button class="mock-button">展开完整谱系</button>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+          <div class="label">可执行动作</div>
+          <p style="font-size:12px">动作只创建新状态，不覆盖历史结果。</p>
+          <button class="mock-button" style="display:block;width:100%;margin:6px 0">加入 Paper 观察</button>
+          <button class="mock-button" style="display:block;width:100%;margin:6px 0">派生反证实验</button>
+          <button class="mock-button" style="display:block;width:100%;margin:6px 0">生成研究摘要</button>
+        </div>
+        <div style="border:1px solid #b7791f;border-radius:10px;padding:14px;background:color-mix(in srgb,#b7791f 8%,var(--surface))">
+          <div class="label">恢复中心</div>
+          <p style="font-size:12px">1 个任务因数据超时暂停。已保留输入与中间证据。</p>
+          <button class="mock-button">检查后重试</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">响应式与交互原则</div>
+  <ul>
+    <li><strong>桌面：</strong>左导航、中工作区、右证据抽屉三栏；右侧可折叠。</li>
+    <li><strong>窄屏：</strong>单栏对话与任务流，证据/动作使用底部抽屉，不缩成不可读三栏。</li>
+    <li><strong>任务状态：</strong>queued → running → needs_input / paused / failed_recoverable → completed / cancelled；无隐形后台无限循环。</li>
+    <li><strong>写操作：</strong>创建派生 Run、加入 Paper 观察等都显示影响范围并保留审计；绝不触发真实交易。</li>
+    <li><strong>错误：</strong>错误卡必须说明已保存内容、失败阶段、可否重试、下一步；不使用“出错了”式空信息。</li>
+  </ul>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve-workbench-layout" onclick="toggleSelect(this)"><div class="letter">✓</div><div class="content"><h3>认可三栏工作台</h3><p>继续定义数据契约、安全门、测试和验收标准。</p></div></div>
+  <div class="option" data-choice="revise-workbench-layout" onclick="toggleSelect(this)"><div class="letter">↺</div><div class="content"><h3>调整布局</h3><p>请说明导航、中间工作区或右侧证据区应如何变化。</p></div></div>
+</div>

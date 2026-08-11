@@ -1,0 +1,72 @@
+<h2>修正版：因子实验不是独立界面</h2>
+<p class="subtitle">你的约束正确：删除独立“因子实验台”等量化功能页面，所有研究能力统一并入 <code>/hermes</code>。因子实验是 Hermes 内的一种任务与结果视图，不是新的一级产品入口。</p>
+
+<div class="section">
+  <div class="label">修正后的信息架构</div>
+  <div class="mockup">
+    <div class="mockup-header">唯一主入口：/hermes</div>
+    <div class="mockup-body">
+      <div style="display:grid;grid-template-columns:210px 1fr;gap:14px;min-height:430px">
+        <div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface)">
+          <strong>Hermes</strong>
+          <div style="margin-top:14px;padding:9px;border-radius:8px;background:color-mix(in srgb,var(--accent) 12%,var(--surface))">今日</div>
+          <div style="padding:9px">对话与研究任务</div>
+          <div style="padding:9px">研究记录</div>
+          <div style="padding:9px">Paper 观察</div>
+          <div style="padding:9px">运行与恢复</div>
+          <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+          <small style="color:var(--muted)">不再存在独立：<br>因子实验台 / 候选页 / 回测页 / 研究控制台</small>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+            <strong>与 Hermes 对话</strong>
+            <p style="font-size:13px">“对 000001 做一个可复现的量价因子实验，和沪深300基准比较，加入交易成本和 walk-forward。”</p>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+            <div style="display:flex;justify-content:space-between"><strong>研究任务 · 量价因子实验</strong><span style="color:var(--accent)">运行中 3/5</span></div>
+            <div style="height:8px;border-radius:99px;background:var(--border);margin:12px 0"><div style="width:60%;height:100%;border-radius:99px;background:var(--accent)"></div></div>
+            <small>输入快照 ✓　因子计算 ✓　成本评估 ✓　Walk-forward …　证据封存</small>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)"><strong>结果卡片</strong><p style="font-size:13px">收益、回撤、稳定性、容量、失败区间；点击在当前工作区展开证据。</p></div>
+            <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)"><strong>Hermes 解释</strong><p style="font-size:13px">解释结果和限制，引用不可变 Research Run；不改写底层事实。</p></div>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+            <strong>建议下一步</strong>
+            <p style="font-size:13px">加入 Paper 观察 · 运行反证实验 · 修改参数后派生新 Run · 暂停并保留失败证据</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">路由收敛规则</div>
+  <ul>
+    <li>原量化/因子/回测/候选研究页面从主导航删除，并最终删除路由与组件。</li>
+    <li>原页面能力被重构为 <code>/hermes</code> 内的任务类型、结果卡片和详情面板。</li>
+    <li>深链接统一为 <code>/hermes?run=&lt;id&gt;</code>、<code>/hermes?candidate=&lt;id&gt;</code> 等工作区状态，不恢复独立产品页面。</li>
+    <li>旧 URL 在一个兼容窗口内重定向到相应 Hermes 实体；遥测确认无调用后删除重定向。</li>
+    <li>后端 Research Run / Evidence Ledger 仍是独立领域模块；“统一入口”不意味着把业务逻辑塞进聊天组件。</li>
+  </ul>
+</div>
+
+<div class="section">
+  <div class="label">修正后的 v0.3 切片命名</div>
+  <ol>
+    <li><strong>V3.1 运行稳定性</strong></li>
+    <li><strong>V3.2 研究运行契约</strong></li>
+    <li><strong>V3.3 Hermes 内嵌实验任务</strong> — 无独立“因子实验台”页面</li>
+    <li><strong>V3.4 Hermes 内嵌证据与候选比较</strong></li>
+    <li><strong>V3.5 Hermes 内嵌 Paper 决策闭环</strong></li>
+    <li><strong>V3.6 旧量化页面退役与路由迁移</strong></li>
+    <li><strong>V3.7 有界研究自动化</strong></li>
+    <li><strong>V3.8 评测与发布</strong></li>
+  </ol>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve-hermes-consolidation" onclick="toggleSelect(this)"><div class="letter">✓</div><div class="content"><h3>认可统一到 /hermes</h3><p>按此边界继续设计 Hermes 工作台布局和迁移策略。</p></div></div>
+  <div class="option" data-choice="revise-hermes-consolidation" onclick="toggleSelect(this)"><div class="letter">↺</div><div class="content"><h3>还需调整</h3><p>请在终端说明哪些旧页面应保留或如何呈现。</p></div></div>
+</div>
