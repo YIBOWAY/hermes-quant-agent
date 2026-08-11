@@ -22,9 +22,10 @@ Rules for AI agents working in this repository.
   `paper_only` factors only. The manual Scene-B path and every live-trading,
   kill-switch, migration, and public-release boundary remain independent.
 - **D-34 runtime snapshot (2026-08-12):** migration 030–032 are applied exactly
-  once after owner backup and isolated restore; the Platform runtime is
-  fast-forwarded to `2640dbc`. The enabled D-34 LaunchAgent reuses the installed
-  Hermes xAI OAuth session through the persistent local proxy on `127.0.0.1:8645`;
+  once after owner backup and isolated restore; D-34 fixes through `2640dbc`
+  are integrated in the current Platform runtime at `9f453c9`. The enabled D-34
+  LaunchAgent reuses the installed Hermes xAI OAuth session through the persistent
+  local proxy on `127.0.0.1:8645`;
   the research chain does not require a separate embedding provider. One real
   Futu → Grok/RD-Agent → Qlib → Platform replay → Artifact → paper canary
   cycle completed with exact-input comparison accepted and canary allocation

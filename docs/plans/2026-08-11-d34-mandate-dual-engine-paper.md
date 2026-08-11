@@ -31,8 +31,8 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 - 两个本地 `main` 仍是唯一集成与 GitHub 发布基线；D-34 后续切片在
   `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
-- D-34 Platform 开发分支为 `codex/d34-slice0-platform`，已 fast-forward 进本地
-  `main@2640dbc` 和 runtime mirror；HQA 文档分支继续仅承载本记录。
+- D-34 Platform 修正截止 `2640dbc`，已 fast-forward 进本地 `main`；并行前端修正合入后，
+  当前主 checkout 与 runtime mirror 均为 `9f453c9`。HQA 文档分支仅承载本记录。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
 - 2026-08-12 正式库已按 030 → 031 → 032 应用，runtime mirror 与主 checkout
