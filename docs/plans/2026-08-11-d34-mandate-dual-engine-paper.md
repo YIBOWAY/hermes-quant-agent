@@ -33,8 +33,8 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 - 两个本地 `main` 仍是唯一集成与 GitHub 发布基线；D-34 后续切片在
   `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
-- D-34 Platform 当前集成 tip 为 `237b4b4`；主 checkout 与 runtime mirror 完全一致。
-  HQA 文档分支仅承载本记录。
+- D-34 Platform 当前集成 tip 为 `95bbfd0`，HQA 为 `9496c7a`；两个主 checkout 与各自
+  runtime mirror 完全一致。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
 - 2026-08-12 正式库已按 030 → 031 → 032 应用，runtime mirror 与主 checkout
@@ -244,6 +244,11 @@ signal/execution journal、预算/暴露、paper-only 与 `live=false` 绑定到
 2026-08-12 用正式 authority 运行的当前 receipt 为 `accepted=false`，唯一 blocker 是
 `d34_time_gate_not_ready`；DB 六类 identity、D-34 signal/execution、pending/corrupt journal 均
 零重复/零残留，预算 `10/100`、paper exposure `0.9999194%`、全量 paper-only 且 `live=false`。
+Platform 受影响的非 PostgreSQL D-34/D-33 相关集合 `111 passed`，新增 routing/acceptance/API
+集合 `12 passed`；HQA CLI/quant seam `28 passed, 1 skipped`。frontend typecheck、targeted
+ESLint、production build 与 Chromium D-34 E2E `1 passed`。首次 runtime build 暴露既有
+OpenAPI generator 未原子截断旧输出、导致 response alias 重复；Platform `95bbfd0` 改为临时
+文件生成后原子替换，并加唯一性回归，正式 stack build 随后通过。
 
 当前 soak 进度仍为完整自动周期 `1/10`、canary 观察日 `1/5`。2026-08-12 首个自然交易信号
 因上述已修复的冻结账户误拦截没有形成 execution，不计作成交验收；下一交易日继续从不可变
