@@ -23,7 +23,7 @@ Rules for AI agents working in this repository.
   kill-switch, migration, and public-release boundary remain independent.
 - **D-34 runtime snapshot (2026-08-12):** migration 030–032 are applied exactly
   once after owner backup and isolated restore; the current Platform runtime is
-  `66c171e`. The enabled D-34
+  `5c7e8d4`. The enabled D-34
   LaunchAgent reuses the installed Hermes xAI OAuth session through the persistent
   local proxy on `127.0.0.1:8645`;
   the research chain does not require a separate embedding provider. One real
@@ -37,7 +37,7 @@ Rules for AI agents working in this repository.
   leases without leaking a lease or duplicating work. The 10-cycle/5-trading-day
   soak remains open at 1/10 cycles and 1/5 observation days; the first natural
   signal exposed and retained an `account_frozen` failure before order creation.
-  `66c171e` includes the `2db9bdf` scoped frozen-account authority fix and now
+  `5c7e8d4` includes the `2db9bdf` scoped frozen-account authority fix and now
   projects the durable 10-cycle/5-observation-day time gate through effective
   safety and `/hermes`; unchanged intraday P&L records at most one observation
   per Shanghai date. It permits the shared frozen paper account only through
@@ -54,6 +54,8 @@ Rules for AI agents working in this repository.
   D-34 signal, even when each batch has a distinct execution identity.
   It compares every durable D-34 sleeve factor identity with the actual live
   registry and rejects either an intersection or a missing factor identity.
+  It also requires the PostgreSQL canary `(sleeve_id, artifact_id)` links to
+  exactly equal the durable local D-34 sleeve links.
   D-34 rollback restores D-33 intake in the same owner operation without an env
   edit or restart. This is not live eligibility. See
   `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.
