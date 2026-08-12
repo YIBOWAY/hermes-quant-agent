@@ -33,7 +33,7 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 - 两个本地 `main` 仍是唯一集成与 GitHub 发布基线；D-34 后续切片在
   `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
-- D-34 Platform 当前集成 tip 为 `9d75eb7`；HQA 的 D-34 功能 tip 为 `9496c7a`，其后只有
+- D-34 Platform 当前集成 tip 为 `66c171e`；HQA 的 D-34 功能 tip 为 `9496c7a`，其后只有
   本计划与运行口径的 docs-only receipts。两个主 checkout 与各自 runtime mirror 完全一致。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
@@ -262,3 +262,8 @@ OpenAPI generator 未原子截断旧输出、导致 response alias 重复；Plat
 Platform `9d75eb7` 补齐最终“零重复订单”语义：除了 execution_id 唯一性，还按
 `(sleeve_id, signal_id)` 检查每个 D-34 signal 只能生成一个 execution/order batch。正式 journals
 当前 `duplicate_order_batches=0`；唯一 blocker 仍是自然 `10/5` 时间门。
+
+Platform `66c171e` 不再用 `live=false` 代替资格隔离证据：final acceptance 会从正式 D-34
+sleeve 读取 factor_id，与实际 `build_factor_registry(purpose="live")` 输出对照，并在身份缺失或
+存在交集时拒绝 cutover。当前正式值为 `missing_factor_ids=0`、
+`live_registry_factor_matches=0`。
