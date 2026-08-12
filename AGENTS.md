@@ -21,48 +21,17 @@ Rules for AI agents working in this repository.
   enabled it replaces Gate 1/2/3 with digest-bound machine policy for
   `paper_only` factors only. The manual Scene-B path and every live-trading,
   kill-switch, migration, and public-release boundary remain independent.
-- **D-34 runtime snapshot (2026-08-12):** migration 030–032 are applied exactly
-  once after owner backup and isolated restore; the current Platform runtime is
-  `a15eb44`. The enabled D-34
-  LaunchAgent reuses the installed Hermes xAI OAuth session through the persistent
-  local proxy on `127.0.0.1:8645`;
-  the research chain does not require a separate embedding provider. One real
-  Futu → Grok/RD-Agent → Qlib → Platform replay → Artifact → paper canary
-  cycle completed with exact-input comparison accepted and canary allocation
-  below 1% NAV. A full Docker/database/LaunchAgent cold restart preserved the
-  Mandate, jobs, Artifact, canary and budget without duplicates. D-33 maintenance
-  and trading now select only `automation_source=d33`, while D-34 selects only
-  `automation_source=d34`. Durable failure acceptance covers Futu unavailable,
-  tampered job input, research timeout, Docker exit 137, and expired external-effect
-  leases without leaking a lease or duplicating work. The 10-cycle/5-trading-day
-  soak remains open at 1/10 cycles and 1/5 observation days; the first natural
-  signal exposed and retained an `account_frozen` failure before order creation.
-  `a15eb44` includes the `2db9bdf` scoped frozen-account authority fix and now
-  projects the durable 10-cycle/5-observation-day time gate through effective
-  safety and `/hermes`; unchanged intraday P&L records at most one observation
-  per Shanghai date. It permits the shared frozen paper account only through
-  current active-Mandate D-34 `paper_only` authority while leaving the account
-  kill switch true; the next natural trading window remains required runtime
-  evidence. Default-research cutover is now digest-bound but inactive: `10/5`
-  only opens a final zero-duplicate/no-live acceptance receipt, after which the
-  local routing receipt can stop new D-33 intake while D-33 maintenance continues.
-  Cutover re-audits the current acceptance facts immediately before persisting
-  routing and rejects a previously accepted receipt if those facts drifted.
-  Research-window admission and cycle-date derivation both use Asia/Shanghai,
-  so an early-morning run cannot enqueue the previous UTC date.
-  Final acceptance also rejects multiple execution/order batches linked to one
-  D-34 signal, even when each batch has a distinct execution identity.
-  It compares every durable D-34 sleeve factor identity with the actual live
-  registry and rejects either an intersection or a missing factor identity.
-  It also requires the PostgreSQL canary `(sleeve_id, artifact_id)` links to
-  exactly equal the durable local D-34 sleeve links.
-  Artifact/Policy lineage matches owner, workspace, Mandate, subject, outcome,
-  policy digest and comparison input digest rather than trusting only IDs.
-  The immutable `hqa.d34_artifact/v1` document is field-for-field checked
-  against its Artifact authority columns before cutover.
-  D-34 rollback restores D-33 intake in the same owner operation without an env
-  edit or restart. This is not live eligibility. See
-  `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.
+- **D-34 runtime boundary (2026-08-12):** migration 030–032 were applied once
+  after backup/isolated restore; the enabled worker uses the persistent Hermes
+  xAI OAuth proxy and completed one real Futu → RD-Agent/Qlib → Platform replay
+  → Artifact → paper-canary cycle. Source, recovery, cold-start, paper-only and
+  final-acceptance mechanisms are implemented. Natural soak remains `1/10`
+  complete cycles and `1/5` observation days, so D-33 remains the default new
+  research entry while both D-33 and D-34 maintain their own sleeves. Never
+  fabricate observations or cut over early. Final cutover requires the exact
+  zero-duplicate/no-live receipt and revalidates current facts; rollback restores
+  D-33 intake without flattening. The authoritative evidence and remaining gate
+  are in `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.
   The owner has standing authorization for normal reversible local development,
   migrations, configuration, service/LaunchAgent restarts, tests, test data and
   local commits; do not pause to request those actions again. Live trading,
@@ -85,9 +54,9 @@ Rules for AI agents working in this repository.
   approved paper-automation implementation and acceptance record is
   `docs/plans/2026-08-10-full-automation-paper-path.md`; its operator contract is
   `docs/runbooks/full-automation-paper.md`.
-  D-34's current source implementation plan is
+  D-34's implementation, runtime evidence and open soak gate are recorded in
   `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`; it does not supersede
-  D-32 public Web Chat work and is not runtime acceptance evidence.
+  D-32 public Web Chat work or authorize live eligibility.
   `docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md` is the
   predecessor Wave 3 delivery record and blocker input, not an active queue;
   the full 9H record is also completed historical delivery evidence.

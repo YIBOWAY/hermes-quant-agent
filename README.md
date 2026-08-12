@@ -1,12 +1,10 @@
 # Hermes-quant-agent
 
-Hermes orchestration layer for the local `ai-quant-platform`. Phase 1a-4/9H is
-complete; D-32 targets a real Agent v0.2 Web Chat, while D-33 provides a
-source-default-OFF, local-only path from verified paper intake through machine policy,
-final backtest, `paper_only` promotion, bounded sleeve activation, and resident
-paper execution. The inspected owner runtime enabled all four flags on
-2026-08-10 after full acceptance; live eligibility and every real order remain
-human-only.
+Hermes orchestration layer for the local `ai-quant-platform`. D-32 owns the
+local Agent v0.2 Web Chat line, D-33 owns verified automatic `paper_only`
+factor intake, and D-34 owns the Mandate-driven Futu → RD-Agent/Qlib → Platform
+replay → Artifact/Policy → paper-canary loop. Automated paths stop at paper;
+live qualification and live orders always remain human-controlled.
 
 ## Normal local operation
 
@@ -20,78 +18,29 @@ bash scripts/local_mac_stack.sh start
 bash scripts/local_mac_stack.sh status
 ```
 
-Hermes official source is pinned at `2446c8bb6755`; the live integration is
-`codex/v2-live-integration@a4bac87463fd` (including bounded macOS cold-start
-socket-drain hardening). Use only
-`~/.hermes/scripts/hqa-hermes-update.sh check|apply` for future updates. Local
-trust reports `admission_mode=local_trust` without candidate identity; it
-simplifies the single-user identity step only. D-33 automation additionally
-requires both HQA and Platform Flag pairs and can create only `paper_only`
-qualifications; it does not relax `live_trading_enabled=false`,
-`kill_switch=true`, migrations, manual live gates, or public-release controls.
-See [`docs/runbooks/full-automation-paper.md`](docs/runbooks/full-automation-paper.md).
+Use only `~/.hermes/scripts/hqa-hermes-update.sh check|apply` for controlled
+Hermes updates. Local trust simplifies the single-user identity ceremony; it
+does not relax paper limits, migrations, live gates, the kill switch, or public
+release controls.
 
-Start with [`docs/README.md`](docs/README.md): it separates the long-term HQA
-roadmap, the current D-32 Agent v0.2 plan, and predecessor delivery records. The
-`docs/superpowers/plans/2026-07-10-phase-1a-4-v2.md` delivery record covers Slice 9A's paper-strategy
-read model and explicit crash recovery, Slice 9B's unified paper snapshot,
-Slice 9C's current-snapshot portfolio risk v1, Slice 9D's strict historical
-price seam + risk v2, Slice 9E's prediction ledger, Slice 9F's proposal-only
-market foresight, the mini 9H read-only Hermes artifact shelf, and Slice 9G's
-auditable opportunity ledger. Full 9H adds the four-job
-read-only automation loop, strict weekly/opportunity/freshness projections,
-durable notification receipts, feed schema 1.1 and the visible `/hermes` cards.
-D-31 has since delivered the official API GET-only session BFF (3A), PostgreSQL
-command/event/outbox/run-link ledger with claim/lease/heartbeat primitives (3B),
-and a deterministic connector notify/scan/expired-lease reconcile runtime (3C).
-The runtime does not claim queued commands and remains reconcile-only. Agent v0.2
-V2 now has an independently accepted and pushed durable Run/approval/provider-evidence
-source candidate at Hermes integration `codex/v2-live-integration@2eb5fa27790f`.
-It is not the live runtime: the 2026-07-19 process is upstream
-`main@c0c76a471533` (PID `96807`, health `0.18.2`), while launchd and the install
-stamp are stale, the stamp still names `916f5fbf5452`, and
-`gateway/durable_runs.py` is absent. Durable runs, real Web submission,
-claim/dispatch and approval mutations therefore remain OFF. Slice 3C.1 has a
-code-accepted append-only Task/Attempt
-authority, immutable content-addressed payloads, exact cross-authority bindings,
-and reverse audit. Platform migration 006 has not been applied to the live database;
-a later v0.2 review found its `UNIQUE(task_id)` incompatible with multi-Attempt
-research. Because the current runner replays old SQL, the selected fix is to revise
-the never-live 006 and redo its full evidence—not assume a later 007 can repair it—
-before any live authorization.
-Slice V0 (interface/cardinality/authority freeze) is source/formal **DONE**. The five
-`hqa/agent_workspace_*` contract modules and exact three-repo source coordinates are
-bound to a fail-closed runtime identity manifest, fresh JUnit evidence and an independent
-`CLEAR` verdict in the
-[`V0/V2 release closure audit`](docs/audits/2026-07-19-v0-v2-release-closure.md).
-That verdict explicitly says `release_authorized=false`; the
-[2026-07-17 cross-review](docs/audits/2026-07-17-v0-three-repo-cross-review.md) remains
-historical evidence. All live write gates remain OFF.
-V1's startup migration/DLP/schema-fingerprint baseline is code-accepted with fresh
-platform full-suite and browser evidence; live DB role/RLS provisioning remains PARTIAL
-(`quant` is still superuser/bypassrls and migration 006 is absent). V2 source is accepted
-and pushed, but the live Hermes runtime is still upstream `main@c0c76a471533`, not the
-candidate; Durable Run and every public write gate remain OFF. V3 is source-accepted and
-locally installed in dark mode at HQA `121926388d86`: encrypted intent payloads,
-multi-Attempt WorkflowAuthority, read-only Hermes research inspection and a unique local
-`--no-agent` retention job are delivered. The current V3 acceptance is
-[`docs/audits/2026-07-19-agent-v0-2-v3-acceptance.md`](docs/audits/2026-07-19-agent-v0-2-v3-acceptance.md).
-This is internal infrastructure, not a usable `/hermes` composer. Hermes updates remain
-operator-controlled and periodic/manual; the no-agent watcher reports drift but never
-pulls, merges, installs, restarts or enables a gate. The upstream Hermes 40k full suite
-is not an Agent v0.2 release gate.
-This foundation is not yet an activated write path. The read-only Unified Results catalog and details are
-delivered and locally accepted as 3E-A, while independent Hermes Run results and
-full results cutover are not. Agent Studio has only a reversible page-scoped
-redirect mechanism that defaults off; exact-bound audit parity, user cutover
-approval, and retirement of all four legacy research pages remain open. The only
-active implementation plan is [Agent v0.2 full `/hermes` Web Chat](docs/superpowers/plans/2026-07-16-agent-v0-2-full-hermes-web-chat.md);
-the [Wave 3 plan](docs/superpowers/plans/2026-07-15-d31-wave3-official-api-bff.md)
-is a predecessor delivery record. Read both it and the accepted
-[local Hermes integration decision](docs/design/2026-07-15-local-hermes-integration-decision.md)
-for evidence before changing the bridge. Discord stays usable, but no temporary
-web chat or fallback path is planned. The platform frontend plan is the Slice 0-8 delivery
-record, not an executable queue. Platform Phase 15 is reference only.
+The 2026-08-12 D-34 runtime has migrations 030–032 applied exactly once, a
+persistent worker and Hermes xAI OAuth proxy, one accepted dual-engine Artifact,
+and one active low-allocation paper canary. Implementation and recovery checks
+are complete; the natural cutover gate is still `1/10` complete cycles and
+`1/5` canary observation days. Until `10/10 + 5/5` and the final zero-duplicate,
+no-live acceptance receipt pass, D-33 remains the default new-research entry.
+
+Start with [`docs/README.md`](docs/README.md). D-33 operation is documented in
+[`docs/runbooks/full-automation-paper.md`](docs/runbooks/full-automation-paper.md);
+D-34 implementation, runtime evidence, remaining acceptance, and rollback are
+tracked in
+[`docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`](docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md).
+The Platform-side owner guide and operations commands live in
+[`docs/guides/d34-workbench.md`](https://github.com/YIBOWAY/ai-quant-platform/blob/main/docs/guides/d34-workbench.md)
+and
+[`docs/runbooks/d34-autonomous-paper.md`](https://github.com/YIBOWAY/ai-quant-platform/blob/main/docs/runbooks/d34-autonomous-paper.md).
+Historical Phase, Wave, and V0–V8 documents remain delivery evidence, not the
+current operations queue.
 
 - **Safety watchdog** (`hqa.doctor_watchdog`) — `[SILENT]`; JSON-first safety
   parse; splits `[INFRA]` (doctor/platform failure) vs `[SAFETY]` (baseline
