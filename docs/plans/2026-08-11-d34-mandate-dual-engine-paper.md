@@ -33,7 +33,7 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 - 两个本地 `main` 仍是唯一集成与 GitHub 发布基线；D-34 后续切片在
   `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
-- D-34 Platform 当前集成 tip 为 `5f27492`；HQA 的 D-34 功能 tip 为 `9496c7a`，其后只有
+- D-34 Platform 当前集成 tip 为 `d3f5294`；HQA 的 D-34 功能 tip 为 `9496c7a`，其后只有
   本计划与运行口径的 docs-only receipts。两个主 checkout 与各自 runtime mirror 完全一致。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
@@ -254,3 +254,7 @@ OpenAPI generator 未原子截断旧输出、导致 response alias 重复；Plat
 当前 soak 进度仍为完整自动周期 `1/10`、canary 观察日 `1/5`。2026-08-12 首个自然交易信号
 因上述已修复的冻结账户误拦截没有形成 execution，不计作成交验收；下一交易日继续从不可变
 历史向前验证，不补写或删除该信号。
+
+同日 `no_queued_job` 是 `cycle:上海日期:hypothesis:N` 的幂等结果。Platform `d3f5294` 将
+默认 cycle date 与研究窗口统一绑定 Asia/Shanghai，修复上海已过 06:00、UTC 仍为前一日时
+错误生成前一天 job key 的问题；D-34 测试集合与部署后 LaunchAgent one-shot 均通过。
