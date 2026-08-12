@@ -281,3 +281,23 @@ owner、workspace、Mandate、subject、outcome、policy digest 以及
 Platform `a15eb44` 进一步逐字段核对不可变 `hqa.d34_artifact/v1` 文档与 Artifact 权威列，
 覆盖 job/Mandate、全部 digest/commit、PolicyDecision 和 `paper_only` scope；生命周期
 status/version 不属于该不可变文档。正式 `artifact_document_mismatches=0`。
+
+## 12. 按目标逐项完成审计（2026-08-12）
+
+| 目标要求 | 当前权威证据 | 判定 |
+|---|---|---|
+| Platform/HQA 双仓实现 | 两个主 checkout 与各自 runtime mirror 已线性对齐，D-34 功能均已合入 `main`；Section 10 的双仓全量与定向测试通过 | 已完成 |
+| migration 030–032 | 正式库按 030 → 031 → 032 单次应用；受限 runtime role 与隔离全链测试通过；worker/startup 均拒绝 auto-migrate | 已完成 |
+| Futu snapshot | 正式闭环使用 4 标的、27 交易日、108 行 Parquet，snapshot digest 与 provider receipt 均已持久化，无静默 fallback | 已完成 |
+| RD-Agent/Qlib Docker | 固定 RD-Agent/Qlib commit、Python 3.11.15 与 image digest；开放式 Docker、真实 LLM JSON、Qlib、Futu 与 child smoke 通过 | 已完成 |
+| Platform 独立重放与比较 | 同一 snapshot/目标权重下生成独立成交、费用、持仓、风险、NAV receipt；正式 comparison 满足三项阈值 | 已完成 |
+| Artifact/Policy/canary | 正式 Artifact、PolicyDecision 与真实 paper canary 已创建；文档、lineage、Registry/sleeve 链接 mismatch 均为 0 | 已完成 |
+| durable job 与恢复 | 正式保留 1 succeeded + 1 outcome_unknown；lease、timeout/OOM、digest mismatch、terminal recovery 与幂等预算均已验收 | 已完成 |
+| 独立 LaunchAgent | `com.aiquant.d34-worker` 关闭终端后按间隔运行；当前累计 66 次、最近退出码 0，标准冷启动后恢复 | 已完成 |
+| `/hermes` 工作台 | Mandate、预算、job、Artifact comparison、canary、sleeve、风险、soak 与 rollback 已接线；production build 和 Chromium E2E 通过 | 已完成 |
+| D-33 回退与切换门 | 当前默认仍为 D-33，intake/maintenance 均启用；用未达标 receipt 实际调用 cutover 被 `d34_research_cutover_not_qualified` 拒绝，`data/d34` 哈希不变 | 机制已完成，等待切换 |
+| 不自动 push / 不自动 migration / live 人工 | D-34 worker 无 push/migration 路径，runtime `auto_migrate=false`；final receipt 的 live registry overlap 为 0 且 `live_execution_enabled=false` | 已完成 |
+| 最终运行门 | 正式完整周期 `1/10`、canary 观察日 `1/5`；当前 acceptance 唯一 blocker 为 `d34_time_gate_not_ready` | **未完成，继续自然 soak** |
+
+只有最后一行完成后才可生成 `accepted=true` receipt、执行 D-34 默认入口切换并做 D-33
+一键回退终验；不得以手工补写 observation、重复历史 job 或放宽阈值替代自然运行证据。
