@@ -33,7 +33,7 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 - 两个本地 `main` 仍是唯一集成与 GitHub 发布基线；D-34 后续切片在
   `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
-- D-34 Platform 当前集成 tip 为 `5c7e8d4`；HQA 的 D-34 功能 tip 为 `9496c7a`，其后只有
+- D-34 Platform 当前集成 tip 为 `106715c`；HQA 的 D-34 功能 tip 为 `9496c7a`，其后只有
   本计划与运行口径的 docs-only receipts。两个主 checkout 与各自 runtime mirror 完全一致。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
@@ -272,3 +272,8 @@ Platform `5c7e8d4` 将 PostgreSQL canary 和本地 durable sleeve 的
 `(sleeve_id, artifact_id)` 精确链接同时写入 final receipt；缺失、多余或错配均拒绝切换。当前
 正式两侧均为 `sleeve-d34-9b7b87fcdb2be30d7efd →
 artifact-ca04678e7f6ce784878cbbc989507747`。
+
+Platform `106715c` 将 Artifact/Policy lineage 从“decision ID + outcome”扩展为精确核对
+owner、workspace、Mandate、subject、outcome、policy digest 以及
+`decision.input_digest == artifact.comparison_digest`。正式
+`artifact_policy_lineage_mismatches=0`。
