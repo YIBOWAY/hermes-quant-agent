@@ -474,3 +474,17 @@ def run_factor_automation_maintain(
         cwd=cwd,
         merge_stderr=False,
     )
+
+
+def run_d34_research_routing(
+    *,
+    bin_path: Optional[Path] = None,
+    cwd: Optional[Path] = None,
+) -> tuple[int, str]:
+    """Read the qualified D-34/D-33 research-entry projection."""
+    return _run(
+        ["d34", "research-routing"],
+        bin_path=bin_path,
+        cwd=cwd,
+        merge_stderr=False,
+    )

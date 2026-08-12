@@ -485,6 +485,7 @@ def test_run_factor_automation_authority_and_sleeve_bind_full_lineage(monkeypatc
         provider="futu",
     )
     quant_cli.run_factor_automation_maintain()
+    quant_cli.run_d34_research_routing()
 
     assert calls[0][:4] == [
         "agent",
@@ -507,6 +508,7 @@ def test_run_factor_automation_authority_and_sleeve_bind_full_lineage(monkeypatc
         "futu",
     ]
     assert calls[2] == ["agent", "factor-automation-maintain"]
+    assert calls[3] == ["d34", "research-routing"]
 
 
 def test_run_experiment_config_default_provider_is_futu(monkeypatch):

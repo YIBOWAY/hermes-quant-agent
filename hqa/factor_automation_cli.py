@@ -153,6 +153,12 @@ def enqueue_request(request_file: Path) -> dict[str, Any]:
     mode, auto_land = _flags_enabled()
     if not mode or not auto_land:
         raise FactorAutomationDriverError("factor_automation_disabled")
+    routing = _d34_research_routing()
+    if routing["d33_new_intake_enabled"] is not True:
+        reason_codes = routing["reason_codes"]
+        if "emergency_stop_active" in reason_codes:
+            raise FactorAutomationDriverError("d33_new_intake_disabled_by_emergency_stop")
+        raise FactorAutomationDriverError("d33_new_intake_disabled_by_d34")
     document = _read_request(request_file)
     request, _base_commit = parse_request(document)
     validate_factor_automation_request(request)
@@ -207,6 +213,23 @@ def _flags_enabled() -> tuple[bool, bool]:
     )
 
 
+def _d34_research_routing() -> dict[str, Any]:
+    code, output = quant_cli.run_d34_research_routing()
+    routing = factor_repro.parse_json_payload(output)
+    if (
+        code != 0
+        or not isinstance(routing, dict)
+        or routing.get("contract") != "hqa.d34_research_routing/v1"
+        or routing.get("default_research_entry") not in {"d33", "d34"}
+        or type(routing.get("d33_new_intake_enabled")) is not bool
+        or type(routing.get("d33_maintenance_enabled")) is not bool
+        or not isinstance(routing.get("reason_codes"), list)
+        or not all(type(item) is str for item in routing["reason_codes"])
+    ):
+        raise FactorAutomationDriverError("d34_research_routing_unavailable")
+    return routing
+
+
 def run_once() -> dict[str, Any]:
     mode, auto_land = _flags_enabled()
     if not mode or not auto_land:
@@ -219,11 +242,24 @@ def run_once() -> dict[str, Any]:
         or maintenance.get("state") != "maintained"
     ):
         raise FactorAutomationDriverError("platform_maintenance_failed")
+    routing = _d34_research_routing()
     queue = config.FACTOR_AUTOMATION_QUEUE_DIR
+    if queue.exists() and (queue.is_symlink() or not queue.is_dir()):
+        raise FactorAutomationDriverError("queue_unsafe")
+    if routing["d33_new_intake_enabled"] is not True:
+        queued = (
+            len([path for path in queue.glob("*.json") if path.is_file()])
+            if queue.exists()
+            else 0
+        )
+        return {
+            "state": "maintenance_only",
+            "queued": queued,
+            "maintenance": maintenance,
+            "routing": routing,
+        }
     if not queue.exists():
         return {"state": "idle", "queued": 0, "maintenance": maintenance}
-    if queue.is_symlink() or not queue.is_dir():
-        raise FactorAutomationDriverError("queue_unsafe")
     requests = sorted(path for path in queue.glob("*.json") if path.is_file())
     if not requests:
         return {"state": "idle", "queued": 0, "maintenance": maintenance}

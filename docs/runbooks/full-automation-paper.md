@@ -59,6 +59,14 @@ request 必须是严格 schema `hqa.factor_automation_request/v1`，包含：
 内容冲突。driver 串行消费，每次只取一项；成功结果写入 owner-private run artifact，失败
 保留可恢复事实，不凭模型 prose 宣告成功。
 
+每次 enqueue 和每轮 queue 消费还会读取 Platform 的只读
+`hqa.d34_research_routing/v1`。D-34 的 `10` 个完整周期与 `5` 个观察日只形成时间门；只有随后
+的最终零重复/零 live eligibility receipt 通过显式本机 cutover，D-34 才成为默认新研究入口。
+此时新的 D-33 enqueue 返回 `d33_new_intake_disabled_by_d34`，已有 queue 保持原样且不消费；
+driver 仍先运行 `factor-automation-maintain`，所以旧 D-33 sleeve 的估值、pause/quarantine 和
+paper cycle 不会停止。routing authority 不可读取时，新 D-33 intake 失败并给出
+`d34_research_routing_unavailable`，维护结果仍保留可见。
+
 ## 4. 机器 Gate 与资格隔离
 
 - Gate 1：精确源码 digest + `auto:` note；
@@ -109,6 +117,10 @@ tail -n 50 data/_runtime/logs/factor-automation.launchd.err.log
 driver 会报告 disabled，不继续自动 mutation；已有 paper 持仓不会因此假装消失。需要拆除
 某个因子时走 audited demote，默认 hold。Git 冲突、unknown outcome 或失败队列必须保留
 原 artifact 后按精确 ID 恢复，禁止删除证据后重跑。
+
+D-34 rollback 会在暂停 Mandate、取消 queued D-34 job 和 hold D-34 canary 的同一次 owner
+操作里，把默认研究入口恢复为 D-33。下一次 enqueue 立即重新可用，不需要改四个 Flag、编辑
+env 或重启 LaunchAgent；D-34 以后重新达标时仍需一份新的最终验收 receipt 才能再次 cutover。
 
 ## 9. 2026-08-10 本机验收快照
 

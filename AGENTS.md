@@ -43,7 +43,11 @@ Rules for AI agents working in this repository.
   per Shanghai date. It permits the shared frozen paper account only through
   current active-Mandate D-34 `paper_only` authority while leaving the account
   kill switch true; the next natural trading window remains required runtime
-  evidence. This is not live eligibility. See
+  evidence. Default-research cutover is now digest-bound but inactive: `10/5`
+  only opens a final zero-duplicate/no-live acceptance receipt, after which the
+  local routing receipt can stop new D-33 intake while D-33 maintenance continues.
+  D-34 rollback restores D-33 intake in the same owner operation without an env
+  edit or restart. This is not live eligibility. See
   `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.
   The owner has standing authorization for normal reversible local development,
   migrations, configuration, service/LaunchAgent restarts, tests, test data and

@@ -235,6 +235,16 @@ LaunchAgent 安装也不是 migration apply、启用态 provider smoke 或 paper
   GitHub push；当前冷启动与重复 worker 快照已满足这些条件。
 - 达标后 D-34 成为新研究入口；D-33 只监控旧 sleeve 并保留一键回退。
 
+默认入口切换的 source 机制已经实现但尚未激活。Platform 的只读
+`d34 final-acceptance` 会把时间门、jobs/Artifacts/canaries/policy/budget 去重、D-34
+signal/execution journal、预算/暴露、paper-only 与 `live=false` 绑定到 owner-only receipt；
+`d34 research-cutover` 只接受匹配且 `accepted=true` 的精确 digest。HQA D-33 driver 在每轮
+维护旧 sleeve 后读取 routing projection：D-34 为默认时拒绝新 enqueue、暂停 queue 消费，
+但不停止维护。D-34 rollback 同步把 routing receipt 恢复为 D-33，因此无需改 env 或重启。
+2026-08-12 用正式 authority 运行的当前 receipt 为 `accepted=false`，唯一 blocker 是
+`d34_time_gate_not_ready`；DB 六类 identity、D-34 signal/execution、pending/corrupt journal 均
+零重复/零残留，预算 `10/100`、paper exposure `0.9999194%`、全量 paper-only 且 `live=false`。
+
 当前 soak 进度仍为完整自动周期 `1/10`、canary 观察日 `1/5`。2026-08-12 首个自然交易信号
 因上述已修复的冻结账户误拦截没有形成 execution，不计作成交验收；下一交易日继续从不可变
 历史向前验证，不补写或删除该信号。

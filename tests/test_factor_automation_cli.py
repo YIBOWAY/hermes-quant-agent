@@ -36,6 +36,23 @@ def _request(source: Path) -> dict:
     }
 
 
+def _routing(default: str = "d33") -> tuple[int, str]:
+    return (
+        0,
+        json.dumps(
+            {
+                "contract": "hqa.d34_research_routing/v1",
+                "default_research_entry": default,
+                "d33_new_intake_enabled": default == "d33",
+                "d33_maintenance_enabled": True,
+                "reason_codes": ["d34_final_acceptance_recorded"]
+                if default == "d34"
+                else ["d34_time_gate_pending"],
+            }
+        ),
+    )
+
+
 def test_run_once_flags_off_is_read_only(tmp_path: Path, monkeypatch, capsys) -> None:
     queue = tmp_path / "queue"
     queue.mkdir()
@@ -65,6 +82,11 @@ def test_enqueue_stages_exact_source_and_writes_one_idempotent_request(
     monkeypatch.setattr(cli.config, "FACTOR_AUTOMATION_QUEUE_DIR", queue)
     monkeypatch.setenv("HQA_FACTOR_AUTOMATION_MODE", "true")
     monkeypatch.setenv("HQA_FACTOR_AUTOMATION_AUTO_LAND", "true")
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_d34_research_routing",
+        _routing,
+    )
 
     assert cli.main(["enqueue", "--request-file", str(request_file)]) == 0
     first = json.loads(capsys.readouterr().out)
@@ -93,6 +115,32 @@ def test_enqueue_flags_off_writes_nothing(tmp_path: Path, monkeypatch, capsys) -
 
     assert cli.main(["enqueue", "--request-file", str(request_file)]) == 1
     assert json.loads(capsys.readouterr().out)["code"] == "factor_automation_disabled"
+    assert not queue.exists()
+
+
+def test_enqueue_rejects_new_d33_candidate_when_d34_is_default(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    queue = tmp_path / "queue"
+    request_file = tmp_path / "request.json"
+    request_file.write_text(
+        json.dumps(_request(tmp_path / "generated-factor.py")),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli.config, "FACTOR_AUTOMATION_QUEUE_DIR", queue)
+    monkeypatch.setenv("HQA_FACTOR_AUTOMATION_MODE", "true")
+    monkeypatch.setenv("HQA_FACTOR_AUTOMATION_AUTO_LAND", "true")
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_d34_research_routing",
+        lambda: _routing("d34"),
+        raising=False,
+    )
+
+    assert cli.main(["enqueue", "--request-file", str(request_file)]) == 1
+    assert json.loads(capsys.readouterr().out)["code"] == "d33_new_intake_disabled_by_d34"
     assert not queue.exists()
 
 
@@ -128,6 +176,11 @@ def test_run_once_enabled_maintains_sleeves_even_when_queue_is_empty(
             '{"checked":2,"paused":1,"quarantined":0,"state":"maintained"}\n',
         ),
     )
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_d34_research_routing",
+        _routing,
+    )
 
     result = cli.run_once()
 
@@ -141,3 +194,39 @@ def test_run_once_enabled_maintains_sleeves_even_when_queue_is_empty(
             "quarantined": 0,
         },
     }
+
+
+def test_run_once_d34_default_keeps_d33_maintenance_and_pauses_queue(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    request = _request(tmp_path / "factor.py")
+    queued = queue / "request.json"
+    queued.write_text(json.dumps(request), encoding="utf-8")
+    monkeypatch.setattr(cli.config, "FACTOR_AUTOMATION_QUEUE_DIR", queue)
+    monkeypatch.setattr(cli.config, "FACTOR_AUTOMATION_RUN_DIR", tmp_path / "runs")
+    monkeypatch.setenv("HQA_FACTOR_AUTOMATION_MODE", "true")
+    monkeypatch.setenv("HQA_FACTOR_AUTOMATION_AUTO_LAND", "true")
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_factor_automation_maintain",
+        lambda: (
+            0,
+            '{"checked":2,"paused":0,"quarantined":0,"state":"maintained"}\n',
+        ),
+    )
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_d34_research_routing",
+        lambda: _routing("d34"),
+    )
+
+    result = cli.run_once()
+
+    assert result["state"] == "maintenance_only"
+    assert result["queued"] == 1
+    assert result["maintenance"]["checked"] == 2
+    assert queued.exists()
+    assert not (tmp_path / "runs").exists()
