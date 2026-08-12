@@ -33,7 +33,7 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 - 两个本地 `main` 仍是唯一集成与 GitHub 发布基线；D-34 后续切片在
   `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
-- D-34 Platform 当前集成 tip 为 `2db9bdf`；主 checkout 与 runtime mirror 完全一致。
+- D-34 Platform 当前集成 tip 为 `237b4b4`；主 checkout 与 runtime mirror 完全一致。
   HQA 文档分支仅承载本记录。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
@@ -215,6 +215,16 @@ LaunchAgent 安装也不是 migration apply、启用态 provider smoke 或 paper
   1 canary、1 PolicyDecision、4 budget events，正式 sleeve 仍只有原始 1 条失败信号。因此它
   证明部署代码与真实 Futu/authority 的修复路径可用，但不冒充下一交易日自然成交或 soak
   进度。
+- Platform `237b4b4` 把最终时间门收敛为现有 effective-safety 深模块上的只读 `soak`
+  投影：成功周期只统计同一 active Mandate 下完整的
+  `succeeded job → paper_only Artifact → canary` 血缘；观察日按上海时区周二至周六的 durable
+  canary observation 去重。Registry 即使 P&L/回撤不变也每天保留一条 observation，同日
+  5 分钟重试不重复；无需 migration。正式 API 与 `/zh/hermes` 当前均显示 `1/10`、`1/5`、
+  `time_gate_ready=false`，正式 canary events 仍为 1 条 running + 1 条 observed。后端相关
+  集合合计 `112 passed, 2 skipped`（其中真实 PostgreSQL authority `2 passed`），变更文件
+  Ruff、frontend 定向 Vitest `2 passed`、typecheck、ESLint、production build 和 Chromium
+  工作台 E2E `1 passed`。部署时首次重载在 Hermes OAuth proxy 遇到 launchctl EIO；定位后
+  仅重装 proxy 与 backend/frontend，最终 Docker、8 个 LaunchAgent 和 5 个端点全部健康。
 
 ## 11. 剩余运行验收
 
