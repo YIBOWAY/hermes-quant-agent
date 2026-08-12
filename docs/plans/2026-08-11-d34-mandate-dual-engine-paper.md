@@ -208,6 +208,13 @@ LaunchAgent 安装也不是 migration apply、启用态 provider smoke 或 paper
   以及无当前 authority 时仍为 `account_frozen`；变更文件 Ruff 与 `git diff --check` 通过。
   source、主 checkout、runtime 已 fast-forward 到 `2db9bdf`，worker `--check` 和本机 stack
   health 全部通过。当天信号不重写，下一交易日的自然信号/成交才计入真实运行验收。
+- 另以 runtime mirror 的 Python 3.11 和实际部署模块、正式只读 Mandate/safety context、真实
+  Futu 行情，在临时 paper 账本上重放同一 Artifact：`IWM=0.99` 信号无 blocker，创建 1 个
+  Policy 允许的 next-open plan 并填充 1 笔，结束后临时账户的 `kill_switch` 仍为 true。该探针
+  注入内存 audit recorder 且使用临时账本，正式库仍为 1 Mandate、2 jobs、1 Artifact、
+  1 canary、1 PolicyDecision、4 budget events，正式 sleeve 仍只有原始 1 条失败信号。因此它
+  证明部署代码与真实 Futu/authority 的修复路径可用，但不冒充下一交易日自然成交或 soak
+  进度。
 
 ## 11. 剩余运行验收
 
