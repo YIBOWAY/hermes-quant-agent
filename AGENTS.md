@@ -23,7 +23,7 @@ Rules for AI agents working in this repository.
   kill-switch, migration, and public-release boundary remain independent.
 - **D-34 runtime snapshot (2026-08-12):** migration 030–032 are applied exactly
   once after owner backup and isolated restore; the current Platform runtime is
-  `95bbfd0`. The enabled D-34
+  `5f27492`. The enabled D-34
   LaunchAgent reuses the installed Hermes xAI OAuth session through the persistent
   local proxy on `127.0.0.1:8645`;
   the research chain does not require a separate embedding provider. One real
@@ -37,7 +37,7 @@ Rules for AI agents working in this repository.
   leases without leaking a lease or duplicating work. The 10-cycle/5-trading-day
   soak remains open at 1/10 cycles and 1/5 observation days; the first natural
   signal exposed and retained an `account_frozen` failure before order creation.
-  `95bbfd0` includes the `2db9bdf` scoped frozen-account authority fix and now
+  `5f27492` includes the `2db9bdf` scoped frozen-account authority fix and now
   projects the durable 10-cycle/5-observation-day time gate through effective
   safety and `/hermes`; unchanged intraday P&L records at most one observation
   per Shanghai date. It permits the shared frozen paper account only through
@@ -46,6 +46,8 @@ Rules for AI agents working in this repository.
   evidence. Default-research cutover is now digest-bound but inactive: `10/5`
   only opens a final zero-duplicate/no-live acceptance receipt, after which the
   local routing receipt can stop new D-33 intake while D-33 maintenance continues.
+  Cutover re-audits the current acceptance facts immediately before persisting
+  routing and rejects a previously accepted receipt if those facts drifted.
   D-34 rollback restores D-33 intake in the same owner operation without an env
   edit or restart. This is not live eligibility. See
   `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.

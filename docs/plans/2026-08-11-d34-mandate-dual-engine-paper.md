@@ -33,7 +33,7 @@ paper 限额、emergency stop、审计和恢复所需的约束。
 - 两个本地 `main` 仍是唯一集成与 GitHub 发布基线；D-34 后续切片在
   `/Users/sunyibo/programs/.worktrees/d34/{Hermes-quant-agent,ai-quant-platform}` 的
   purpose worktree 上开发，按 Slice 验收后再 fast-forward 合回 `main`。
-- D-34 Platform 当前集成 tip 为 `95bbfd0`，HQA 为 `9496c7a`；两个主 checkout 与各自
+- D-34 Platform 当前集成 tip 为 `5f27492`，HQA 为 `9496c7a`；两个主 checkout 与各自
   runtime mirror 完全一致。
 - AsiaRadar 的 runtime WIP 未被 D-34 合并、清理或提交。
 - `data/_runtime/agent-v02-work/*` 仍是部署镜像，只允许 fetch/fast-forward；禁止直接开发。
@@ -238,7 +238,8 @@ LaunchAgent 安装也不是 migration apply、启用态 provider smoke 或 paper
 默认入口切换的 source 机制已经实现但尚未激活。Platform 的只读
 `d34 final-acceptance` 会把时间门、jobs/Artifacts/canaries/policy/budget 去重、D-34
 signal/execution journal、预算/暴露、paper-only 与 `live=false` 绑定到 owner-only receipt；
-`d34 research-cutover` 只接受匹配且 `accepted=true` 的精确 digest。HQA D-33 driver 在每轮
+`d34 research-cutover` 只接受匹配且 `accepted=true` 的精确 digest，并在写 routing 前重新
+读取正式 authority 与 paper journal；任一已接受事实漂移都会拒绝旧 receipt。HQA D-33 driver 在每轮
 维护旧 sleeve 后读取 routing projection：D-34 为默认时拒绝新 enqueue、暂停 queue 消费，
 但不停止维护。D-34 rollback 同步把 routing receipt 恢复为 D-33，因此无需改 env 或重启。
 2026-08-12 用正式 authority 运行的当前 receipt 为 `accepted=false`，唯一 blocker 是
