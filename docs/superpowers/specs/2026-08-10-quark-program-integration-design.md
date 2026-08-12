@@ -351,6 +351,33 @@ passed；tsc / eslint 干净；stack 重启后非法输入 400×5、正常 baske
 **结论**：Phase 1.5 功能与契约语义均可信任，可以进入下一阶段（Phase 2 本地指数 + 龙头映射，
 见 §2.6）。
 
+### 2.9 Slice 2A.1 复审修复 + 第三方数据源 key 实测（2026-08-11，Claude）
+
+**Slice 2A.1（已完成并入库，platform `d69dc8a`）**：Phase 1.5 修复 + Slice 2A 经 18-agent 对抗
+复审（15 项确认 finding），全部可执行项已修复并回归——前端补 `--color-accent-danger` token
+（Tailwind v4 静默丢色导致 K 型输家线不可见，HIGH）+ token 存在性 CI 断言、`bg-bg-card` 失效
+类名归一 `bg-bg-surface`、错误面板原始 OpenD 地址收进折叠层；后端堵死 `US.HK.800000` 跨 lane
+缓存读取、summary 路径不再白付指数 lane 调用、指数序列 ≥20 根下限；测试补齐序列化级 attach
+不变性、路由级 200-on-index-outage 等 10 项实证。红线不变：指数 lane 永不混入 ETF 指标，
+专用 API fail-closed，无 sample 回退。
+
+**数据源 key（2026-08-11 用户提供 6 个，实测见 `docs/audits/2026-08-11-data-source-key-evaluation.md`）**：
+处理红线——key 明文绝不入仓/入 memory/入文档（含本 spec），一律 env 注入；报告仅留掩码。
+接入定位（以实测报告为准）：第三方源一律是 **Futu 主链路的备份/补盲 lane**，带独立 provenance
+徽章，绝不静默顶替 Futu 数据；候选用途包括 ETF 日 bars 灾备、Asia 指数 lane 补盲（韩/台/新/澳
+等 Futu 白名单外市场）、估值字段（PE/PB/cap）与晨报新闻源——最终以当日实测矩阵为准。
+
+### 2.9a 第三方数据 lane 契约（接入前必须满足）
+
+1. **永不静默顶替**：任何第三方源数据必须带 `provider`/`provenance` 字段与前端徽章；Futu 不可用时
+   切备份需显式记录降级原因（同现有 futu_cache 模式）。
+2. **专用 API fail-closed 不变**：asia-radar / market-cross-section 专用路由仍禁止 sample 回退；
+   备份源失败 = 诚实 unavailable，不是换源造假。
+3. **额度纪律**：免费档配额（如 Alpha Vantage 25 req/日）在调度层显式建模，超出即排队/降级，
+   不硬刷。
+4. **合规**：NewsAPI 开发者档若为 localhost-only 则不得部署到任何服务器路径；各源 ToS 在审计
+   报告中逐条登记。
+
 ## 3. P3：板块价格/成交量动量 → 修复后作为普通实验（不用花旗名称）
 
 - 只保留"板块动量轮动"概念；**重写**信号与执行对齐：
