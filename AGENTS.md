@@ -23,7 +23,7 @@ Rules for AI agents working in this repository.
   kill-switch, migration, and public-release boundary remain independent.
 - **D-34 runtime snapshot (2026-08-12):** migration 030–032 are applied exactly
   once after owner backup and isolated restore; the current Platform runtime is
-  `0be9f32`. The enabled D-34
+  `2db9bdf`. The enabled D-34
   LaunchAgent reuses the installed Hermes xAI OAuth session through the persistent
   local proxy on `127.0.0.1:8645`;
   the research chain does not require a separate embedding provider. One real
@@ -35,7 +35,12 @@ Rules for AI agents working in this repository.
   `automation_source=d34`. Durable failure acceptance covers Futu unavailable,
   tampered job input, research timeout, Docker exit 137, and expired external-effect
   leases without leaking a lease or duplicating work. The 10-cycle/5-trading-day
-  soak remains open; this is not live eligibility. See
+  soak remains open at 1/10 cycles and 1/5 observation days; the first natural
+  signal exposed and retained an `account_frozen` failure before order creation.
+  `2db9bdf` now permits the shared frozen paper account only through current
+  active-Mandate D-34 `paper_only` authority while leaving the account kill switch
+  true; the next natural trading window remains required runtime evidence. This is
+  not live eligibility. See
   `docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`.
   The owner has standing authorization for normal reversible local development,
   migrations, configuration, service/LaunchAgent restarts, tests, test data and
