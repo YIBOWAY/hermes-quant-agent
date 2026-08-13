@@ -38,6 +38,7 @@ Rules for AI agents working in this repository.
   （默认开）；`emergency_stop` 或 `live_trading_enabled=true` 仍冻纸面成交。
   隔离预览：平台 worktree 里 `bash scripts/coo_unify_preview.sh start|stop`，
   端口 `:8876` / `:3002`，库只许 `quantplatform_coo`。
+  预览种子成交证明的是冻结账户能记账，不是每日观察；种子市值差不许写进摘要。
 - 手工 Scene-B 和任何 **live** 资格仍走三道人闸（公式确认、源码 CAS、diff/commit）。
   纸面每天跑不走这三道闸。Gate 细节在现行计划 §6；旧 Scene-B 包装器仍是手工入口。
 - 规范候选在平台仓 `data/agent_run/agent/candidates`（只可用 `QS_AGENT_OUTPUT_DIR` 改）。
