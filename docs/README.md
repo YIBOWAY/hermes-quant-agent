@@ -28,7 +28,9 @@ Hermes 更新只用 `~/.hermes/scripts/hqa-hermes-update.sh check|apply`。
 第 1 步按计划收口：隔离栈上，已挂试运行仓能成交、能记账，实盘仍关。  
 那不是「助手已经在看效果」。预览种子用假价 179 买进，页面 Futu 现价只是市值差，不许写进摘要。  
 核对预览用 `http://127.0.0.1:3002/zh/paper-trading`（后端 `:8876`，库 `quantplatform_coo`），不要改 live `:3001`。  
-双引擎通过仍只进已验证候选，挂上才每天跑。第 2–4 步未开。第 5 步要等真观察日，不要用种子盈亏顶上。
+第 2 步隔离语义已拆开：派研究不会挂仓，挂上要另下一命令。双引擎默认停在已验证候选。  
+看遥控用同一地址的「聊天遥控」块。派研究不会编候选；预览里那条 `candidate-preview-unhung` 是种子夹具，不是双引擎刚跑完。  
+第 3–4 步未开。第 5 步要等真观察日，不要用种子盈亏顶上。
 
 纸面与实盘切开、`live_trading_enabled=false`、公开 composer 关闭，这些红线还在。  
 不要用 soak `1/10` 或旧 audit 里的 PID/commit 当 NEXT。
