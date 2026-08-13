@@ -8,9 +8,11 @@ Rules for AI agents working in this repository.
   `/Users/sunyibo/programs/ai-quant-platform`。
 - **唯一现行计划：** `docs/plans/2026-08-13-personal-quant-assistant.md`。
   先读 `docs/README.md`。`D-31`/`D-32`/`D-33`/`D-34` 不是产品线，不是 NEXT。
-- 助手只做五件事：盯盘、复现、回测、已登记策略在模拟盘每天跑、看效果。
-  值班、已挂策略、评价必须自动。新研究：你发了论文/视频/方向就自动跑完；
-  没有授权禁止发明周期。聊天是遥控，实验室/回测/模拟盘仍是一等页面。
+- 助手只做五件事：盯盘、复现、回测、**已挂上**的策略每天跑、看效果。
+  值班、已挂策略、评价必须自动。论文/说明可跑到双引擎，默认停在**已验证候选**；
+  「挂上」或明文「过了就挂」才进每天跑。持续方向最多 1 个作业且停在候选。
+  视频只抽规则、多数停问，不是研究账完成条件。没有授权禁止发明周期。
+  聊天是遥控，实验室/回测/模拟盘仍是一等页面。
 - 正常启动：部署镜像里的 `bash scripts/local_mac_stack.sh start`。
   服务寿命不绑 AI 终端。Hermes 更新只用
   `~/.hermes/scripts/hqa-hermes-update.sh check|apply`。
@@ -26,8 +28,9 @@ Rules for AI agents working in this repository.
 ## Safety Rules
 
 - `live_trading_enabled=false`。因子、试运行仓、研究收据都没有 live 升级操作。
-- 常驻模拟只跑已登记、已测试的因子。候选文件和模型散文不能进每天跑。
-- 新研究禁止由五分钟 worker 发明。没有 owner 需求或每周槽，只维护已挂策略。
+- 常驻模拟只跑**已挂上**的因子。已验证候选和模型散文不能进每天跑。
+- 没有授权禁止发明研究作业，只维护已挂策略。没有「每周槽」。
+  双引擎通过 ≠ 挂上。持续方向不是全权委托。
 - 模型说搜了网 / 回测过 / 成交了，必须有无正文收据；没有就失败，不许把 Run 标成功。
 - 不要重放已经 apply 过的正式库 migration（028–033 等）。新动作前先核 live 元数据。
 - 不要绕过 `paper_trading`、`live_trading_enabled=false`。
