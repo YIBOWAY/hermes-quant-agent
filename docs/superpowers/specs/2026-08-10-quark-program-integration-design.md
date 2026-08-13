@@ -1,5 +1,9 @@
 # 设计：quark_program 三个外部项目接入 HQA（分三档）
 
+> **不是助手主线。** 2026-08-13 起现行计划是
+> [`../../plans/2026-08-13-personal-quant-assistant.md`](../../plans/2026-08-13-personal-quant-assistant.md)。
+> P1 已交付可留作雷达零件；P2/P3 不要当成下一 slice。
+
 日期：2026-08-10
 状态：已与用户对齐范围（全部接入、分三档）与工作目录（直接在活跃副本 `data/_runtime/agent-v02-work/` 上改）
 安全红线：全程只读研究/展示用途，不触发交易；`kill_switch=true`、`live_trading_enabled=false` 不变。

@@ -1,5 +1,9 @@
 # Agent v0.2 — 完整 `/hermes` Web Chat 实施计划
 
+> **历史文件，不是现行计划。** 2026-08-13 起只按
+> [`../../plans/2026-08-13-personal-quant-assistant.md`](../../plans/2026-08-13-personal-quant-assistant.md)
+> 施工。公开 Web Chat / 发布 Gate 明确不是 NEXT。
+
 > **OPERATOR-WINDOW ADDENDUM（2026-08-01）：RUNTIME SUBPATHS PASS / PAPER
 > INTAKE FAIL / PUBLIC OFF。** 本 addendum 是当前 dated status；下方 2026-07-31 及更早的
 > source-boundary、进度和 NEXT 保留为历史决策/施工记录。Command/Run 的 `succeeded` 只
