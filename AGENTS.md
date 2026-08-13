@@ -34,7 +34,10 @@ Rules for AI agents working in this repository.
 - 模型说搜了网 / 回测过 / 成交了，必须有无正文收据；没有就失败，不许把 Run 标成功。
 - 不要重放已经 apply 过的正式库 migration（028–033 等）。新动作前先核 live 元数据。
 - 不要绕过 `paper_trading`、`live_trading_enabled=false`。
-  `kill_switch` 是紧急停；现行计划要求它不再顺便冻死纸面评价，改之前不要假装试运行仓已经在验证因子。
+  `kill_switch` 冻实盘/真危险。已挂上的试运行仓走 `QS_PAPER_OBSERVATION_ENABLED`
+  （默认开）；`emergency_stop` 或 `live_trading_enabled=true` 仍冻纸面成交。
+  隔离预览：平台 worktree 里 `bash scripts/coo_unify_preview.sh start|stop`，
+  端口 `:8876` / `:3002`，库只许 `quantplatform_coo`。
 - 手工 Scene-B 和任何 **live** 资格仍走三道人闸（公式确认、源码 CAS、diff/commit）。
   纸面每天跑不走这三道闸。Gate 细节在现行计划 §6；旧 Scene-B 包装器仍是手工入口。
 - 规范候选在平台仓 `data/agent_run/agent/candidates`（只可用 `QS_AGENT_OUTPUT_DIR` 改）。

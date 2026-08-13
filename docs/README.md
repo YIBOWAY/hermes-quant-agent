@@ -25,7 +25,9 @@ Hermes 更新只用 `~/.hermes/scripts/hqa-hermes-update.sh check|apply`。
 ## 实际做到哪里
 
 能力零件大多已经落地：真 Futu、回测器、模拟账户、论文入队机、双引擎研究作业、试运行仓、本机 LaunchAgent。  
-助手这件事还没成立：评价环被账户冻结挡住；双引擎通过只应进已验证候选，挂上才每天跑。
+第 1 步已在隔离栈解开：已挂上的试运行仓可以成交并记 P&L，全局 `kill_switch` 仍冻实盘。  
+看效果请开 `http://127.0.0.1:3002/zh/paper-trading`（后端 `:8876`，库 `quantplatform_coo`），不要改 live `:3001`。  
+双引擎通过仍只进已验证候选，挂上才每天跑。第 2–4 步未开。
 
 纸面与实盘切开、`live_trading_enabled=false`、公开 composer 关闭，这些红线还在。  
 不要用 soak `1/10` 或旧 audit 里的 PID/commit 当 NEXT。
