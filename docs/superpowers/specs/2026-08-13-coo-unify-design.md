@@ -1,5 +1,9 @@
 # COO 统一重构设计（D-34 主入口 + Hermes 真当 COO）
 
+> **已被取代。** 2026-08-13 起只按
+> [`../../plans/2026-08-13-personal-quant-assistant.md`](../../plans/2026-08-13-personal-quant-assistant.md)
+> 施工。本文是隔离 worktree 的早期施工笔记，不再当产品线。
+
 状态：隔离施工 spec。施工只发生在
 `/Users/sunyibo/programs/.worktrees/coo-unify/` 的 `refactor/coo-unify`
 分支，以及独立库 `quantplatform_coo`。不改 live soak、不改公开

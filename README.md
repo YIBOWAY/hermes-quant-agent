@@ -1,10 +1,13 @@
 # Hermes-quant-agent
 
-Hermes orchestration layer for the local `ai-quant-platform`. D-32 owns the
-local Agent v0.2 Web Chat line, D-33 owns verified automatic `paper_only`
-factor intake, and D-34 owns the owner-requested Futu → RD-Agent/Qlib → Platform
-replay → Artifact/Policy → paper-canary loop. Automated paths stop at paper;
-live qualification and live orders always remain human-controlled.
+Hermes orchestration layer for the local `ai-quant-platform`. Together they are
+one personal quant assistant: watch the book, reproduce a factor, backtest,
+run registered strategies on paper every day, and show honest results.
+
+The only current plan is
+[`docs/plans/2026-08-13-personal-quant-assistant.md`](docs/plans/2026-08-13-personal-quant-assistant.md).
+`D-32` / `D-33` / `D-34` are leftover code names, not product lines.
+Automated paper stops at paper; live qualification stays human.
 
 ## Normal local operation
 
@@ -23,24 +26,8 @@ Hermes updates. Local trust simplifies the single-user identity ceremony; it
 does not relax paper limits, migrations, live gates, the kill switch, or public
 release controls.
 
-The 2026-08-12 D-34 runtime has migrations 030–032 applied exactly once, a
-persistent worker and Hermes xAI OAuth proxy, one accepted dual-engine Artifact,
-and one active low-allocation paper canary. Implementation and recovery checks
-are complete; the natural cutover gate is still `1/10` complete cycles and
-`1/5` canary observation days. Until `10/10 + 5/5` and the final zero-duplicate,
-no-live acceptance receipt pass, D-33 remains the default new-research entry.
-
-Start with [`docs/README.md`](docs/README.md). D-33 operation is documented in
-[`docs/runbooks/full-automation-paper.md`](docs/runbooks/full-automation-paper.md);
-D-34 implementation, runtime evidence, remaining acceptance, and rollback are
-tracked in
-[`docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md`](docs/plans/2026-08-11-d34-mandate-dual-engine-paper.md).
-The Platform-side owner guide and operations commands live in
-[`docs/guides/d34-workbench.md`](https://github.com/YIBOWAY/ai-quant-platform/blob/main/docs/guides/d34-workbench.md)
-and
-[`docs/runbooks/d34-autonomous-paper.md`](https://github.com/YIBOWAY/ai-quant-platform/blob/main/docs/runbooks/d34-autonomous-paper.md).
-Historical Phase, Wave, and V0–V8 documents remain delivery evidence, not the
-current operations queue.
+Start with [`docs/README.md`](docs/README.md). Historical Phase, Wave, D-xx and
+V0–V8 documents remain delivery evidence, not the current operations queue.
 
 - **Safety watchdog** (`hqa.doctor_watchdog`) — `[SILENT]`; JSON-first safety
   parse; splits `[INFRA]` (doctor/platform failure) vs `[SAFETY]` (baseline

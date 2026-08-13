@@ -1,8 +1,8 @@
 # D-34：Mandate 驱动的双引擎自主 Paper 研究助手
 
-> 2026-08-13 isolation note (`refactor/coo-unify`): live soak evidence below is
-> unchanged. On the isolation branch, a Mandate no longer invents a daily job.
-> New research is owner-request only; the worker only leases queued asks.
+> **历史文件，不是现行计划。** 2026-08-13 起只按
+> [`2026-08-13-personal-quant-assistant.md`](2026-08-13-personal-quant-assistant.md)
+> 施工。本文是研究账「双引擎作业」来源的实现记录。不要按 soak 方框或 D-34 默认入口续写。
 
 ## 1. 目标
 

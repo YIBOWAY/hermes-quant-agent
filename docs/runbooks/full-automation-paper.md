@@ -1,5 +1,9 @@
 # D-33 自动 paper 运行手册
 
+> **历史运行手册。** 产品身份见
+> [`../plans/2026-08-13-personal-quant-assistant.md`](../plans/2026-08-13-personal-quant-assistant.md)。
+> 本文只解释已经落地的论文入队机怎么开关，不再定义默认研究入口。
+
 ## 1. 边界
 
 这条路径把已满足 `hqa.paper_intake/v1` 的论文研究请求自动推进到：机器策略评审、真实

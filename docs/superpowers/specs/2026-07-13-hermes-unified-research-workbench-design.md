@@ -1,5 +1,9 @@
 # Hermes 统一研究工作台设计 spec（D-31）
 
+> **历史设计，不是现行计划。** 2026-08-13 起只按
+> [`../../plans/2026-08-13-personal-quant-assistant.md`](../../plans/2026-08-13-personal-quant-assistant.md)
+> 施工。`/hermes` 仍是首页，但目标是五个动词，不是再做一套工作台产品。
+
 > 状态：**产品与架构设计已确认**（2026-07-13）；第一批三份正式 implementation
 > plan 已选 wave：gateway capability 已冻结且 chat fail-closed；candidate
 > integrity/Gate 3 已代码交付；professional frontend/read-only shell 已代码交付

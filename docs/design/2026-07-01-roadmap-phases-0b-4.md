@@ -1,5 +1,9 @@
 # Hermes-quant-agent 后续路线设计 spec（Phase 0b → 4）
 
+> **历史决策台账，不是现行计划。** 2026-08-13 起只按
+> [`../plans/2026-08-13-personal-quant-assistant.md`](../plans/2026-08-13-personal-quant-assistant.md)
+> 施工。D-31…D-34 是当时的切片名，不再当产品线。
+
 > 状态：定稿（2026-07-01），经 brainstorming + grilling 逐项对齐。
 > 上游：`docs/design/hermes_quant_agent_plan.md`（总设计）。前置：Phase 0a 已交付（只读数字员工，见 `docs/plans/2026-07-01-phase-0a-readonly-digital-employee.md`）。
 > 本文定位：把 0a 之后的全部阶段一次性对齐方向。**分层规划**——近期阶段给完整 TDD 计划，中期给设计 spec，远期给方向大纲。
