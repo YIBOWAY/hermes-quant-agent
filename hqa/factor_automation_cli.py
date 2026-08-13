@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import hashlib
 import json
 import os
@@ -15,8 +14,8 @@ from hqa import config, factor_repro, quant_cli
 from hqa.factor_automation import (
     FactorAutomationRequest,
     PlatformFactorAutomationSlice2Port,
-    PlatformFactorPromotionPort,
-    run_to_paper_land,
+    run_to_final_backtest,
+    run_to_paper_land,  # kept: explicit land still exists; run_once must not call it
     validate_factor_automation_request,
 )
 from hqa.factor_automation_policy import (
@@ -264,26 +263,24 @@ def run_once() -> dict[str, Any]:
     if not requests:
         return {"state": "idle", "queued": 0, "maintenance": maintenance}
     path = requests[0]
-    request, base_commit = parse_request(_read_request(path))
+    request, _base_commit = parse_request(_read_request(path))
     policy = load_factor_automation_policy(
         config.REPO_DIR / "config" / "factor_automation_policy.v1.json"
     )
     slice2_port = PlatformFactorAutomationSlice2Port(policy_digest=policy.policy_digest)
-    result = run_to_paper_land(
+    result = run_to_final_backtest(
         request=request,
         policy=policy,
-        slice2_port=slice2_port,
-        promotion_port=PlatformFactorPromotionPort(
-            gate_dir=config.FACTOR_AUTOMATION_GATE1_DIR / request.automation_id,
-            experiment_output_dir=config.FACTOR_EXPERIMENT_OUTPUT_DIR,
-        ),
-        base_commit=base_commit,
-        hqa_mode_enabled=mode,
-        hqa_auto_land_enabled=auto_land,
+        port=slice2_port,
+        allow_acceptance_machine_approval=True,
     )
     document = {
         "schema_version": "hqa.factor_automation_run/v1",
-        **dataclasses.asdict(result),
+        "state": "verified_candidate",
+        "automation_id": request.automation_id,
+        "candidate_id": result.candidate.candidate_id,
+        "source_sha256": result.candidate.source_sha256,
+        "landed": False,
     }
     _write_result(config.FACTOR_AUTOMATION_RUN_DIR / f"{request.automation_id}.json", document)
     completed = queue / "completed"
@@ -295,7 +292,13 @@ def run_once() -> dict[str, Any]:
         path.unlink()
     else:
         os.replace(path, target)
-    return {"state": "landed", "automation_id": request.automation_id}
+    return {
+        "state": "verified_candidate",
+        "automation_id": request.automation_id,
+        "candidate_id": result.candidate.candidate_id,
+        "source_sha256": result.candidate.source_sha256,
+        "landed": False,
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:

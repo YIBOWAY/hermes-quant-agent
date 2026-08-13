@@ -12,7 +12,9 @@ Rules for AI agents working in this repository.
   值班、已挂策略、评价必须自动。论文/说明可跑到双引擎，默认停在**已验证候选**；
   「挂上」或明文「过了就挂」才进每天跑。持续方向最多 1 个作业且停在候选。
   视频只抽规则、多数停问，不是研究账完成条件。没有授权禁止发明周期。
-  聊天是遥控：派研究停在候选，挂上另下命令。实验室/回测/模拟盘仍是一等页面。
+  聊天是遥控：派研究停在候选，挂上另下命令。挂上必须绑候选 digest，
+  禁止演示仓充数。D-33 `run_once` 默认停在候选，不再自动落地。
+  实验室/回测/模拟盘仍是一等页面。正式桌面先走设计，不要把演示仓画进去。
 - 正常启动：部署镜像里的 `bash scripts/local_mac_stack.sh start`。
   服务寿命不绑 AI 终端。Hermes 更新只用
   `~/.hermes/scripts/hqa-hermes-update.sh check|apply`。

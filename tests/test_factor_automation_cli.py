@@ -230,3 +230,65 @@ def test_run_once_d34_default_keeps_d33_maintenance_and_pauses_queue(
     assert result["maintenance"]["checked"] == 2
     assert queued.exists()
     assert not (tmp_path / "runs").exists()
+
+
+def test_run_once_stops_at_verified_candidate_and_does_not_land(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    request = _request(tmp_path / "factor.py")
+    queued = queue / "automation-0123456789abcdef.json"
+    queued.write_text(json.dumps(request), encoding="utf-8")
+    monkeypatch.setattr(cli.config, "FACTOR_AUTOMATION_QUEUE_DIR", queue)
+    monkeypatch.setattr(cli.config, "FACTOR_AUTOMATION_RUN_DIR", tmp_path / "runs")
+    monkeypatch.setattr(cli.config, "FACTOR_AUTOMATION_GATE1_DIR", tmp_path / "gate1")
+    monkeypatch.setattr(cli.config, "FACTOR_EXPERIMENT_OUTPUT_DIR", tmp_path / "experiments")
+    monkeypatch.setenv("HQA_FACTOR_AUTOMATION_MODE", "true")
+    monkeypatch.setenv("HQA_FACTOR_AUTOMATION_AUTO_LAND", "true")
+    monkeypatch.setattr(
+        cli.quant_cli,
+        "run_factor_automation_maintain",
+        lambda: (
+            0,
+            '{"checked":1,"paused":0,"quarantined":0,"state":"maintained"}\n',
+        ),
+    )
+    monkeypatch.setattr(cli.quant_cli, "run_d34_research_routing", _routing)
+    monkeypatch.setattr(
+        cli,
+        "load_factor_automation_policy",
+        lambda _path: type("Policy", (), {"policy_digest": "d" * 64})(),
+    )
+
+    def _fail_land(**_kwargs):
+        raise AssertionError("run_to_paper_land must not be the default hang path")
+
+    slice2 = type(
+        "Slice2",
+        (),
+        {
+            "state": "final_backtest_ready",
+            "candidate": type(
+                "Candidate",
+                (),
+                {"candidate_id": "cand-ready", "source_sha256": "e" * 64},
+            )(),
+        },
+    )()
+    monkeypatch.setattr(cli, "run_to_final_backtest", lambda **_kwargs: slice2)
+    monkeypatch.setattr(cli, "run_to_paper_land", _fail_land)
+
+    result = cli.run_once()
+
+    assert result["state"] == "verified_candidate"
+    assert result["landed"] is False
+    assert result["automation_id"] == "automation-0123456789abcdef"
+    assert result["candidate_id"] == "cand-ready"
+    assert not queued.exists()
+    run_doc = json.loads(
+        (tmp_path / "runs" / "automation-0123456789abcdef.json").read_text(encoding="utf-8")
+    )
+    assert run_doc["state"] == "verified_candidate"
+    assert run_doc["landed"] is False

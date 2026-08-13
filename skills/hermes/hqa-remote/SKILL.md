@@ -29,7 +29,7 @@ __HQA_REPO_DIR__/.venv/bin/python -m hqa.remote_cli --backend http://127.0.0.1:8
 
 Add `--hang-if-pass` only when the owner wrote 过了就挂 on **this** ask. That flag is stored on the request; it is not itself a hang.
 
-2. **挂上** — hang one existing **verified** candidate onto the daily paper book.
+2. **挂上** — hang one existing **verified** candidate onto the daily paper book. The candidate must already carry a source/artifact digest, universe, and factor id. Hang binds that digest on the sleeve. It will refuse a digest-less demo candidate and will not mint a generic momentum sleeve.
 
 ```bash
 __HQA_REPO_DIR__/.venv/bin/python -m hqa.remote_cli --backend http://127.0.0.1:8876 hang --candidate-id <exact-id-from-status>
@@ -41,5 +41,7 @@ If status has no `verified` candidate, say so and stop. Do not hang a request. D
 
 - 派研究 ≠ 挂上.
 - Dual-engine pass = 已验证候选 only.
+- Hang requires source/artifact digest. No generic AAPL/MSFT/momentum sleeve.
+- D-33 `run-once` now stops at verified candidate; it is not the default hang path.
 - No live path. No invented universe. No seed mark-to-market as strategy P&L.
 - Do not use the old D-33 enqueue / D-34 worker as a fused "research then hang" shortcut.
