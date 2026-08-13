@@ -9,7 +9,8 @@ Rules for AI agents working in this repository.
 - **唯一现行计划：** `docs/plans/2026-08-13-personal-quant-assistant.md`。
   先读 `docs/README.md`。`D-31`/`D-32`/`D-33`/`D-34` 不是产品线，不是 NEXT。
 - 助手只做五件事：盯盘、复现、回测、已登记策略在模拟盘每天跑、看效果。
-  值班和评价必须自动；新研究只有 owner 开口或每周固定槽才入队。
+  值班、已挂策略、评价必须自动。新研究：你发了论文/视频/方向就自动跑完；
+  没有授权禁止发明周期。聊天是遥控，实验室/回测/模拟盘仍是一等页面。
 - 正常启动：部署镜像里的 `bash scripts/local_mac_stack.sh start`。
   服务寿命不绑 AI 终端。Hermes 更新只用
   `~/.hermes/scripts/hqa-hermes-update.sh check|apply`。

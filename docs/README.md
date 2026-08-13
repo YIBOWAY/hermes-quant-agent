@@ -25,7 +25,7 @@ Hermes 更新只用 `~/.hermes/scripts/hqa-hermes-update.sh check|apply`。
 ## 实际做到哪里
 
 能力零件大多已经落地：真 Futu、回测器、模拟账户、论文入队机、双引擎研究作业、试运行仓、本机 LaunchAgent。  
-助手这件事还没成立：评价环被账户冻结挡住，研究入口还是两套厂，Hermes 还不是五个动词。
+助手这件事还没成立：评价环被账户冻结挡住，研究入口还是两套厂，发一篇论文还不能可靠地变成进池的因子。
 
 纸面与实盘切开、`live_trading_enabled=false`、公开 composer 关闭，这些红线还在。  
 不要用 soak `1/10` 或旧 audit 里的 PID/commit 当 NEXT。
