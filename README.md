@@ -2,7 +2,7 @@
 
 Hermes orchestration layer for the local `ai-quant-platform`. D-32 owns the
 local Agent v0.2 Web Chat line, D-33 owns verified automatic `paper_only`
-factor intake, and D-34 owns the Mandate-driven Futu → RD-Agent/Qlib → Platform
+factor intake, and D-34 owns the owner-requested Futu → RD-Agent/Qlib → Platform
 replay → Artifact/Policy → paper-canary loop. Automated paths stop at paper;
 live qualification and live orders always remain human-controlled.
 

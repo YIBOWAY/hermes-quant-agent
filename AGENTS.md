@@ -35,8 +35,15 @@ Rules for AI agents working in this repository.
   The owner has standing authorization for normal reversible local development,
   migrations, configuration, service/LaunchAgent restarts, tests, test data and
   local commits; do not pause to request those actions again. Live trading,
-  automatic GitHub push and unrecoverable deletion remain outside that standing
-  authorization.
+  automatic GitHub push of `main` and unrecoverable deletion remain outside that
+  standing authorization.
+- **COO unify isolation (`refactor/coo-unify`):** construction lives in
+  `/Users/sunyibo/programs/.worktrees/coo-unify/` plus empty DB
+  `quantplatform_coo`. D-34 research enqueue is owner-request only
+  (`POST /api/hermes/research/requests` or `quant-system d34 request-research`).
+  `worker-once` never invents a cycle. RD-Agent/Qlib LLM must use the Hermes
+  xAI OAuth proxy at `127.0.0.1:8645` with `LITELLM_CHAT_MODEL=grok-4.6`.
+  Do not cut over live soak or public composer from this branch.
 - **Checkout role boundary:** development is allowed only in the primary HQA
   and Platform checkouts or purpose-named source worktrees under
   `/Users/sunyibo/programs/.worktrees/`. Both checkouts under
@@ -196,10 +203,12 @@ Rules for AI agents working in this repository.
   `registration=auto_promote`, a versioned policy digest, verified final-backtest
   evidence, two-phase commit, local ff-only land, and immutable
   `promotion_scope=paper_only`. It never auto-pushes and cannot populate the
-  live registry. D-34 is a second, separate paper-only exception: an active
-  Mandate may autonomously run Futu → RD-Agent/Qlib → Platform replay →
-  Artifact/Policy → canary, but execution is still rechecked against the
-  durable Mandate, emergency stop, budget, digest and paper exposure policies.
+  live registry. D-34 is a second, separate paper-only exception: after an
+  explicit owner research ask, an active Mandate may run Futu → RD-Agent/Qlib
+  → Platform replay → Artifact/Policy → canary. The Mandate is only the
+  budget/universe envelope; the worker never invents a cycle. Execution is
+  still rechecked against the durable Mandate, emergency stop, budget, digest
+  and paper exposure policies.
   D-34 artifacts have no live upgrade operation. The following manual rules
   continue to apply to manual Scene-B and every live qualification. For the
   final paper task, plan confirmation is a separate human stop and is not Gate

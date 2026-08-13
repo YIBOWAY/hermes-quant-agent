@@ -21,6 +21,7 @@ data/*
 data/_runtime/*
 !data/_runtime/signal_thresholds.json
 .DS_Store
+.grok/
 
 # Superpowers brainstorming runtime state. Keep durable HTML/SDD evidence, but
 # never publish local bearer tokens, ports, process IDs, or server instances.
