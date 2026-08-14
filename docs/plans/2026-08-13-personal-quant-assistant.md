@@ -92,7 +92,7 @@ live `:3001` / 正式 `quantplatform` / 已有试运行仓观察，没有单独�
 | 1 | **已完成（隔离语义）** | 解冻纸面观察 | 隔离栈上，已挂上的 `automation_managed + paper_only + allocated` 仓能在 `kill_switch=true` 时成交并记账；live 仍关。预览种子成交不是每日观察，种子市值差不是策略效果 |
 | 2 | **已完成（隔离语义）** | 聊天当遥控 | 派研究和挂仓是两条命令；双引擎默认停在已验证候选。`:3002`「聊天遥控」可核对。**不是** Discord / Hermes 网页已经遥控同一本正式账；隔离 `hang` 仍是文件账演示仓，不是 Artifact CAS 正式挂仓 |
 | 3 | **已完成（隔离语义）** | 一本模拟账 | 隔离 `hang` 只收带源码/artifact digest + 宇宙 + factor 的候选，开出来的仓绑定该 digest，不再 mint AAPL/MSFT/momentum。无 digest 的旧演示仓拒新挂。本分支 D-33 `run_once` 默认停在已验证候选，不再自动落地。**不是** Artifact Registry 正式挂仓，也不是 live LaunchAgent / `:3001` 已切；第 2 步那条无 digest 演示仓仍是化石 |
-| 4 | **进行中（隔离语义，2026-08-14 起）** | 一本研究账 | 已收口：隔离 `dispatch-research` 接真作业；隔离一次性 worker（不是 live LaunchAgent）已跑完首作业 `request:2026-08-14:030600c343f3`。双引擎收据齐，对照因 `terminal_nav_difference_bps=29.1` 超过 25bps 上限拒收；账本投影 `rejected`；无 artifact / 金丝雀 / 挂仓。未收口：成功作业的候选回填、论文/材料 intake。视频只抽规则、多数停问；持续方向最多 1 作业且停在候选 |
+| 4 | **进行中（隔离语义，2026-08-14 起）** | 一本研究账 | 已收口：派研究接真作业；隔离 worker 跑完两条。第一条 29.1bps 拒收。第二条（21 日动量跳过近 5 日）24.89bps 通过，Artifact 合格且已回填为已验证候选，未挂上、无金丝雀。未收口：论文/材料 intake；对照通过后的自动回填还只在这次手补+函数，GET 账本尚未自动扫 Artifact。视频只抽规则、多数停问；持续方向最多 1 作业且停在候选 |
 | 5 | 等真观察日 | 评价进摘要 | 已挂仓的真观察日结果或诚实失败进 `hqa ops digest` / 今日页。禁止用预览种子市值差或空仓顶上 |
 
 每做完一步：neat-freak 只改**现行**文档（本文、README、指南、运维），不要往历史计划里追加「现已上线」。
