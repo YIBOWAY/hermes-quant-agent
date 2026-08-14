@@ -4,7 +4,9 @@ import argparse
 import copy
 import json
 import math
+import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -744,11 +746,12 @@ def _history_unavailable(
     reason: str,
     minimum_aligned_returns: int,
     error: Optional[dict[str, Any]] = None,
+    provider: str = "futu",
 ) -> dict[str, Any]:
     return {
         "history_source": {
             "status": status,
-            "provider": "futu",
+            "provider": provider,
             "source": None,
             "adjustment": "qfq",
             "interval": "1d",
@@ -789,6 +792,11 @@ def _attach_history(
     generated_at: str,
     benchmark: str,
     minimum_aligned_returns: int,
+    run_history_fallback: Optional[
+        Callable[[list[str], str, str], tuple[int, str]]
+    ] = None,
+    history_fallback_provider: Optional[str] = None,
+    history_retry_sleep: Optional[Callable[[float], None]] = None,
 ) -> dict[str, Any]:
     artifact["schema_version"] = "2.0"
     limitations = artifact.get("limitations")
@@ -894,31 +902,72 @@ def _attach_history(
     normalized_benchmark = benchmark.strip().upper()
     if normalized_benchmark not in requested_symbols:
         requested_symbols.append(normalized_benchmark)
-    try:
-        exit_code, output = run_history(requested_symbols, start, end)
-    except Exception as exc:
-        exit_code = 1
-        output = ""
-        error = {
-            "code": "historical_prices_command_failed",
-            "provider": "futu",
-            "provider_code": type(exc).__name__,
-            "message": f"historical price command failed: {exc}",
-        }
-    else:
-        error = None
+
+    def _attempt(
+        runner: Callable[[list[str], str, str], tuple[int, str]],
+        provider_name: str,
+    ) -> tuple[int, str, Optional[dict[str, Any]]]:
+        try:
+            code, out = runner(requested_symbols, start, end)
+        except Exception as exc:
+            return (
+                1,
+                "",
+                {
+                    "code": "historical_prices_command_failed",
+                    "provider": provider_name,
+                    "provider_code": type(exc).__name__,
+                    "message": f"historical price command failed: {exc}",
+                },
+            )
+        return code, out, None
+
+    def _attempt_error(
+        out: str,
+        exc_error: Optional[dict[str, Any]],
+        provider_name: str,
+    ) -> dict[str, Any]:
+        if exc_error is not None:
+            return exc_error
+        try:
+            parsed = historical_risk.parse_price_error(out)
+        except historical_risk.HistoricalPriceContractError as exc:
+            return {
+                "code": exc.code,
+                "provider": provider_name,
+                "provider_code": None,
+                "message": str(exc),
+            }
+        if parsed.get("provider") is None:
+            parsed["provider"] = provider_name
+        return parsed
+
+    # Primary provider with one retry for transient network failures; the
+    # optional fallback provider is explicit, recorded, and never silent.
+    provider_used = "futu"
+    exit_code, output, attempt_error = _attempt(run_history, provider_used)
+    if exit_code != 0:
+        if history_retry_sleep is not None:
+            history_retry_sleep(2.0)
+        exit_code, output, attempt_error = _attempt(run_history, provider_used)
+
+    primary_error: Optional[dict[str, Any]] = None
+    fallback_error: Optional[dict[str, Any]] = None
+    if exit_code != 0:
+        primary_error = _attempt_error(output, attempt_error, provider_used)
+        if run_history_fallback is not None and history_fallback_provider:
+            provider_used = history_fallback_provider
+            exit_code, output, attempt_error = _attempt(
+                run_history_fallback, provider_used
+            )
+            if exit_code != 0:
+                fallback_error = _attempt_error(
+                    output, attempt_error, provider_used
+                )
 
     if exit_code != 0:
-        if error is None:
-            try:
-                error = historical_risk.parse_price_error(output)
-            except historical_risk.HistoricalPriceContractError as exc:
-                error = {
-                    "code": exc.code,
-                    "provider": "futu",
-                    "provider_code": None,
-                    "message": str(exc),
-                }
+        error = primary_error
+        assert error is not None
         artifact.update(
             _history_unavailable(
                 benchmark=normalized_benchmark,
@@ -930,6 +979,9 @@ def _attach_history(
                 error=error,
             )
         )
+        if fallback_error is not None:
+            artifact["history_source"]["fallback_error"] = fallback_error
+            _append_unique(artifact["reason_codes"], "history_fallback_failed")
         artifact["status"] = "degraded"
         _append_unique(artifact["reason_codes"], error["code"])
         return artifact
@@ -940,6 +992,7 @@ def _attach_history(
             expected_symbols=requested_symbols,
             expected_start=start,
             expected_end=end,
+            expected_provider=provider_used,
         )
         result = historical_risk.analyze_price_history(
             payload,
@@ -947,11 +1000,12 @@ def _attach_history(
             benchmark=normalized_benchmark,
             minimum_aligned_returns=minimum_aligned_returns,
             history_end_policy="previous_utc_calendar_date",
+            provider=provider_used,
         )
     except historical_risk.HistoricalPriceContractError as exc:
         error = {
             "code": exc.code,
-            "provider": "futu",
+            "provider": provider_used,
             "provider_code": None,
             "message": str(exc),
         }
@@ -964,6 +1018,7 @@ def _attach_history(
                 reason=exc.code,
                 minimum_aligned_returns=minimum_aligned_returns,
                 error=error,
+                provider=provider_used,
             )
         )
         artifact["status"] = "degraded"
@@ -971,6 +1026,18 @@ def _attach_history(
         return artifact
 
     artifact.update(result)
+    if provider_used != "futu" and primary_error is not None:
+        # Loud, receipt-backed substitution: the artifact keeps the primary
+        # failure and names the provider that actually served the history.
+        artifact["history_source"]["fallback"] = {
+            "primary_provider": "futu",
+            "primary_error": primary_error,
+        }
+        _append_unique(artifact["reason_codes"], "history_provider_fallback_used")
+        _append_unique(
+            artifact["limitations"],
+            f"history_from_fallback_provider_{provider_used}",
+        )
     history_status = artifact["historical_risk"]["status"]
     if history_status != "available":
         artifact["status"] = "degraded"
@@ -1057,9 +1124,17 @@ def build_report(artifact: dict[str, Any]) -> str:
                 "  Historical correlation/beta unavailable: "
                 f"{error.get('message', history.get('reason', 'unknown reason'))}."
             )
-            lines.append(
-                "  No sample, cached-local, Tiingo, or Longbridge data was substituted."
-            )
+            fallback_error = history_source.get("fallback_error")
+            if fallback_error:
+                lines.append(
+                    "  Tiingo fallback also failed "
+                    f"({fallback_error.get('code', 'unknown')}); "
+                    "no data was substituted."
+                )
+            else:
+                lines.append(
+                    "  No sample, cached-local, Tiingo, or Longbridge data was substituted."
+                )
         elif history["status"] == "unavailable":
             lines.append(
                 "  Historical correlation/beta unavailable: "
@@ -1068,10 +1143,21 @@ def build_report(artifact: dict[str, Any]) -> str:
                 f"{history['minimum_aligned_returns']})."
             )
         elif history["status"] in {"available", "degraded"}:
+            provider_label = (
+                "Tiingo" if history_source.get("provider") == "tiingo" else "Futu"
+            )
             lines.append(
-                "  Historical source: Futu QFQ daily, "
+                f"  Historical source: {provider_label} QFQ daily, "
                 f"{history_source['requested_start']}..{history_source['requested_end']}."
             )
+            fallback = history_source.get("fallback")
+            if fallback:
+                primary_error = fallback.get("primary_error") or {}
+                lines.append(
+                    "  Futu history failed "
+                    f"({primary_error.get('code', 'unknown')}); Tiingo data was "
+                    "substituted with explicit provenance."
+                )
             lines.append(
                 f"  {history['aligned_return_count']} aligned daily returns were used "
                 f"(minimum {history['minimum_aligned_returns']})."
@@ -1149,6 +1235,11 @@ def run(
     ] = None,
     benchmark: str = "SPY",
     minimum_aligned_returns: int = 60,
+    run_history_fallback: Optional[
+        Callable[[list[str], str, str], tuple[int, str]]
+    ] = None,
+    history_fallback_provider: Optional[str] = None,
+    history_retry_sleep: Optional[Callable[[float], None]] = None,
 ) -> str:
     exit_code: Optional[int] = None
     artifact: Optional[dict[str, Any]] = None
@@ -1226,6 +1317,9 @@ def run(
             generated_at=generated_at,
             benchmark=benchmark,
             minimum_aligned_returns=minimum_aligned_returns,
+            run_history_fallback=run_history_fallback,
+            history_fallback_provider=history_fallback_provider,
+            history_retry_sleep=history_retry_sleep,
         )
     # Validate serializability before opening the append-only artifact. This is
     # a last-resort boundary: finite inputs can still overflow during future
@@ -1261,9 +1355,33 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Skip historical Futu correlation/beta and emit the v1 current snapshot only.",
     )
     parser.add_argument(
+        "--history-fallback",
+        default=os.environ.get("HQA_PORTFOLIO_RISK_HISTORY_FALLBACK", ""),
+        help=(
+            "Optional fallback history provider used only when Futu fails "
+            "after one retry. Supported: 'tiingo'; empty/off disables "
+            "(default; also via HQA_PORTFOLIO_RISK_HISTORY_FALLBACK)."
+        ),
+    )
+    parser.add_argument(
         "--log", default=str(config.LOG_DIR / "portfolio_risk.jsonl")
     )
     args = parser.parse_args(argv)
+    fallback_choice = (args.history_fallback or "").strip().lower()
+    if fallback_choice in {"", "off", "none"}:
+        run_history_fallback = None
+        history_fallback_provider = None
+    elif fallback_choice == "tiingo":
+        def run_history_fallback(
+            symbols: list[str], start: str, end: str
+        ) -> tuple[int, str]:
+            return quant_cli.run_historical_prices(
+                symbols, start, end, provider="tiingo"
+            )
+
+        history_fallback_provider = "tiingo"
+    else:
+        parser.error("--history-fallback only supports 'tiingo', 'off', or empty")
     report = run(
         quant_cli.run_paper_account_snapshot,
         runlog.utc_now_iso,
@@ -1274,6 +1392,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         ),
         benchmark=args.benchmark,
         minimum_aligned_returns=args.minimum_aligned_returns,
+        run_history_fallback=None if args.current_only else run_history_fallback,
+        history_fallback_provider=(
+            None if args.current_only else history_fallback_provider
+        ),
+        history_retry_sleep=None if args.current_only else time.sleep,
     )
     print(report)
     return 0

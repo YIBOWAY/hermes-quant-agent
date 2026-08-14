@@ -109,6 +109,7 @@ def parse_price_snapshot(
     expected_symbols: list[str],
     expected_start: str | None = None,
     expected_end: str | None = None,
+    expected_provider: str = "futu",
 ) -> dict[str, Any]:
     if not isinstance(output, str) or not output.strip():
         raise _invalid("historical price output is empty")
@@ -118,7 +119,11 @@ def parse_price_snapshot(
             parse_constant=_reject_constant,
             object_pairs_hook=_object_without_duplicate_keys,
         )
-        validated = _validate_payload(payload, expected_symbols=expected_symbols)
+        validated = _validate_payload(
+            payload,
+            expected_symbols=expected_symbols,
+            expected_provider=expected_provider,
+        )
         if expected_start is not None and validated["start"] != expected_start:
             raise _invalid("historical price start does not match the request")
         if expected_end is not None and validated["end"] != expected_end:
@@ -173,11 +178,17 @@ def parse_price_error(output: str) -> dict[str, Any]:
     }
 
 
+SUPPORTED_HISTORY_PROVIDERS = ("futu", "tiingo")
+
+
 def _validate_payload(
     payload: Any,
     *,
     expected_symbols: list[str],
+    expected_provider: str = "futu",
 ) -> dict[str, Any]:
+    if expected_provider not in SUPPORTED_HISTORY_PROVIDERS:
+        raise _invalid(f"unsupported history provider: {expected_provider}")
     if not isinstance(payload, dict):
         raise _invalid("historical price snapshot must be an object")
     _validate_json_tree(payload)
@@ -199,8 +210,13 @@ def _validate_payload(
     )
     if payload["schema_version"] != "1.0":
         raise _invalid("unsupported historical price schema_version")
-    if payload["provider"] != "futu" or payload["source"] != "futu":
-        raise _invalid("historical price provenance must be explicit futu")
+    if (
+        payload["provider"] != expected_provider
+        or payload["source"] != expected_provider
+    ):
+        raise _invalid(
+            f"historical price provenance must be explicit {expected_provider}"
+        )
     if payload["interval"] != "1d" or payload["adjustment"] != "qfq":
         raise _invalid("historical price provenance must be 1d qfq")
     start = _strict_date(payload["start"], "historical price snapshot.start")
@@ -353,6 +369,7 @@ def analyze_price_history(
     benchmark: str,
     minimum_aligned_returns: int = 60,
     history_end_policy: str,
+    provider: str = "futu",
 ) -> dict[str, Any]:
     if (
         isinstance(minimum_aligned_returns, bool)
@@ -368,7 +385,9 @@ def analyze_price_history(
     requested = list(positions)
     if benchmark_symbol not in requested:
         requested.append(benchmark_symbol)
-    validated = _validate_payload(payload, expected_symbols=requested)
+    validated = _validate_payload(
+        payload, expected_symbols=requested, expected_provider=provider
+    )
 
     series_by_symbol: dict[str, dict[str, float]] = {}
     for item in validated["series"]:
@@ -400,8 +419,8 @@ def analyze_price_history(
     )
     history_source = {
         "status": "available",
-        "provider": "futu",
-        "source": "futu",
+        "provider": provider,
+        "source": provider,
         "adjustment": "qfq",
         "interval": "1d",
         "requested_start": validated["start"],

@@ -156,6 +156,113 @@ def test_invalid_minimum_is_rejected_before_calling_history_provider(tmp_path) -
     )
 
 
+def _provider_error(provider: str = "futu", message: str = "network interrupted") -> dict:
+    return {
+        "error": {
+            "code": "historical_prices_provider_error",
+            "provider": provider,
+            "provider_code": "provider_query_failed",
+            "message": message,
+        }
+    }
+
+
+def test_primary_retry_recovers_transient_failure_without_fallback(tmp_path) -> None:
+    snapshot = _snapshot([_position("AAPL", 10_000.0)], cash=90_000.0)
+    history = _history_payload()
+    calls: list[tuple] = []
+    sleeps: list[float] = []
+    log_path = tmp_path / "portfolio_risk.jsonl"
+
+    def flaky_history(symbols, start, end):
+        calls.append((symbols, start, end))
+        if len(calls) == 1:
+            return 1, json.dumps(_provider_error())
+        return 0, json.dumps(history)
+
+    report = portfolio_risk.run(
+        lambda _account_id: (0, json.dumps(snapshot)),
+        lambda: "2026-07-11T00:05:00+08:00",
+        log_path,
+        run_history=flaky_history,
+        history_retry_sleep=sleeps.append,
+    )
+    artifact = json.loads(log_path.read_text(encoding="utf-8"))
+
+    assert len(calls) == 2
+    assert sleeps == [2.0]
+    assert artifact["status"] == "available"
+    assert artifact["history_source"]["provider"] == "futu"
+    assert "fallback" not in artifact["history_source"]
+    assert "history_provider_fallback_used" not in artifact["reason_codes"]
+    assert "Historical source: Futu QFQ daily" in report
+
+
+def test_fallback_serves_history_with_explicit_provenance(tmp_path) -> None:
+    snapshot = _snapshot([_position("AAPL", 10_000.0)], cash=90_000.0)
+    tiingo_history = _history_payload()
+    tiingo_history["provider"] = "tiingo"
+    tiingo_history["source"] = "tiingo"
+    fallback_calls: list[tuple] = []
+    log_path = tmp_path / "portfolio_risk.jsonl"
+
+    def failing_futu(_symbols, _start, _end):
+        return 1, json.dumps(_provider_error(message="Futu request failed: 网络中断"))
+
+    def tiingo_history_runner(symbols, start, end):
+        fallback_calls.append((symbols, start, end))
+        return 0, json.dumps(tiingo_history)
+
+    report = portfolio_risk.run(
+        lambda _account_id: (0, json.dumps(snapshot)),
+        lambda: "2026-07-11T00:05:00+08:00",
+        log_path,
+        run_history=failing_futu,
+        run_history_fallback=tiingo_history_runner,
+        history_fallback_provider="tiingo",
+    )
+    artifact = json.loads(log_path.read_text(encoding="utf-8"))
+
+    assert fallback_calls == [(["AAPL", "SPY"], "2025-06-04", "2026-07-09")]
+    assert artifact["status"] == "available"
+    assert artifact["history_source"]["provider"] == "tiingo"
+    assert artifact["history_source"]["source"] == "tiingo"
+    fallback = artifact["history_source"]["fallback"]
+    assert fallback["primary_provider"] == "futu"
+    assert fallback["primary_error"]["code"] == "historical_prices_provider_error"
+    assert "history_provider_fallback_used" in artifact["reason_codes"]
+    assert "history_from_fallback_provider_tiingo" in artifact["limitations"]
+    assert artifact["historical_risk"]["status"] == "available"
+    assert "Historical source: Tiingo QFQ daily" in report
+    assert "Tiingo data was substituted with explicit provenance" in report
+
+
+def test_fallback_failure_keeps_honest_degrade_with_both_receipts(tmp_path) -> None:
+    snapshot = _snapshot([_position("AAPL", 10_000.0)], cash=90_000.0)
+    log_path = tmp_path / "portfolio_risk.jsonl"
+
+    report = portfolio_risk.run(
+        lambda _account_id: (0, json.dumps(snapshot)),
+        lambda: "2026-07-11T00:05:00+08:00",
+        log_path,
+        run_history=lambda *_args: (1, json.dumps(_provider_error())),
+        run_history_fallback=lambda *_args: (
+            1,
+            json.dumps(_provider_error(provider="tiingo", message="tiingo 401")),
+        ),
+        history_fallback_provider="tiingo",
+    )
+    artifact = json.loads(log_path.read_text(encoding="utf-8"))
+
+    assert artifact["status"] == "degraded"
+    assert artifact["history_source"]["error"]["provider"] == "futu"
+    assert artifact["history_source"]["fallback_error"]["provider"] == "tiingo"
+    assert "historical_prices_provider_error" in artifact["reason_codes"]
+    assert "history_fallback_failed" in artifact["reason_codes"]
+    assert "Tiingo fallback also failed" in report
+    assert "no data was substituted" in report
+
+
 def test_report_explains_unavailable_beta_reason(tmp_path) -> None:
     snapshot = _snapshot([_position("AAPL", 10_000.0)], cash=90_000.0)
     history = _history_payload()
