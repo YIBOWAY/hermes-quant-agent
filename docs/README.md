@@ -30,7 +30,8 @@ Hermes 更新只用 `~/.hermes/scripts/hqa-hermes-update.sh check|apply`。
 核对预览用 `http://127.0.0.1:3002/zh/paper-trading`（后端 `:8876`，库 `quantplatform_coo`），不要改 live `:3001`。  
 第 2 步按计划收口（隔离语义）：派研究不会挂仓，挂上另下一命令；双引擎默认停在已验证候选。  
 `:3002`「聊天遥控」只核对这两条命令，不是 Hermes 网页已经能说话。  
-第 3 步按计划收口（隔离语义）：挂上必须绑候选源码 digest，禁止再造通用动量仓；本分支 D-33 `run_once` 默认停在已验证候选。不是 Artifact CAS 正式挂仓，也不切 live `:3001`。第 4 步先别开。第 5 步等真观察日，不要用种子盈亏顶上。
+第 3 步按计划收口（隔离语义）：挂上必须绑候选源码 digest，禁止再造通用动量仓；本分支 D-33 `run_once` 默认停在已验证候选。不是 Artifact CAS 正式挂仓，也不切 live `:3001`。第 4 步先别开。第 5 步等真观察日，不要用种子盈亏顶上。  
+前端按 §9 已开视觉打样：`http://127.0.0.1:3002/zh/desk-preview`（blotter 桌面 + 右栏 Hermes 会话流，暖岩/石墨/琥珀三主题可切）。假数据全标预览态，不当今日效果；定稿前不动正式桌面。
 
 纸面与实盘切开、`live_trading_enabled=false`、公开 composer 关闭，这些红线还在。  
 不要用 soak `1/10` 或旧 audit 里的 PID/commit 当 NEXT。
