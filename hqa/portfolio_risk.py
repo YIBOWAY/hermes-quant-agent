@@ -737,6 +737,23 @@ def _platform_error(output: str, exit_code: int) -> tuple[str, str]:
     )
 
 
+def _stamp_fallback_config_error(
+    artifact: dict[str, Any],
+    history_fallback_config_error: Optional[str],
+) -> dict[str, Any]:
+    if not history_fallback_config_error:
+        return artifact
+    codes = artifact.setdefault("reason_codes", [])
+    limitations = artifact.setdefault("limitations", [])
+    if isinstance(codes, list):
+        _append_unique(codes, "history_fallback_misconfigured")
+    if isinstance(limitations, list):
+        _append_unique(limitations, "history_fallback_env_invalid")
+    if artifact.get("status") != "unavailable":
+        artifact["status"] = "degraded"
+    return artifact
+
+
 def _history_unavailable(
     *,
     benchmark: str,
@@ -753,7 +770,7 @@ def _history_unavailable(
             "status": status,
             "provider": provider,
             "source": None,
-            "adjustment": "qfq",
+            "adjustment": historical_risk.PROVIDER_ADJUSTMENTS.get(provider, "qfq"),
             "interval": "1d",
             "requested_start": start,
             "requested_end": end,
@@ -1003,12 +1020,31 @@ def _attach_history(
             provider=provider_used,
         )
     except historical_risk.HistoricalPriceContractError as exc:
-        error = {
+        parse_error = {
             "code": exc.code,
             "provider": provider_used,
             "provider_code": None,
             "message": str(exc),
         }
+        if provider_used != "futu" and primary_error is not None:
+            artifact.update(
+                _history_unavailable(
+                    benchmark=normalized_benchmark,
+                    start=start,
+                    end=end,
+                    status="unavailable",
+                    reason=primary_error["code"],
+                    minimum_aligned_returns=minimum_aligned_returns,
+                    error=primary_error,
+                    provider="futu",
+                )
+            )
+            artifact["history_source"]["fallback_error"] = parse_error
+            artifact["status"] = "degraded"
+            _append_unique(artifact["reason_codes"], primary_error["code"])
+            _append_unique(artifact["reason_codes"], "history_fallback_failed")
+            _append_unique(artifact["reason_codes"], parse_error["code"])
+            return artifact
         artifact.update(
             _history_unavailable(
                 benchmark=normalized_benchmark,
@@ -1017,12 +1053,12 @@ def _attach_history(
                 status="unavailable",
                 reason=exc.code,
                 minimum_aligned_returns=minimum_aligned_returns,
-                error=error,
+                error=parse_error,
                 provider=provider_used,
             )
         )
         artifact["status"] = "degraded"
-        _append_unique(artifact["reason_codes"], exc.code)
+        _append_unique(artifact["reason_codes"], parse_error["code"])
         return artifact
 
     artifact.update(result)
@@ -1115,6 +1151,10 @@ def build_report(artifact: dict[str, Any]) -> str:
     lines.append(
         f"  Pending orders excluded from current exposure: {pending_count}."
     )
+    if "history_fallback_misconfigured" in artifact.get("reason_codes", []):
+        lines.append(
+            "  History fallback env is invalid; duty cycle ran without a fallback provider."
+        )
     history_source = artifact.get("history_source")
     history = artifact.get("historical_risk")
     if history_source and history:
@@ -1143,11 +1183,13 @@ def build_report(artifact: dict[str, Any]) -> str:
                 f"{history['minimum_aligned_returns']})."
             )
         elif history["status"] in {"available", "degraded"}:
-            provider_label = (
-                "Tiingo" if history_source.get("provider") == "tiingo" else "Futu"
+            source_desc = (
+                "Tiingo adjusted"
+                if history_source.get("provider") == "tiingo"
+                else "Futu QFQ"
             )
             lines.append(
-                f"  Historical source: {provider_label} QFQ daily, "
+                f"  Historical source: {source_desc} daily, "
                 f"{history_source['requested_start']}..{history_source['requested_end']}."
             )
             fallback = history_source.get("fallback")
@@ -1251,7 +1293,7 @@ def history_fallback_from_env(
             symbols: list[str], start: str, end: str
         ) -> tuple[int, str]:
             return quant_cli.run_historical_prices(
-                symbols, start, end, provider="tiingo"
+                symbols, start, end, provider="tiingo", adjustment="adjusted"
             )
 
         return _tiingo_history, "tiingo"
@@ -1275,6 +1317,7 @@ def run(
     ] = None,
     history_fallback_provider: Optional[str] = None,
     history_retry_sleep: Optional[Callable[[float], None]] = None,
+    history_fallback_config_error: Optional[str] = None,
 ) -> str:
     exit_code: Optional[int] = None
     artifact: Optional[dict[str, Any]] = None
@@ -1356,6 +1399,9 @@ def run(
             history_fallback_provider=history_fallback_provider,
             history_retry_sleep=history_retry_sleep,
         )
+    artifact = _stamp_fallback_config_error(
+        artifact, history_fallback_config_error
+    )
     # Validate serializability before opening the append-only artifact. This is
     # a last-resort boundary: finite inputs can still overflow during future
     # derived calculations, and an unattended read must persist one honest

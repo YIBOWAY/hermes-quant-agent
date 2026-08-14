@@ -32,8 +32,8 @@ Hermes 更新只用 `~/.hermes/scripts/hqa-hermes-update.sh check|apply`。
 `:3002`「聊天遥控」只核对这两条命令，不是 Hermes 网页已经能说话。  
 第 3 步按计划收口（隔离语义）：挂上必须绑候选源码 digest，禁止再造通用动量仓；本分支 D-33 `run_once` 默认停在已验证候选。不是 Artifact CAS 正式挂仓，也不切 live `:3001`。第 4 步先别开。第 5 步等真观察日，不要用种子盈亏顶上。  
 前端按 §9 已开视觉打样：`http://127.0.0.1:3002/zh/desk-preview`（blotter 桌面 + 右栏 Hermes 会话流，石墨主题已定稿为默认）。假数据全标预览态，不当今日效果；定稿前不动正式桌面。  
-第 4 步进行中（隔离语义）：`dispatch-research` 已接真 D-34 作业（活跃 Mandate 时入队并回写 `job_key`，单并发 1，账本只投影作业车道状态）；扩宇宙 Mandate（20 标的）已种、首作业已排队。worker 执行、候选回填、材料 intake 未开。  
-值班韧性：`portfolio_risk` 历史价 Futu 失败先重试一次，可选 Tiingo 显式回退（收据双留痕）；已部署到镜像与 wrapper，等 `QS_TIINGO_API_TOKEN` 填值即激活。兵器库条款进 §4，试点 runbook 见 `runbooks/arsenal-pilot-daily-stock-analysis.md`。
+第 4 步进行中（隔离语义）：`dispatch-research` 已接真 D-34 作业（活跃 Mandate 时入队并回写 `job_key`，单并发 1，账本按 JobAuthority 上限投影车道状态；此路由不把 `hang_if_pass` 写入 worker）。扩宇宙 Mandate（20 标的）已种。worker 执行、候选回填、材料 intake 未开。  
+值班韧性：`portfolio_risk` 历史价 Futu 失败先重试一次，可选 Tiingo 显式回退（`tiingo/adjusted`，收据双留痕；回退合同失败仍保留 Futu 收据；非法 `HQA_PORTFOLIO_RISK_HISTORY_FALLBACK` 会在收据上留痕）。已部署到镜像与 wrapper 的是提交版；工作区含 `adjusted` 合同修复，等提交后再 ff 镜像。`QS_TIINGO_API_TOKEN` 填值后回退才真正出门。兵器库条款进 §4，试点 runbook 见 `runbooks/arsenal-pilot-daily-stock-analysis.md`。
 
 纸面与实盘切开、`live_trading_enabled=false`、公开 composer 关闭，这些红线还在。  
 不要用 soak `1/10` 或旧 audit 里的 PID/commit 当 NEXT。

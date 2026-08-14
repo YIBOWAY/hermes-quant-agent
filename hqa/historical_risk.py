@@ -180,6 +180,10 @@ def parse_price_error(output: str) -> dict[str, Any]:
 
 SUPPORTED_HISTORY_PROVIDERS = ("futu", "tiingo")
 
+# Each provider lane carries exactly one adjustment label; relabelling data
+# from one lane as another is a provenance violation, not a convenience.
+PROVIDER_ADJUSTMENTS = {"futu": "qfq", "tiingo": "adjusted"}
+
 
 def _validate_payload(
     payload: Any,
@@ -217,8 +221,11 @@ def _validate_payload(
         raise _invalid(
             f"historical price provenance must be explicit {expected_provider}"
         )
-    if payload["interval"] != "1d" or payload["adjustment"] != "qfq":
-        raise _invalid("historical price provenance must be 1d qfq")
+    expected_adjustment = PROVIDER_ADJUSTMENTS[expected_provider]
+    if payload["interval"] != "1d" or payload["adjustment"] != expected_adjustment:
+        raise _invalid(
+            f"historical price provenance must be 1d {expected_adjustment}"
+        )
     start = _strict_date(payload["start"], "historical price snapshot.start")
     end = _strict_date(payload["end"], "historical price snapshot.end")
     if start > end:
@@ -421,7 +428,7 @@ def analyze_price_history(
         "status": "available",
         "provider": provider,
         "source": provider,
-        "adjustment": "qfq",
+        "adjustment": PROVIDER_ADJUSTMENTS[provider],
         "interval": "1d",
         "requested_start": validated["start"],
         "requested_end": validated["end"],
@@ -441,7 +448,7 @@ def analyze_price_history(
     }
     limitations = [
         "historical_relationship_not_forecast",
-        "qfq_history_can_be_revised_after_corporate_actions",
+        f"{PROVIDER_ADJUSTMENTS[provider]}_history_can_be_revised_after_corporate_actions",
         "no_statistical_confidence_interval",
         "no_risk_policy_thresholds_configured",
     ]

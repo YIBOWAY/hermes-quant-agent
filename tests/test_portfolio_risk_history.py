@@ -203,6 +203,7 @@ def test_fallback_serves_history_with_explicit_provenance(tmp_path) -> None:
     tiingo_history = _history_payload()
     tiingo_history["provider"] = "tiingo"
     tiingo_history["source"] = "tiingo"
+    tiingo_history["adjustment"] = "adjusted"
     fallback_calls: list[tuple] = []
     log_path = tmp_path / "portfolio_risk.jsonl"
 
@@ -233,8 +234,141 @@ def test_fallback_serves_history_with_explicit_provenance(tmp_path) -> None:
     assert "history_provider_fallback_used" in artifact["reason_codes"]
     assert "history_from_fallback_provider_tiingo" in artifact["limitations"]
     assert artifact["historical_risk"]["status"] == "available"
-    assert "Historical source: Tiingo QFQ daily" in report
+    assert artifact["history_source"]["adjustment"] == "adjusted"
+    assert "Historical source: Tiingo adjusted daily" in report
     assert "Tiingo data was substituted with explicit provenance" in report
+
+
+def test_history_fallback_from_env_tiingo_requests_adjusted_close(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(symbols, start, end, provider="futu", adjustment="qfq", **_kwargs):
+        captured.update(
+            symbols=symbols,
+            start=start,
+            end=end,
+            provider=provider,
+            adjustment=adjustment,
+        )
+        return 0, "{}"
+
+    monkeypatch.setattr(portfolio_risk.quant_cli, "run_historical_prices", fake_run)
+    runner, provider = portfolio_risk.history_fallback_from_env("tiingo")
+
+    assert provider == "tiingo"
+    assert runner is not None
+    runner(["AAPL", "SPY"], "2025-06-04", "2026-07-09")
+    assert captured == {
+        "symbols": ["AAPL", "SPY"],
+        "start": "2025-06-04",
+        "end": "2026-07-09",
+        "provider": "tiingo",
+        "adjustment": "adjusted",
+    }
+
+
+@pytest.mark.parametrize("value", ["", "off", "none", "  OFF  "])
+def test_history_fallback_from_env_off_disables(value) -> None:
+    assert portfolio_risk.history_fallback_from_env(value) == (None, None)
+
+
+def test_history_fallback_from_env_rejects_unknown() -> None:
+    with pytest.raises(ValueError, match="tiingo"):
+        portfolio_risk.history_fallback_from_env("tingo")
+
+
+def test_fallback_invalid_snapshot_keeps_futu_receipt(tmp_path) -> None:
+    snapshot = _snapshot([_position("AAPL", 10_000.0)], cash=90_000.0)
+    tiingo_qfq = _history_payload()
+    tiingo_qfq["provider"] = "tiingo"
+    tiingo_qfq["source"] = "tiingo"
+    log_path = tmp_path / "portfolio_risk.jsonl"
+
+    report = portfolio_risk.run(
+        lambda _account_id: (0, json.dumps(snapshot)),
+        lambda: "2026-07-11T00:05:00+08:00",
+        log_path,
+        run_history=lambda *_args: (1, json.dumps(_provider_error())),
+        run_history_fallback=lambda *_args: (0, json.dumps(tiingo_qfq)),
+        history_fallback_provider="tiingo",
+    )
+    artifact = json.loads(log_path.read_text(encoding="utf-8"))
+
+    assert artifact["status"] == "degraded"
+    assert artifact["history_source"]["error"]["provider"] == "futu"
+    assert artifact["history_source"]["fallback_error"]["provider"] == "tiingo"
+    assert artifact["history_source"]["fallback_error"]["code"] == (
+        "historical_prices_snapshot_invalid"
+    )
+    assert "historical_prices_provider_error" in artifact["reason_codes"]
+    assert "history_fallback_failed" in artifact["reason_codes"]
+    assert "Tiingo fallback also failed" in report
+    assert "no data was substituted" in report
+
+
+def test_invalid_fallback_env_is_recorded_on_the_artifact(tmp_path) -> None:
+    snapshot = _snapshot([_position("AAPL", 10_000.0)], cash=90_000.0)
+    history = _history_payload()
+    log_path = tmp_path / "portfolio_risk.jsonl"
+
+    report = portfolio_risk.run(
+        lambda _account_id: (0, json.dumps(snapshot)),
+        lambda: "2026-07-11T00:05:00+08:00",
+        log_path,
+        run_history=lambda *_args: (0, json.dumps(history)),
+        history_fallback_config_error="history_fallback_misconfigured",
+    )
+    artifact = json.loads(log_path.read_text(encoding="utf-8"))
+
+    assert artifact["status"] == "degraded"
+    assert artifact["history_source"]["provider"] == "futu"
+    assert "history_fallback_misconfigured" in artifact["reason_codes"]
+    assert "history_fallback_env_invalid" in artifact["limitations"]
+    assert "History fallback env is invalid" in report
+
+
+def test_duty_cycle_records_invalid_fallback_env(tmp_path, monkeypatch) -> None:
+    from hqa.research_automation_runtime import Full9HPaths, Full9HServices
+
+    monkeypatch.setenv("HQA_PORTFOLIO_RISK_HISTORY_FALLBACK", "tingo")
+    snapshot = _snapshot([_position("AAPL", 10_000.0)], cash=90_000.0)
+    history = _history_payload()
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    services = Full9HServices(
+        Full9HPaths(
+            log_dir=log_dir,
+            review_dir=tmp_path / "review",
+            prediction_dir=tmp_path / "predictions",
+            opportunity_dir=tmp_path / "opportunities",
+            foresight_dir=tmp_path / "foresight",
+            scan_dir=tmp_path / "scans",
+            thresholds_path=tmp_path / "thresholds.json",
+            automation_dir=tmp_path / "automation",
+            outbox_path=tmp_path / "automation" / "outbox.jsonl",
+            feed_path=tmp_path / "feed" / "manifest.v1.json",
+            weekly_projection_path=tmp_path / "feed" / "projections" / "weekly.json",
+            opportunity_projection_path=tmp_path
+            / "feed"
+            / "projections"
+            / "opportunity.json",
+            automation_projection_path=tmp_path
+            / "feed"
+            / "projections"
+            / "automation.json",
+        ),
+        now=lambda: "2026-07-11T00:05:00+08:00",
+        run_snapshot=lambda _account_id: (0, json.dumps(snapshot)),
+        run_history=lambda *_args: (0, json.dumps(history)),
+        run_observations=lambda **_kwargs: (1, ""),
+        notification_target="local",
+    )
+
+    result = services.portfolio_risk("2026-07-11")
+    artifact = json.loads((log_dir / "portfolio_risk.jsonl").read_text(encoding="utf-8"))
+
+    assert result["status"] == "degraded"
+    assert "history_fallback_misconfigured" in artifact["reason_codes"]
 
 
 def test_fallback_failure_keeps_honest_degrade_with_both_receipts(tmp_path) -> None:

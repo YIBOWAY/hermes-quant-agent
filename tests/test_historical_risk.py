@@ -106,6 +106,38 @@ def test_parse_price_snapshot_rejects_provenance_and_series_drift(mutate) -> Non
     assert excinfo.value.code == "historical_prices_snapshot_invalid"
 
 
+def test_parse_price_snapshot_accepts_tiingo_adjusted_and_rejects_crossed_lanes() -> None:
+    payload = _known_payload()
+    payload["provider"] = "tiingo"
+    payload["source"] = "tiingo"
+    payload["adjustment"] = "adjusted"
+
+    parsed = historical_risk.parse_price_snapshot(
+        json.dumps(payload),
+        expected_symbols=["AAPL", "MSFT", "SPY"],
+        expected_provider="tiingo",
+    )
+    assert parsed["adjustment"] == "adjusted"
+    assert parsed["provider"] == "tiingo"
+
+    payload["adjustment"] = "qfq"
+    with pytest.raises(historical_risk.HistoricalPriceContractError):
+        historical_risk.parse_price_snapshot(
+            json.dumps(payload),
+            expected_symbols=["AAPL", "MSFT", "SPY"],
+            expected_provider="tiingo",
+        )
+
+    futu = _known_payload()
+    futu["adjustment"] = "adjusted"
+    with pytest.raises(historical_risk.HistoricalPriceContractError):
+        historical_risk.parse_price_snapshot(
+            json.dumps(futu),
+            expected_symbols=["AAPL", "MSFT", "SPY"],
+            expected_provider="futu",
+        )
+
+
 def test_global_date_inner_join_computes_known_beta_and_correlation() -> None:
     payload = _known_payload()
 

@@ -430,14 +430,16 @@ class Full9HServices:
 
     def portfolio_risk(self, as_of: str) -> dict[str, Any]:
         log_path = self.paths.log_dir / "portfolio_risk.jsonl"
+        fallback_config_error = None
         try:
             fallback_runner, fallback_provider = (
                 portfolio_risk.history_fallback_from_env()
             )
         except ValueError:
-            # Misconfigured fallback must not take down the duty cycle; run
-            # exactly the pre-fallback behavior instead.
+            # Keep the duty cycle up, but the artifact must say the configured
+            # fallback never armed — a typo is not pre-fallback success.
             fallback_runner, fallback_provider = None, None
+            fallback_config_error = "history_fallback_misconfigured"
         portfolio_risk.run(
             self._run_snapshot,
             self._now,
@@ -446,6 +448,7 @@ class Full9HServices:
             run_history_fallback=fallback_runner,
             history_fallback_provider=fallback_provider,
             history_retry_sleep=time.sleep,
+            history_fallback_config_error=fallback_config_error,
         )
         rows, invalid = _read_jsonl(log_path)
         if invalid or not rows:
