@@ -5,6 +5,7 @@ import json
 import math
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -429,11 +430,22 @@ class Full9HServices:
 
     def portfolio_risk(self, as_of: str) -> dict[str, Any]:
         log_path = self.paths.log_dir / "portfolio_risk.jsonl"
+        try:
+            fallback_runner, fallback_provider = (
+                portfolio_risk.history_fallback_from_env()
+            )
+        except ValueError:
+            # Misconfigured fallback must not take down the duty cycle; run
+            # exactly the pre-fallback behavior instead.
+            fallback_runner, fallback_provider = None, None
         portfolio_risk.run(
             self._run_snapshot,
             self._now,
             log_path,
             run_history=self._run_history,
+            run_history_fallback=fallback_runner,
+            history_fallback_provider=fallback_provider,
+            history_retry_sleep=time.sleep,
         )
         rows, invalid = _read_jsonl(log_path)
         if invalid or not rows:

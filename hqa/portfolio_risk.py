@@ -1225,6 +1225,41 @@ def build_report(artifact: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def history_fallback_from_env(
+    env_value: Optional[str] = None,
+) -> tuple[
+    Optional[Callable[[list[str], str, str], tuple[int, str]]],
+    Optional[str],
+]:
+    """Resolve the optional, explicit history fallback provider.
+
+    Reads HQA_PORTFOLIO_RISK_HISTORY_FALLBACK unless env_value is given.
+    Empty/off disables (default). Only 'tiingo' is supported; anything else
+    raises ValueError so misconfiguration is visible to the caller.
+    """
+    raw = (
+        os.environ.get("HQA_PORTFOLIO_RISK_HISTORY_FALLBACK", "")
+        if env_value is None
+        else env_value
+    )
+    choice = raw.strip().lower()
+    if choice in {"", "off", "none"}:
+        return None, None
+    if choice == "tiingo":
+
+        def _tiingo_history(
+            symbols: list[str], start: str, end: str
+        ) -> tuple[int, str]:
+            return quant_cli.run_historical_prices(
+                symbols, start, end, provider="tiingo"
+            )
+
+        return _tiingo_history, "tiingo"
+    raise ValueError(
+        "HQA_PORTFOLIO_RISK_HISTORY_FALLBACK only supports 'tiingo', 'off', or empty"
+    )
+
+
 def run(
     run_snapshot: Callable[[str], tuple[int, str]],
     now_iso: Callable[[], str],
@@ -1367,20 +1402,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--log", default=str(config.LOG_DIR / "portfolio_risk.jsonl")
     )
     args = parser.parse_args(argv)
-    fallback_choice = (args.history_fallback or "").strip().lower()
-    if fallback_choice in {"", "off", "none"}:
-        run_history_fallback = None
-        history_fallback_provider = None
-    elif fallback_choice == "tiingo":
-        def run_history_fallback(
-            symbols: list[str], start: str, end: str
-        ) -> tuple[int, str]:
-            return quant_cli.run_historical_prices(
-                symbols, start, end, provider="tiingo"
-            )
-
-        history_fallback_provider = "tiingo"
-    else:
+    try:
+        run_history_fallback, history_fallback_provider = history_fallback_from_env(
+            args.history_fallback
+        )
+    except ValueError:
         parser.error("--history-fallback only supports 'tiingo', 'off', or empty")
     report = run(
         quant_cli.run_paper_account_snapshot,
