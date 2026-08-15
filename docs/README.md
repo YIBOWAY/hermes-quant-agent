@@ -27,13 +27,12 @@ Hermes 更新只用 `~/.hermes/scripts/hqa-hermes-update.sh check|apply`。
 能力零件大多已经落地：真 Futu、回测器、模拟账户、论文入队机、双引擎研究作业、试运行仓、本机 LaunchAgent。  
 第 1 步按计划收口：隔离栈上，已挂试运行仓能成交、能记账，实盘仍关。  
 那不是「助手已经在看效果」。预览种子用假价 179 买进，页面 Futu 现价只是市值差，不许写进摘要。  
-核对预览用 `http://127.0.0.1:3002/zh/paper-trading`（后端 `:8876`，库 `quantplatform_coo`），不要改 live `:3001`。  
-第 2 步按计划收口（隔离语义）：派研究不会挂仓，挂上另下一命令；双引擎默认停在已验证候选。  
-`:3002`「聊天遥控」只核对这两条命令，不是 Hermes 网页已经能说话。  
-第 3 步按计划收口（隔离语义）：挂上必须绑候选源码 digest，禁止再造通用动量仓；本分支 D-33 `run_once` 默认停在已验证候选。不是 Artifact CAS 正式挂仓，也不切 live `:3001`。第 4 步先别开。第 5 步等真观察日，不要用种子盈亏顶上。  
-前端按 §9 已开视觉打样：`http://127.0.0.1:3002/zh/desk-preview`（blotter 桌面 + 右栏 Hermes 会话流，石墨主题已定稿为默认）。假数据全标预览态，不当今日效果；定稿前不动正式桌面。  
-第 4 步进行中（隔离语义）：第二条作业 `request:2026-08-15:6d98b8a21a78` 对照通过（终端净值差 24.89bps < 25），`artifact-250f39dbae3531ea858543197ec3e204` 已合格 `paper_only`，遥控账已回填已验证候选 `artifact-447141c1b769e8ee`（`d34_3df35614d64954f0c2ccff62`），**未挂上**，金丝雀 0。首作业仍是 29.1bps 拒收。材料 intake 未开。live 库没有这些 job。  
-值班韧性：`portfolio_risk` 历史价 Futu 失败先重试一次，可选 Tiingo 显式回退（`tiingo/adjusted`，收据双留痕；回退合同失败仍保留 Futu 收据；非法 `HQA_PORTFOLIO_RISK_HISTORY_FALLBACK` 会在收据上留痕）。已部署到镜像与 wrapper 的是提交版；工作区含 `adjusted` 合同修复，等提交后再 ff 镜像。`QS_TIINGO_API_TOKEN` 填值后回退才真正出门。兵器库条款进 §4，试点 runbook 见 `runbooks/arsenal-pilot-daily-stock-analysis.md`。
+核对隔离账用 `http://127.0.0.1:3002/`（正式三本账桌面，后端 `:8876`，库 `quantplatform_coo`）。  
+`/desk-preview` 仍是假数据打样。live `:3001` 已切同一套正式桌面，但连的是 live 后端/库，不是隔离账。  
+第 2–3 步按计划收口：派研究不会挂仓；挂上必须绑候选 digest。  
+第 4 步已收口：材料 intake 缺公式/股票池失败；GET 账本自动收双引擎通过的 Artifact 为已验证候选。隔离已挂上 `artifact-447141c1b769e8ee` → `sleeve-6dc471756791`。种子仓标化石，不计官方观察。live 库没有这些 isolation job。  
+第 5 步路径已落地：`python -m hqa.ops_digest_cli ingest` 拒收种子市值差，只收已挂仓观察或诚实失败。还没有足够真观察日。  
+值班韧性：`portfolio_risk` 历史价 Futu 失败先重试一次，可选 Tiingo `adjusted` 回退。`QS_TIINGO_API_TOKEN` 填值后回退才真正出门。兵器库条款进 §4，试点 runbook 见 `runbooks/arsenal-pilot-daily-stock-analysis.md`。
 
 纸面与实盘切开、`live_trading_enabled=false`、公开 composer 关闭，这些红线还在。  
 不要用 soak `1/10` 或旧 audit 里的 PID/commit 当 NEXT。
